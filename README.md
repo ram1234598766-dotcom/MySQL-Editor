@@ -68,13 +68,19 @@ MySQL IDLE provides a lightweight, IDLE-style desktop shell for writing and runn
 - The mobile companion is started explicitly and binds to a selected private IPv4 interface.
 - The Android manifest requests only the `INTERNET` permission.
 - The Android app disables cleartext HTTP and restricts connections to the verified desktop endpoint.
-- SQL risk checks, resource limits, integration tests, package signature verification, and static security checks are part of the project workflow.
+- SQL risk checks, resource limits, integration tests, and static security checks are part of the project workflow; release-signature verification is conditional on valid signing credentials.
 
 These controls reduce risk but do not replace least-privilege database accounts, sound backups, trusted networks, or review of SQL before execution.
 
 ## Latest downloads
 
-Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases) and select the newest successful **MySQL IDLE 3.0 Build N** release. Release numbers increase as CI runs; don't rely on an older hard-coded build number. Each release includes a `SHA256SUMS` manifest.
+Published packages appear on the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases). A successful build does not automatically mean a public release exists: the workflow only publishes Android release packages after all required Android signing secrets are present and the signing checks pass.
+
+**Current repository status (checked October 16, 2026):** the latest checked build run completed successfully for the Windows EXE/installer and Android build, including Windows installed-launch/uninstall smoke tests and an Android emulator install/launch smoke test. Android release signing was skipped because the release-signing secrets were not configured, so the release-publication steps were skipped too. **There is not yet a public release from that run.**
+
+You can inspect the successful [GitHub Actions build run](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/38873075729). It has two temporary CI artifacts: `MySQLIDLE-Windows` (portable EXE, installer and folder ZIP) and `MySQLIDLE-Android` (debug build for CI testing). Download them from the run's **Artifacts** section. They are temporary workflow artifacts, not public releases; retention/expiry applies. The Android debug package is for testing and is not a substitute for a release-signed package.
+
+After configuring signing, the following are the expected public-release assets:
 
 | Package | Asset filename | Intended use |
 | --- | --- | --- |
@@ -82,14 +88,14 @@ Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Ed
 | Windows portable executable | `MySQLIDLE_Portable.exe` | Run without installing |
 | Windows application folder | `MySQLIDLE-Folder.zip` | Extract the entire folder and keep its files together |
 | Android APK | `MySQLIDLE-Mobile-release.apk` | Direct Android installation/testing |
-| Android App Bundle | `MySQLIDLE-Mobile-release.aab` | Optional package output; not directly installable—use the APK for normal installation |
+| Android App Bundle | `MySQLIDLE-Mobile-release.aab` | Upload to Google Play Console; not directly installable |
 | SHA-256 manifest | `SHA256SUMS` | Verify downloaded assets |
 
-For Windows, inspect `WINDOWS-SIGNING-STATUS.txt` before distributing the installer. If a release says the Windows files are unsigned, Windows SmartScreen may show an unknown-publisher warning.
+To enable Android release publication, add the four Android repository Actions secrets listed in [SIGNING.md](SIGNING.md). Windows signing secrets are optional for creating Windows build artifacts, but a public Windows release without them will be unsigned and may trigger Windows SmartScreen's unknown-publisher warning. See [SIGNING.md](SIGNING.md) for complete setup and signing-key continuity instructions.
 
 ### Installation warning note
 
-The APK is signed and the release workflow checks its signature, target API, permissions, and launch behavior. **That does not guarantee Google Play Protect will classify it as safe.** If Android explicitly says the app is harmful, cancel installation rather than overriding the warning. A new build or valid signature does not automatically clear Google's classification. Submit a suspected false positive through Google's [official app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033); do not disable Play Protect.
+A valid signature and passing CI checks do **not** guarantee that Google Play Protect will classify an app as safe. If Android explicitly says an app is harmful, cancel installation rather than overriding the warning. Do not disable Play Protect or repackage the app to evade it. If a released build appears to be misclassified, use Google's [official app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033).
 
 ## System requirements
 
@@ -134,7 +140,7 @@ The following commands are for PowerShell on Windows, from a clone of this repos
 
 ```powershell
 git clone https://github.com/ram1234598766-dotcom/MySQL-Editor.git
-Set-Location MySQL-IDLE
+Set-Location MySQL-Editor
 
 py -3.15 --version
 py -3.15 -m venv .venv
@@ -330,7 +336,7 @@ Read [SECURITY.md](SECURITY.md) before deploying the app in a sensitive environm
 
 ### Android permission and installation status
 
-The Android manifest requests `INTERNET`; cleartext HTTP is disabled. CI builds and verifies a signed APK and signed App Bundle, checks requested permissions, installs/launches the APK on an Android emulator, and runs the repository's security workflow.
+The Android manifest requests `INTERNET`; cleartext HTTP is disabled. CI checks requested permissions and installs/launches an APK on an Android emulator. When all four Android signing secrets are configured and validated, CI builds a release-signed APK/App Bundle and verifies the APK signature. Without those secrets, CI builds a debug package for CI testing and does not publish it as a public release. The Python dependency and static-analysis security workflow runs separately.
 
 Those checks are useful evidence about the package and source but **are not a guarantee of zero vulnerabilities or Google's Play Protect verdict**. Do not bypass a “harmful app” warning. Cancel installation and submit an appeal if you believe Google has misclassified the app; see [Google's official process](https://support.google.com/googleplay/android-developer/answer/2992033).
 
@@ -413,7 +419,7 @@ The GitHub Actions workflows run checks for the source and packaged application,
 - SQL parsing, settings privacy, password authentication, and Feature Governance tests.
 - Mobile HTTPS integration tests for pairing, TLS behavior, request validation and resource limits.
 - Windows build and regression tests, including installer launch, desktop shortcut checks, and uninstall cleanup.
-- Android package signature verification, permission auditing, and emulator install/launch checks when the appropriate release signing configuration is available.
+- Android permission auditing and emulator install/launch checks. APK signature verification and release-signed APK/AAB creation run when valid Android signing secrets are configured; without them, the debug package is CI-only.
 
 See the [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml) and [Security workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml) for current results.
 
@@ -460,7 +466,7 @@ Use **Help → Check Environment** to inspect runtime and diagnostic paths. Revi
 ## Project structure
 
 ```text
-MySQL-IDLE/
+MySQL-Editor/
 ├── mysql_idle.py                 # Desktop SQL shell and GUI
 ├── mobile_companion.py           # HTTPS service hosted by the desktop
 ├── feature_governor.py           # SQL risk policy and audit events
@@ -488,7 +494,7 @@ MySQL-IDLE/
 - MySQL IDLE is a SQL client, not a MySQL/MariaDB server or a database backup/restore system.
 - SQL is executed using the connected database account's server-side privileges.
 - The desktop TLS compatibility default does not verify server identity unless certificate verification is enabled.
-- The Feature Governance classifier is conservative and lexical, not a complete SQL parser.
+- The Feature Governance classifier and SQL formatter are conservative lexical tools, not full MySQL SQL parsers; review formatted or safety-checked SQL before execution.
 - The MySQL `DELIMITER` command is not supported for custom-delimiter scripts.
 - The mobile companion should be used only on trusted private networks; it is not designed to be publicly exposed.
 - Direct APK distribution may trigger Android/Google Play Protect warnings. Only Google can clear a Google-side classification.
