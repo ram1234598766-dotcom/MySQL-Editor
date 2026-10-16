@@ -2,6 +2,7 @@
 from __future__ import annotations
 import sys
 from pathlib import Path
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from mysql_editor.database import DatabaseWorker
@@ -68,6 +69,9 @@ QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; b
 """
 
 def main() -> int:
+    # A bounded, no-database startup path is used by Windows CI to verify that the
+    # packaged Qt app can initialize and show the branded first-run connection UI.
+    smoke_test = "--smoke-test" in sys.argv
     app = QApplication(sys.argv)
     app.setApplicationName("MySQL Editor")
     app.setOrganizationName("MySQL Editor")
@@ -103,6 +107,8 @@ def main() -> int:
     dialog = ConnectionDialog(worker, repository, credentials)
     dialog.connected.connect(on_connected)
     dialog.show()
+    if smoke_test:
+        QTimer.singleShot(1800, app.quit)
     exit_code = app.exec()
     if worker.isRunning():
         worker.shutdown()

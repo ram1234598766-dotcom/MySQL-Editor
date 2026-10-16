@@ -54,14 +54,18 @@ jobs:
             (Resolve-Path "dist/MySQLEditor/MySQLEditor.exe").Path,
             (Resolve-Path "dist/MySQLEditor-Portable.exe").Path
           )
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "MySQLEditor-SmokeData"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
           foreach ($appPath in $apps) {
-            $process = Start-Process -FilePath $appPath -PassThru
-            Start-Sleep -Seconds 5
-            $process.Refresh()
-            if ($process.HasExited) {
-              throw "Application exited during startup: $appPath (exit code $($process.ExitCode))"
+            $process = Start-Process -FilePath $appPath -ArgumentList @("--smoke-test") -PassThru
+            if (!$process.WaitForExit(45000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Application startup smoke test timed out: $appPath"
             }
-            Stop-Process -Id $process.Id -Force
+            $process.Refresh()
+            if ($process.ExitCode -ne 0) {
+              throw "Application smoke test failed: $appPath (exit code $($process.ExitCode))"
+            }
           }
       - name: Verify expected output files
         shell: pwsh
