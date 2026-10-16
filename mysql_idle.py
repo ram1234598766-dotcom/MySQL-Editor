@@ -84,7 +84,7 @@ def _resource_path(relative_path):
 def _resize_logo_crisp(source_image, size):
     """Resize the shared logo with Lanczos and a restrained edge-sharpening pass."""
     resized = source_image.resize(size, Image.Resampling.LANCZOS)
-    return resized.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+    return resized.filter(ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2))
 
 
 def _apply_window_icon(window):
