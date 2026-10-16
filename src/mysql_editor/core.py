@@ -129,12 +129,32 @@ def format_sql(sql: str) -> str:
     return format_sqlglot(sql, dialect="mysql", pretty=True, comments=True)
 
 _SECRET = re.compile(
-    r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)\b(\s*[:=]\s*|\s+)"
+    r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)\b(\s*[:=]\s*)"
     r"('[^']*'|\"[^\"]*\"|[^\s,;]+)"
 )
 
+_SQL_VALUE = r"""(?:'(?:''|\\.|[^'])*'|"(?:\"\"|\\.|[^"])*"|[^\s,;]+)"""
+_SQL_SECRET_PATTERNS = (
+    re.compile(r"(?is)(\bIDENTIFIED\s+BY\s+(?:PASSWORD\s+)?)" + _SQL_VALUE),
+    re.compile(r"(?is)(\bIDENTIFIED\s+WITH\s+[A-Za-z0-9_]+\s+BY\s+)" + _SQL_VALUE),
+    re.compile(r"(?is)(\bIDENTIFIED\s+WITH\s+[A-Za-z0-9_]+\s+AS\s+)" + _SQL_VALUE),
+    re.compile(r"(?is)(\bSET\s+PASSWORD(?:\s+FOR\s+[^=;]+)?\s*=\s*)" + _SQL_VALUE),
+    re.compile(r"(?is)(\b(?:PASSWORD|AUTHENTICATION_STRING|TOKEN|SECRET|API_KEY)\s*=\s*)" + _SQL_VALUE),
+)
+
+
 def redact_secrets(text: str) -> str:
+    """Redact credential-like key/value assignments in text."""
     return _SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", text)
+
+
+def redact_sql_secrets(sql: str) -> str:
+    """Redact common MySQL account/password syntax before opt-in query history is persisted."""
+    redacted = sql
+    for pattern in _SQL_SECRET_PATTERNS:
+        redacted = pattern.sub(lambda match: match.group(1) + "[REDACTED]", redacted)
+    return redact_secrets(redacted)
+
 
 def safe_identifier(name: str) -> str:
     tick = chr(96)

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, split_sql_statements
+from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
 from mysql_editor.database import MAX_PREVIEW_ROWS, DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.connection_dialog import ConnectionDialog
@@ -641,7 +641,7 @@ class MainWindow(QMainWindow):
             self.status.setText(result.get("error") or "Query complete.")
             if context.get("sql"):
                 self.repository.add_history(
-                    context.get("profile_name", "Connection"), context["sql"],
+                    context.get("profile_name", "Connection"), redact_sql_secrets(context["sql"]),
                     self._last_duration, "success" if result.get("ok") else "error",
                 )
                 self.refresh_history()

@@ -36,3 +36,28 @@ def test_current_statement_at_delimiter_and_trailing_whitespace():
     source = "SELECT 1;  \nSELECT 2;"
     assert current_statement(source, source.index(";") + 1) == "SELECT 1"
     assert current_statement(source, len(source)) == "SELECT 2"
+
+
+def test_sql_history_redacts_mysql_account_password_syntax():
+    from mysql_editor.core import redact_sql_secrets
+
+    query = (
+        "CREATE USER 'app'@'%' IDENTIFIED BY 'db-secret'; "
+        "SET PASSWORD FOR 'app'@'%' = 'another-secret'; "
+        "CREATE USER 'hash-user'@'%' IDENTIFIED WITH mysql_native_password AS '*HASHVALUE';"
+    )
+    safe = redact_sql_secrets(query)
+    assert "db-secret" not in safe
+    assert "another-secret" not in safe
+    assert "*HASHVALUE" not in safe
+    assert "FOR" in safe
+    assert safe.count("[REDACTED]") >= 3
+
+
+def test_key_value_redaction_masks_common_secret_assignments():
+    from mysql_editor.core import redact_secrets
+
+    result = redact_secrets("password=keep-out token: abcdef api_key=my-key")
+    assert "keep-out" not in result
+    assert "abcdef" not in result
+    assert "my-key" not in result
