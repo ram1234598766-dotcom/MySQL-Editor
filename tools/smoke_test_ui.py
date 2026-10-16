@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.main_window import MainWindow
