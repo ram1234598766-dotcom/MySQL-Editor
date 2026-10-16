@@ -30,3 +30,9 @@ def test_redaction_masks_credentials():
     assert "secret123" not in output
     assert "abcdef" not in output
     assert "my-key" not in output
+
+
+def test_current_statement_at_delimiter_and_trailing_whitespace():
+    source = "SELECT 1;  \nSELECT 2;"
+    assert current_statement(source, source.index(";") + 1) == "SELECT 1"
+    assert current_statement(source, len(source)) == "SELECT 2"

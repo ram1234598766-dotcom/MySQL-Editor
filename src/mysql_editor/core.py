@@ -92,8 +92,13 @@ def split_sql_statements(source: str) -> list[str]:
     return [span.sql for span in iter_statement_spans(source)]
 
 def current_statement(source: str, cursor_position: int) -> str:
-    for span in iter_statement_spans(source):
+    spans = list(iter_statement_spans(source))
+    for span in spans:
         if span.start <= cursor_position <= span.end:
+            return span.sql
+    # Cursor commonly rests immediately after a semicolon or on trailing whitespace.
+    for span in reversed(spans):
+        if span.end <= cursor_position and source[span.end:cursor_position].strip() in ("", ";"):
             return span.sql
     return ""
 
