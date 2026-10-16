@@ -1,4 +1,4 @@
-PySide6>=6.8,<7
+PySide6>=6.12,<7
 mysql-connector-python>=9.2,<27
 keyring>=25.5,<27
 argon2-cffi>=23.1,<26
