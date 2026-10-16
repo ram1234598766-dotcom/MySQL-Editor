@@ -54,7 +54,7 @@ The certificate must be valid for code signing and include its private key. Do n
 
 ## 3. Produce a signed release
 
-After all four Android secrets are set, open **Actions → Build Windows EXE and Android APK → Run workflow** on `main`. The workflow builds, verifies, and publishes the release-signed Android APK as a prerelease asset. The workflow intentionally creates no Android App Bundle (`.aab`); the APK is for direct installation/testing. If the Windows build succeeds, its portable EXE, folder archive, and installer are also included. With the Windows secrets configured, CI signs and verifies those binaries; without them, CI includes the files with an explicit unsigned warning.
+After all four Android secrets are set, open **Actions → Build Windows EXE and Android APK → Run workflow** on `main`. The workflow builds, verifies, and publishes the release-signed Android APK as a prerelease asset. Only the APK is generated for Android distribution; it is intended for direct installation/testing. If the Windows build succeeds, its portable EXE, folder archive, and installer are also included. With the Windows secrets configured, CI signs and verifies those binaries; without them, CI includes the files with an explicit unsigned warning.
 
 Check the workflow run for successful signature-verification steps. The release APK will be named `MySQLEditor-Mobile-release.apk`. Windows downloads keep their regular filenames, and Authenticode signatures must verify and identify your publisher certificate.
 
