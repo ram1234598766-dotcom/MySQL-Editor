@@ -25,7 +25,7 @@ def main() -> None:
     with Image.open(SOURCE) as source_image:
         logo = source_image.convert("RGB")
     logo = logo.resize((256, 256), Image.Resampling.LANCZOS)
-    logo = logo.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+    logo = logo.filter(ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2))
     logo.save(ANDROID_RESOURCE, format="JPEG", quality=95, subsampling=0, optimize=True)
 
     with Image.open(ANDROID_RESOURCE) as generated:
