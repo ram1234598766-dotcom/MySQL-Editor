@@ -109,16 +109,139 @@ _DESTRUCTIVE = re.compile(
 _WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 _COMMAND = re.compile(r"\b([A-Za-z]+)\b")
 
+def _mask_sql_literals_and_comments(source: str) -> str:
+    """Mask strings, quoted identifiers and comments, keeping newlines and offsets."""
+    chars = list(source)
+    length = len(source)
+    i = 0
+    state = "normal"
+    terminator = ""
+    while i < length:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < length else ""
+        if state == "line":
+            if ch in "\r\n":
+                state = "normal"
+            else:
+                chars[i] = " "
+            i += 1
+            continue
+        if state == "block":
+            if ch not in "\r\n":
+                chars[i] = " "
+            if ch == "*" and nxt == "/":
+                chars[i] = chars[i + 1] = " "
+                state = "normal"
+                i += 2
+            else:
+                i += 1
+            continue
+        if state in {"single", "double", "identifier"}:
+            if ch not in "\r\n":
+                chars[i] = " "
+            if ch == "\\" and state != "identifier" and i + 1 < length:
+                if source[i + 1] not in "\r\n":
+                    chars[i + 1] = " "
+                i += 2
+                continue
+            if ch == terminator:
+                if nxt == terminator:
+                    if nxt not in "\r\n":
+                        chars[i + 1] = " "
+                    i += 2
+                    continue
+                state = "normal"
+            i += 1
+            continue
+        if ch == "#" or (
+            ch == "-" and nxt == "-" and
+            (i + 2 >= length or source[i + 2].isspace())
+        ):
+            state = "line"
+            if ch == "-":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+            else:
+                chars[i] = " "
+                i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            chars[i] = chars[i + 1] = " "
+            state = "block"
+            i += 2
+            continue
+        if ch in {"'", '"', chr(96)}:
+            state = {"'": "single", '"': "double", chr(96): "identifier"}[ch]
+            terminator = ch
+            chars[i] = " "
+            i += 1
+            continue
+        i += 1
+    return "".join(chars)
+
+
+_TOP_LEVEL_COMMANDS = frozenset({
+    "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP",
+    "TRUNCATE", "GRANT", "REVOKE", "SET", "CALL", "LOAD", "RENAME",
+})
+
+
+def _main_statement_command(masked_sql: str) -> tuple[str, int]:
+    tokens = list(re.finditer(r"[A-Za-z_][A-Za-z0-9_$]*|[()]", masked_sql))
+    if not tokens:
+        return "UNKNOWN", 0
+    first = tokens[0]
+    command = first.group().upper()
+    if command != "WITH":
+        return command, first.start()
+    depth = 0
+    for token in tokens[1:]:
+        value = token.group()
+        if value == "(":
+            depth += 1
+        elif value == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0 and value.upper() in _TOP_LEVEL_COMMANDS:
+            return value.upper(), token.start()
+    return command, first.start()
+
+
+def _has_top_level_keyword(masked_sql: str, keyword: str, start: int) -> bool:
+    depth = 0
+    for token in re.finditer(r"[A-Za-z_][A-Za-z0-9_$]*|[()]", masked_sql[start:]):
+        value = token.group()
+        if value == "(":
+            depth += 1
+        elif value == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0 and value.upper() == keyword:
+            return True
+    return False
+
+
 def classify_statement(sql: str) -> tuple[str, str]:
-    """Return (risk, explanation); guidance only, never an access-control boundary."""
-    without_comments = re.sub(r"/\*.*?\*/|--[^\r\n]*|#[^\r\n]*", " ", sql, flags=re.S)
-    first = _COMMAND.search(without_comments)
-    command = first.group(1).upper() if first else "UNKNOWN"
-    if _DESTRUCTIVE.search(without_comments):
+    """Conservative SQL advisory, excluding strings/comments and understanding CTE DML.
+
+    This is guidance, not authorization; MySQL privileges remain the enforcement boundary.
+    """
+    masked = _mask_sql_literals_and_comments(sql)
+    command, command_start = _main_statement_command(masked)
+    body = masked[command_start:].lstrip().upper()
+    if command in {"DROP", "TRUNCATE", "ALTER", "GRANT", "REVOKE"}:
         return "high", f"{command} can change schema, permissions, or server-wide settings."
-    if command in {"UPDATE", "DELETE"} and not _WHERE.search(without_comments):
-        return "high", f"{command} has no WHERE clause and may affect every row."
-    if command in {"INSERT", "UPDATE", "DELETE", "REPLACE", "LOAD", "CALL", "CREATE", "RENAME"}:
+    if command == "CREATE" and re.match(
+        r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:USER|ROLE)\b", body
+    ):
+        return "high", "CREATE USER or CREATE ROLE changes database access."
+    if command == "SET" and re.match(r"SET\s+GLOBAL\b", body):
+        return "high", "SET GLOBAL changes server-wide settings."
+    if command in {"UPDATE", "DELETE"} and not _has_top_level_keyword(
+        masked, "WHERE", command_start
+    ):
+        return "high", f"{command} has no top-level WHERE clause and may affect every row."
+    if command in {
+        "INSERT", "UPDATE", "DELETE", "REPLACE", "LOAD", "CALL", "CREATE", "RENAME",
+    }:
         return "medium", f"{command} may change data or database objects."
     return "low", "No high-impact pattern was detected by the local advisory check."
 

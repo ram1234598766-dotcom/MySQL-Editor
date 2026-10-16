@@ -1,47 +1,133 @@
-"""SQL editor with line numbers, syntax highlighting and indentation."""
+"""SQL editor with line numbers, MySQL syntax highlighting and completion."""
 from __future__ import annotations
+
 import re
-from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat, QTextFormat
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
+
+from PySide6.QtCore import QRect, QSize, QStringListModel, Qt
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QPainter,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextCursor,
+    QTextFormat,
+)
+from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QWidget
+
+
+SQL_KEYWORDS = frozenset("""
+ADD ALL ALTER ANALYZE AND AS ASC BEFORE BETWEEN BIGINT BINARY BOTH BY CALL CASCADE
+CASE CHANGE CHAR CHARACTER CHECK COLLATE COLUMN COLUMNS COMMENT COMMIT CONDITION
+CONSTRAINT CONTINUE CONVERT CREATE CROSS CUBE CUME_DIST CURRENT_DATE CURRENT_TIME
+CURRENT_TIMESTAMP CURRENT_USER CURSOR DATABASE DATABASES DAY_HOUR DAY_MICROSECOND
+DAY_MINUTE DAY_SECOND DEC DECIMAL DECLARE DEFAULT DELAYED DELETE DENSE_RANK DESC
+DESCRIBE DETERMINISTIC DISTINCT DISTINCTROW DIV DOUBLE DROP DUAL EACH ELSE ELSEIF
+EMPTY ENCLOSED END ESCAPE ESCAPED EXCEPT EXISTS EXIT EXPLAIN FALSE FETCH FIRST FLOAT
+FOLLOWING FOR FORCE FOREIGN FROM FULLTEXT FUNCTION GENERATED GET GRANT GROUP GROUPING
+HAVING HIGH_PRIORITY HOUR_MICROSECOND HOUR_MINUTE HOUR_SECOND IF IGNORE IN INDEX
+INFILE INNER INOUT INSENSITIVE INSERT INT INTEGER INTERSECT INTERVAL INTO IO_AFTER_GTIDS
+IO_BEFORE_GTIDS IS ITERATE JOIN JSON_TABLE KEY KEYS KILL LAG LAST_VALUE LATERAL LEAD
+LEADING LEAVE LEFT LIKE LIMIT LINEAR LINES LOAD LOCALTIME LOCALTIMESTAMP LOCK LONG
+LONGBLOB LONGTEXT LOOP LOW_PRIORITY MASTER_BIND MASTER_SSL_VERIFY_SERVER_CERT MATCH
+MAXVALUE MEDIUMBLOB MEDIUMINT MEDIUMTEXT MIDDLEINT MINUTE_MICROSECOND MINUTE_SECOND
+MOD MODIFIES NATURAL NOT NO_WRITE_TO_BINLOG NTH_VALUE NTILE NULL NUMERIC OF ON
+OPTIMIZE OPTION OPTIONALLY OR ORDER OUT OUTER OUTFILE OVER PARTITION PERCENT_RANK
+PRECISION PRIMARY PROCEDURE PURGE RANGE RANK READ READS READ_WRITE REAL RECURSIVE
+REFERENCES REGEXP RELEASE RENAME REPEAT REPLACE REQUIRE RESIGNAL RESTRICT RETURN
+REVOKE RIGHT RLIKE ROLE ROLLBACK ROLLUP ROW ROW_NUMBER ROWS SCHEMA SCHEMAS
+SECOND_MICROSECOND SELECT SENSITIVE SEPARATOR SET SHOW SIGNAL SMALLINT SPATIAL SPECIFIC
+SQL SQLEXCEPTION SQLSTATE SQLWARNING SQL_BIG_RESULT SQL_CALC_FOUND_ROWS SQL_SMALL_RESULT
+SSL START STARTING STORED STRAIGHT_JOIN SYSTEM TABLE TABLES TERMINATED THEN TINYBLOB
+TINYINT TINYTEXT TO TRAILING TRANSACTION TRIGGER TRUE UNDO UNION UNIQUE UNLOCK UNSIGNED
+UPDATE USAGE USE USING UTC_DATE UTC_TIME UTC_TIMESTAMP VALUES VARBINARY VARCHAR
+VARYING VIRTUAL WHEN WHERE WHILE WINDOW WITH WRITE XOR YEAR_MONTH ZEROFILL
+""".split())
+
+SQL_FUNCTIONS = frozenset("""
+ABS ACOS ADDDATE ADDTIME AES_DECRYPT AES_ENCRYPT ANY_VALUE ASCII ASIN ATAN ATAN2 AVG
+BENCHMARK BIN BINARY BINDING BIT_AND BIT_COUNT BIT_OR BIT_XOR CEIL CEILING CHAR
+CHAR_LENGTH CHARACTER_LENGTH COALESCE COERCIBILITY COLLATION COMPRESS CONCAT CONCAT_WS
+CONNECTION_ID CONV CONVERT_TZ COS COT COUNT CRC32 CURDATE CURRENT_ROLE CURTIME DATABASE
+DATE DATE_ADD DATE_FORMAT DATE_SUB DATEDIFF DAY DAYNAME DAYOFMONTH DAYOFWEEK DAYOFYEAR
+DECODE DEFAULT DEGREES ELT ENCODE ENCRYPT EXP EXPORT_SET EXTRACT FIELD FIND_IN_SET
+FIRST_VALUE FLOOR FORMAT FOUND_ROWS FROM_BASE64 FROM_DAYS FROM_UNIXTIME GET_FORMAT
+GREATEST GROUP_CONCAT HEX HOUR IF IFNULL INET_ATON INET_NTOA INET6_ATON INSTR JSON_ARRAY
+JSON_ARRAYAGG JSON_CONTAINS JSON_EXTRACT JSON_OBJECT JSON_OBJECTAGG JSON_PRETTY JSON_QUOTE
+JSON_SEARCH JSON_SET JSON_TYPE JSON_UNQUOTE JSON_VALID LCASE LEAST LEFT LENGTH LN LOAD_FILE
+LOCALTIME LOCALTIMESTAMP LOCATE LOG LOG10 LOG2 LOWER LPAD LTRIM MAKEDATE MAKETIME MAKE_SET
+MASTER_POS_WAIT MAX MD5 MICROSECOND MID MIN MINUTE MOD MONTH MONTHNAME NOW NULLIF OCT
+OCTET_LENGTH ORD PASSWORD PERIOD_ADD PERIOD_DIFF PI POSITION POW POWER QUARTER QUOTE
+RADIANS RAND REGEXP_REPLACE REPEAT REPLACE REVERSE RIGHT ROUND RPAD RTRIM SECOND SEC_TO_TIME
+SESSION_USER SHA SHA1 SHA2 SIGN SIN SLEEP SOUNDEX SPACE SQRT STD STDDEV STDDEV_POP
+STDDEV_SAMP STR_TO_DATE STRCMP SUBDATE SUBSTR SUBSTRING SUBSTRING_INDEX SUM SYSDATE SYSTEM_USER
+TAN TIME TIME_FORMAT TIMEDIFF TIMESTAMP TIMESTAMPADD TIMESTAMPDIFF TO_BASE64 TRIM TRUNCATE
+UCASE UNCOMPRESS UNHEX UNIX_TIMESTAMP UPPER USER UTC_DATE UTC_TIME UTC_TIMESTAMP UUID UUID_SHORT
+VALUES VARIANCE VAR_POP VAR_SAMP VERSION WEEK WEEKDAY WEEKOFYEAR YEAR YEARWEEK
+""".split())
+
+SQL_COMPLETIONS = SQL_KEYWORDS | SQL_FUNCTIONS
+_IDENTIFIER_COMPLETION = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+
 
 class SqlHighlighter(QSyntaxHighlighter):
+    """Comment-aware SQL highlighting, including comments spanning multiple lines."""
+
     def __init__(self, document):
         super().__init__(document)
         keyword = QTextCharFormat()
         keyword.setForeground(QColor("#37d6e7"))
         keyword.setFontWeight(QFont.Weight.DemiBold)
-        words = (
-            "SELECT FROM WHERE JOIN LEFT RIGHT INNER OUTER ON GROUP BY ORDER HAVING LIMIT OFFSET "
-            "INSERT INTO VALUES UPDATE SET DELETE REPLACE CREATE ALTER DROP TRUNCATE TABLE DATABASE "
-            "VIEW INDEX PRIMARY KEY FOREIGN REFERENCES NOT NULL UNIQUE DEFAULT CHECK CONSTRAINT "
-            "AS DISTINCT ALL UNION CASE WHEN THEN ELSE END AND OR IN IS LIKE BETWEEN EXISTS WITH "
-            "RECURSIVE DESC ASC TRUE FALSE NULL IF IFNULL COALESCE COUNT SUM AVG MIN MAX CAST CONVERT "
-            "DATE INTERVAL CURRENT_DATE CURRENT_TIMESTAMP BEGIN COMMIT ROLLBACK START TRANSACTION "
-            "EXPLAIN DESCRIBE SHOW USE GRANT REVOKE"
-        ).split()
-        self.rules = [(re.compile(r"\b(?:" + "|".join(words) + r")\b", re.I), keyword)]
+        alternatives = "|".join(re.escape(word) for word in sorted(SQL_KEYWORDS, key=len, reverse=True))
+        self.rules = [(re.compile(r"\b(?:" + alternatives + r")\b", re.I), keyword)]
+
         string = QTextCharFormat()
         string.setForeground(QColor("#f6c56f"))
         self.rules.append((re.compile(r"'(?:''|\\.|[^'])*'|\"(?:\"\"|\\.|[^\"])*\""), string))
-        comment = QTextCharFormat()
-        comment.setForeground(QColor("#7f93ad"))
-        comment.setFontItalic(True)
-        self.rules.extend([
-            (re.compile(r"--[^\r\n]*|#[^\r\n]*"), comment),
-            (re.compile(r"/\*.*?\*/"), comment),
-        ])
+
         number = QTextCharFormat()
         number.setForeground(QColor("#bd9cff"))
         self.rules.append((re.compile(r"\b\d+(?:\.\d+)?\b"), number))
+
         function = QTextCharFormat()
         function.setForeground(QColor("#69b7ff"))
-        self.rules.append((re.compile(r"\b[A-Za-z_]\w*(?=\s*\()"), function))
+        self.rules.append((re.compile(r"\b[A-Za-z_$][\w$]*(?=\s*\()"), function))
+
+        comment = QTextCharFormat()
+        comment.setForeground(QColor("#7f93ad"))
+        comment.setFontItalic(True)
+        self._comment_format = comment
+        self.rules.append((re.compile(r"--(?=\s|$)[^\r\n]*|#[^\r\n]*"), comment))
 
     def highlightBlock(self, text: str) -> None:
         for pattern, style in self.rules:
             for match in pattern.finditer(text):
                 self.setFormat(match.start(), match.end() - match.start(), style)
+        self._highlight_block_comments(text)
+
+    def _highlight_block_comments(self, text: str) -> None:
+        start = 0
+        if self.previousBlockState() == 1:
+            end = text.find("*/")
+            if end < 0:
+                self.setFormat(0, len(text), self._comment_format)
+                self.setCurrentBlockState(1)
+                return
+            self.setFormat(0, end + 2, self._comment_format)
+            start = end + 2
+        while True:
+            opening = text.find("/*", start)
+            if opening < 0:
+                self.setCurrentBlockState(0)
+                return
+            closing = text.find("*/", opening + 2)
+            if closing < 0:
+                self.setFormat(opening, len(text) - opening, self._comment_format)
+                self.setCurrentBlockState(1)
+                return
+            self.setFormat(opening, closing + 2 - opening, self._comment_format)
+            start = closing + 2
+
 
 class LineNumberArea(QWidget):
     def __init__(self, editor: SqlEditor):
@@ -54,7 +140,10 @@ class LineNumberArea(QWidget):
     def paintEvent(self, event):
         self.editor.paint_line_numbers(event)
 
+
 class SqlEditor(QPlainTextEdit):
+    """SQL editor with Ctrl+Space and inline MySQL/schema-name completion."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.line_number_area = LineNumberArea(self)
@@ -71,11 +160,70 @@ class SqlEditor(QPlainTextEdit):
             "SELECT table_name\nFROM information_schema.tables\n"
             "WHERE table_schema = DATABASE()\nORDER BY table_name;"
         )
+
+        self._extra_completion_words: set[str] = set()
+        self._completion_model = QStringListModel(self)
+        self._completer = QCompleter(self._completion_model, self)
+        self._completer.setWidget(self)
+        self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+        self._completer.setMaxVisibleItems(14)
+        self._completer.setWrapAround(False)
+        self._completer.activated.connect(self.insert_completion)
+        self._refresh_completions()
+
         self.blockCountChanged.connect(self.update_line_number_area_width)
         self.updateRequest.connect(self.update_line_number_area)
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.update_line_number_area_width(0)
         self.highlight_current_line()
+
+    def set_completion_words(self, words) -> None:
+        """Add safe schema identifiers without changing source SQL or quoting arbitrary names."""
+        self._extra_completion_words = {
+            str(word) for word in words if _IDENTIFIER_COMPLETION.fullmatch(str(word))
+        }
+        self._refresh_completions()
+
+    def completion_words(self) -> tuple[str, ...]:
+        """Expose the active word list for regression tests."""
+        return tuple(self._completion_model.stringList())
+
+    def _refresh_completions(self) -> None:
+        self._completion_model.setStringList(
+            sorted(SQL_COMPLETIONS | self._extra_completion_words, key=str.casefold)
+        )
+
+    def _completion_prefix(self) -> str:
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        return cursor.selectedText()
+
+    def _show_completion(self, force: bool = False) -> None:
+        prefix = self._completion_prefix()
+        if not force and len(prefix) < 2:
+            self._completer.popup().hide()
+            return
+        self._completer.setCompletionPrefix(prefix)
+        popup = self._completer.popup()
+        if self._completer.completionCount() == 0:
+            popup.hide()
+            return
+        popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
+        rectangle = self.cursorRect()
+        rectangle.setWidth(
+            popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width()
+        )
+        self._completer.complete(rectangle)
+
+    def insert_completion(self, completion: str) -> None:
+        if self._completer.widget() is not self:
+            return
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(completion)
+        self.setTextCursor(cursor)
 
     def line_number_area_width(self) -> int:
         digits = max(2, len(str(max(1, self.blockCount()))))
@@ -128,14 +276,20 @@ class SqlEditor(QPlainTextEdit):
         self.setExtraSelections([selection] if not self.isReadOnly() else [])
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Tab and not event.modifiers():
-            self.insertPlainText("    ")
+        key = event.key()
+        popup = self._completer.popup()
+        if key == Qt.Key.Key_Space and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._show_completion(force=True)
             return
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers():
-            indent = re.match(r"\s*", self.textCursor().block().text()).group(0)
-            if self.textCursor().block().text().rstrip().endswith(("(", ",")):
-                indent += "    "
-            super().keyPressEvent(event)
-            self.insertPlainText(indent)
-            return
+        if popup.isVisible():
+            if key == Qt.Key.Key_Escape:
+                popup.hide()
+                return
+            if key in (
+                Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, Qt.Key.Key_Backtab,
+            ):
+                return
         super().keyPressEvent(event)
+        typed = event.text()
+        if typed and (typed[-1].isalnum() or typed[-1] in "_$"):
+            self._show_completion()

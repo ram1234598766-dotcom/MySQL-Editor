@@ -44,8 +44,8 @@ jobs:
       MYSQL_EDITOR_TEST_PASSWORD: integration-test-password
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -66,8 +66,12 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - name: Install Qt system libraries for offscreen UI tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -98,8 +102,8 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip

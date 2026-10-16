@@ -61,3 +61,30 @@ def test_key_value_redaction_masks_common_secret_assignments():
     assert "keep-out" not in result
     assert "abcdef" not in result
     assert "my-key" not in result
+
+
+
+def test_risk_advisory_does_not_treat_where_inside_string_as_a_clause():
+    assert classify_statement("DELETE FROM users WHERE note = 'WHERE'")[0] == "medium"
+    assert classify_statement("DELETE FROM users /* WHERE id = 1 */")[0] == "high"
+    assert classify_statement("UPDATE users SET note = 'WHERE'")[0] == "high"
+
+
+def test_risk_advisory_requires_outer_where_not_nested_subquery_where():
+    query = "UPDATE users SET label = (SELECT label FROM labels WHERE id = 2)"
+    assert classify_statement(query)[0] == "high"
+
+
+def test_risk_advisory_understands_cte_wrapped_mutations():
+    assert classify_statement(
+        "WITH candidate AS (SELECT id FROM users) DELETE FROM users"
+    )[0] == "high"
+    assert classify_statement(
+        "WITH candidate AS (SELECT id FROM users) "
+        "DELETE FROM users WHERE id IN (SELECT id FROM candidate)"
+    )[0] == "medium"
+
+
+def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
+    assert classify_statement("UPDATE " + chr(96) + "where" + chr(96) + " SET value = 1")[0] == "high"
+    assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
