@@ -9,13 +9,19 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore, new_profile_id
+from mysql_editor.ui.tutorial import ProductTourDialog
 
 class ConnectionDialog(QDialog):
     connected = Signal(dict, dict, dict)
     TLS_OPTIONS = ["Automatic TLS", "Verify server identity", "Disabled"]
 
-    def __init__(self, worker, repository: LocalRepository, credentials: CredentialStore, parent=None):
+    def __init__(
+        self, worker, repository: LocalRepository, credentials: CredentialStore, parent=None,
+        *, master_unlocked: bool = False, preferred_profile_id: str | None = None,
+    ):
         super().__init__(parent)
+        self.master_unlocked = master_unlocked
+        self.preferred_profile_id = preferred_profile_id
         self.worker = worker
         self.repository = repository
         self.credentials = credentials
@@ -130,9 +136,10 @@ class ConnectionDialog(QDialog):
         self.master_confirm.setPlaceholderText("Type it again to confirm")
         security_form.addRow(self.master_label, self.master_password)
         security_form.addRow(self.confirm_label, self.master_confirm)
+        self.security_card = security
         root.addWidget(security)
         self.save_profile_check = QCheckBox(
-            "Save profile and password in Windows Credential Manager"
+            "Remember this connection and save its password in Windows Credential Manager"
         )
         self.save_profile_check.setChecked(True)
         root.addWidget(self.save_profile_check)
@@ -141,6 +148,8 @@ class ConnectionDialog(QDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         buttons = QHBoxLayout()
+        self.tour_button = QPushButton("Guided tour")
+        self.tour_button.clicked.connect(self._show_product_tour)
         self.test_button = QPushButton("Test connection")
         self.test_button.clicked.connect(self._test_connection)
         self.connect_button = QPushButton("Connect")
@@ -148,6 +157,7 @@ class ConnectionDialog(QDialog):
         self.connect_button.clicked.connect(self._connect)
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.reject)
+        buttons.addWidget(self.tour_button)
         buttons.addWidget(self.test_button)
         buttons.addStretch(1)
         buttons.addWidget(self.exit_button)
@@ -175,13 +185,25 @@ class ConnectionDialog(QDialog):
     def _load_profiles(self):
         for item in self.repository.profiles():
             self.profile.addItem(f"{item.name} — {item.username}@{item.host}:{item.port}", item.id)
+        preferred = self.preferred_profile_id or self.repository.get_setting("last_profile_id")
+        if preferred:
+            index = self.profile.findData(preferred)
+            if index >= 0:
+                self.profile.setCurrentIndex(index)
+                self._profile_selected(index)
 
     def _update_master_mode(self):
         first = not self.repository.has_master_password
+        self.security_card.setVisible(not self.master_unlocked)
         self.master_label.setText("Create local master password" if first else "Master password")
         self.master_password.setPlaceholderText("At least 10 characters" if first else "Unlock MySQL Editor")
         self.master_confirm.setVisible(first)
         self.confirm_label.setVisible(first)
+        if self.master_unlocked:
+            self.status.setText(
+                "Master password verified for this session. Database passwords are saved only in "
+                "Windows Credential Manager when you enable connection saving."
+            )
 
     def _update_tls_hint(self, *_):
         hints = {
@@ -244,17 +266,18 @@ class ConnectionDialog(QDialog):
             if not Path(config["ca_file"]).is_file():
                 QMessageBox.warning(self, "Certificate file not found", "Select an existing CA certificate file.")
                 return None
-        if not self.repository.has_master_password:
-            try:
-                self.master.validate(self.master_password.text())
-                if self.master_password.text() != self.master_confirm.text():
-                    raise ValueError("The master password and confirmation do not match.")
-            except ValueError as exc:
-                QMessageBox.warning(self, "Master password", str(exc))
+        if not self.master_unlocked:
+            if not self.repository.has_master_password:
+                try:
+                    self.master.validate(self.master_password.text())
+                    if self.master_password.text() != self.master_confirm.text():
+                        raise ValueError("The master password and confirmation do not match.")
+                except ValueError as exc:
+                    QMessageBox.warning(self, "Master password", str(exc))
+                    return None
+            elif not self.master.verify(self.master_password.text()):
+                QMessageBox.warning(self, "Master password", "The master password is incorrect.")
                 return None
-        elif not self.master.verify(self.master_password.text()):
-            QMessageBox.warning(self, "Master password", "The master password is incorrect.")
-            return None
         return config
 
     def _queue(self, action: str, config: dict):
@@ -263,6 +286,9 @@ class ConnectionDialog(QDialog):
         self._pending_config[task_id] = config
         self._set_busy(True, "Testing connection…" if action == "test" else "Connecting…")
         self.worker.submit(action, {"config": config}, task_id)
+
+    def _show_product_tour(self):
+        ProductTourDialog(self, self.repository).exec()
 
     def _test_connection(self):
         config = self._validate()
@@ -288,6 +314,7 @@ class ConnectionDialog(QDialog):
         self.connect_button.setEnabled(not busy)
         self.test_button.setEnabled(not busy)
         self.exit_button.setEnabled(not busy)
+        self.tour_button.setEnabled(not busy)
         self.profile.setEnabled(not busy)
 
     def _on_worker_completed(self, task_id: str, action: str, result: dict):
