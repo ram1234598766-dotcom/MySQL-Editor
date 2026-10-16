@@ -454,20 +454,60 @@ jobs:
           trap 'rm -rf "$check_dir"' EXIT
           new_alias="mysqlidle-release"
 
-          # Prefer the publisher's exact existing signing key whenever it validates.
-          if [[ "${ANDROID_KEYSTORE_RESTORE_FAILED:-false}" != "true" && -s "$store" ]] &&
-             keytool -list -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null 2>&1 &&
-             keytool -list -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1 &&
-             keytool -certreq -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" -alias "$ANDROID_KEY_ALIAS" -file "$check_dir/validation.csr" >/dev/null 2>&1; then
-            {
-              printf 'ANDROID_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
-              printf 'ANDROID_KEY_ALIAS=%s\n' "$ANDROID_KEY_ALIAS"
-              printf 'ANDROID_KEY_PASSWORD=%s\n' "$ANDROID_KEY_PASSWORD"
-              echo "ANDROID_KEYSTORE_WAS_REPLACED=false"
-            } >> "$GITHUB_ENV"
-            echo "replaced=false" >> "$GITHUB_OUTPUT"
-            echo "Existing Android release keystore and credentials validated."
-            exit 0
+          # Prefer the publisher's exact existing signing key. Diagnose store/alias
+          # mismatches without displaying passwords or private-key material.
+          if [[ "\${ANDROID_KEYSTORE_RESTORE_FAILED:-false}" != "true" && -s "$store" ]] &&
+             keytool -list -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            mapfile -t private_aliases < <(
+              keytool -list -v -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" 2>/dev/null |
+              awk -F': ' '/^Alias name: / { alias = substr($0, index($0, ": ") + 2) }
+                           /^Entry type: PrivateKeyEntry/ { print alias }'
+            )
+            selected_alias="$ANDROID_KEY_ALIAS"
+            alias_found=false
+            for candidate in "\${private_aliases[@]}"; do
+              if [[ "$candidate" == "$selected_alias" ]]; then
+                alias_found=true
+                break
+              fi
+            done
+
+            if [[ "$alias_found" != "true" && \${#private_aliases[@]} -eq 1 ]]; then
+              selected_alias="\${private_aliases[0]}"
+              alias_found=true
+              echo "::notice::The configured alias was not found; using the only private-key alias in the supplied keystore."
+            elif [[ "$alias_found" != "true" && \${#private_aliases[@]} -gt 1 ]]; then
+              echo "::warning::The configured alias does not match a private-key entry. Available private-key aliases: \${private_aliases[*]}"
+            fi
+
+            selected_key_password=""
+            if [[ "$alias_found" == "true" ]] &&
+               keytool -certreq -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+                 -keypass "$ANDROID_KEY_PASSWORD" -alias "$selected_alias" \
+                 -file "$check_dir/input-key-password.csr" >/dev/null 2>&1; then
+              selected_key_password="$ANDROID_KEY_PASSWORD"
+            elif [[ "$alias_found" == "true" ]] &&
+                 keytool -certreq -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+                   -keypass "$ANDROID_KEYSTORE_PASSWORD" -alias "$selected_alias" \
+                   -file "$check_dir/store-password.csr" >/dev/null 2>&1; then
+              selected_key_password="$ANDROID_KEYSTORE_PASSWORD"
+              echo "::notice::The supplied keystore uses the store password for its private-key entry."
+            fi
+
+            if [[ "$alias_found" == "true" && -n "$selected_key_password" ]]; then
+              {
+                printf 'ANDROID_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+                printf 'ANDROID_KEY_ALIAS=%s\n' "$selected_alias"
+                printf 'ANDROID_KEY_PASSWORD=%s\n' "$selected_key_password"
+                echo "ANDROID_KEYSTORE_WAS_REPLACED=false"
+              } >> "$GITHUB_ENV"
+              echo "replaced=false" >> "$GITHUB_OUTPUT"
+              echo "Existing Android signing keystore validated."
+              exit 0
+            fi
+            echo "::warning::The supplied keystore opens, but its private-key alias or entry password could not be validated; checking the encrypted backup."
+          else
+            echo "::warning::The supplied keystore does not open with ANDROID_KEYSTORE_PASSWORD; checking the encrypted backup."
           fi
 
           # If the supplied file/credentials fail, try the prior encrypted backup.
