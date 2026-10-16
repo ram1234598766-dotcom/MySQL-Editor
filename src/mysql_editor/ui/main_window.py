@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
+    QButtonGroup, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
     QTabWidget, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -19,6 +19,7 @@ from mysql_editor.database import MAX_PREVIEW_ROWS, DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
+from mysql_editor.ui.tutorial import ProductTourDialog
 
 
 class ResultsModel(QAbstractTableModel):
@@ -158,50 +159,59 @@ class MainWindow(QMainWindow):
         self.connection_badge = QLabel()
         self.connection_badge.setObjectName("connectionBadge")
         top_layout.addWidget(self.connection_badge)
-        switch = QPushButton("Switch connection")
+        self.connection_details = QLabel()
+        self.connection_details.setObjectName("connectionDetails")
+        self.connection_details.setMaximumWidth(275)
+        top_layout.addWidget(self.connection_details)
+        self.tour_button = QPushButton("✧  Guided tour")
+        self.tour_button.clicked.connect(self._show_product_tour)
+        top_layout.addWidget(self.tour_button)
+        switch = QPushButton("Connect")
+        switch.setObjectName("primaryButton")
         switch.clicked.connect(self.open_connection_dialog)
         top_layout.addWidget(switch)
         outer.addWidget(top)
 
-        self.main_split = QSplitter(Qt.Orientation.Horizontal)
-        body = self.main_split
-        body.setObjectName("mainSplit")
-        nav = QWidget()
-        nav.setObjectName("navigationPanel")
-        nav.setMinimumWidth(205)
-        nav.setMaximumWidth(285)
-        nav_layout = QVBoxLayout(nav)
-        nav_layout.setContentsMargins(12, 18, 12, 14)
-        nav_layout.setSpacing(7)
-        nav_title = QLabel("WORKSPACE")
-        nav_title.setObjectName("sectionLabel")
-        nav_layout.addWidget(nav_title)
+        navigation = QWidget()
+        navigation.setObjectName("workspaceNavigation")
+        navigation_layout = QHBoxLayout(navigation)
+        navigation_layout.setContentsMargins(16, 6, 16, 6)
+        navigation_layout.setSpacing(6)
+        self.workspace_nav_group = QButtonGroup(self)
+        self.workspace_nav_group.setExclusive(True)
+        self.workspace_nav_buttons: dict[str, QToolButton] = {}
         for label, icon in [
             ("SQL Editor", "▤"), ("Connections", "◇"), ("Schema explorer", "▦"),
             ("Query history", "◷"), ("Saved queries", "☆"),
         ]:
             button = QToolButton()
-            button.setText(f"{icon}   {label}")
+            button.setText(f"{icon}  {label}")
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             button.setObjectName("navButton")
-            button.setMinimumHeight(39)
+            button.setMinimumHeight(38)
+            button.setCheckable(label != "Connections")
+            button.setAccessibleName(label)
+            button.setToolTip({
+                "SQL Editor": "Return to the SQL editor",
+                "Connections": "Manage and switch MySQL connections",
+                "Schema explorer": "Browse databases, tables and views",
+                "Query history": "Review opt-in local query history",
+                "Saved queries": "Open saved SQL snippets",
+            }[label])
+            if label != "Connections":
+                self.workspace_nav_group.addButton(button)
             button.clicked.connect(lambda checked=False, value=label: self._navigate(value))
-            nav_layout.addWidget(button)
-        nav_layout.addSpacing(14)
-        section = QLabel("ACTIVE CONNECTION")
-        section.setObjectName("sectionLabel")
-        nav_layout.addWidget(section)
-        self.connection_details = QLabel()
-        self.connection_details.setObjectName("mutedText")
-        self.connection_details.setWordWrap(True)
-        nav_layout.addWidget(self.connection_details)
-        nav_layout.addStretch(1)
-        safety = QLabel("LOCAL-FIRST\nCredentials in Windows Credential Manager\nNo account or cloud relay")
-        safety.setObjectName("securityNotice")
-        safety.setWordWrap(True)
-        nav_layout.addWidget(safety)
-        body.addWidget(nav)
+            navigation_layout.addWidget(button)
+            self.workspace_nav_buttons[label] = button
+        navigation_layout.addStretch(1)
+        privacy_hint = QLabel("LOCAL WORKSPACE  ·  DIRECT MYSQL CONNECTION")
+        privacy_hint.setObjectName("navHint")
+        navigation_layout.addWidget(privacy_hint)
+        outer.addWidget(navigation)
 
+        self.main_split = QSplitter(Qt.Orientation.Horizontal)
+        body = self.main_split
+        body.setObjectName("mainSplit")
         self.center = QWidget()
         center_layout = QVBoxLayout(self.center)
         center_layout.setContentsMargins(18, 17, 18, 10)
@@ -303,10 +313,9 @@ class MainWindow(QMainWindow):
         self.saved_list.itemDoubleClicked.connect(self._saved_selected)
         self.inspector_tabs.addTab(self.saved_list, "Saved")
         body.addWidget(self.inspector_tabs)
-        body.setStretchFactor(0, 0)
-        body.setStretchFactor(1, 1)
-        body.setStretchFactor(2, 0)
-        body.setSizes([228, 980, 292])
+        body.setStretchFactor(0, 1)
+        body.setStretchFactor(1, 0)
+        body.setSizes([1180, 310])
         outer.addWidget(body, 1)
 
         self.status = QLabel("Ready")
@@ -316,6 +325,7 @@ class MainWindow(QMainWindow):
         self._set_result_controls()
         self.refresh_history()
         self._refresh_saved_queries()
+        self._set_workspace_nav("SQL Editor")
 
     def _set_brand_logo(self, label: QLabel):
         import sys
@@ -387,7 +397,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
 
         sizes = self._settings.value("ui/mainSplitterSizes", [])
-        if isinstance(sizes, (list, tuple)) and len(sizes) == 3:
+        if isinstance(sizes, (list, tuple)) and len(sizes) == self.main_split.count():
             try:
                 self.main_split.setSizes([max(1, int(value)) for value in sizes])
             except (TypeError, ValueError):
@@ -433,21 +443,53 @@ class MainWindow(QMainWindow):
             self.query_meta.setText("Running…")
         return job_id
 
+    def _set_workspace_nav(self, destination: str):
+        button = self.workspace_nav_buttons.get(destination)
+        if button is not None and button.isCheckable():
+            button.setChecked(True)
+
     def _navigate(self, destination: str):
         if destination == "SQL Editor":
+            self._set_workspace_nav(destination)
             if self._current_editor():
                 self._current_editor().setFocus()
         elif destination == "Connections":
             self.open_connection_dialog()
+            self._set_workspace_nav("SQL Editor")
         elif destination == "Schema explorer":
+            self._set_workspace_nav(destination)
             self.inspector_tabs.setCurrentIndex(0)
             self.refresh_schema()
         elif destination == "Query history":
+            self._set_workspace_nav(destination)
             self.inspector_tabs.setCurrentIndex(1)
             self.refresh_history()
         elif destination == "Saved queries":
+            self._set_workspace_nav(destination)
             self.inspector_tabs.setCurrentIndex(2)
             self._refresh_saved_queries()
+
+    def _insert_tour_example(self):
+        editor = self._current_editor()
+        if editor is None:
+            self.new_query_tab()
+            editor = self._current_editor()
+        if editor is not None:
+            editor.setPlainText(
+                "SELECT TABLE_SCHEMA, TABLE_NAME\n"
+                "FROM information_schema.tables\n"
+                "WHERE TABLE_SCHEMA = DATABASE()\n"
+                "ORDER BY TABLE_NAME\n"
+                "LIMIT 50;"
+            )
+            editor.document().setModified(True)
+            editor.setFocus()
+            self.status.setText("A sample SELECT was inserted. Review it, then run with Ctrl+Enter.")
+            self._set_workspace_nav("SQL Editor")
+            self.inspector_tabs.setCurrentIndex(0)
+
+    def _show_product_tour(self):
+        ProductTourDialog(self, self.repository, self._insert_tour_example).exec()
 
     def _current_editor(self) -> SqlEditor | None:
         editor = self.editors.currentWidget()
@@ -941,7 +983,10 @@ class MainWindow(QMainWindow):
         self.status.setText("Local query history cleared and disabled.")
 
     def open_connection_dialog(self):
-        dialog = ConnectionDialog(self.worker, self.repository, self.credentials, self)
+        dialog = ConnectionDialog(
+            self.worker, self.repository, self.credentials, self,
+            master_unlocked=True,
+        )
         dialog.connected.connect(self._switch_connection)
         dialog.exec()
 
@@ -959,7 +1004,8 @@ class MainWindow(QMainWindow):
         try:
             self.repository.save_profile(ConnectionProfile(**profile))
             self.credentials.save(profile["id"], config.get("password", ""))
-            self.status.setText("Connection profile saved securely.")
+            self.repository.set_setting("last_profile_id", profile["id"])
+            self.status.setText("Connection profile and password saved in Windows Credential Manager.")
         except Exception as exc:
             QMessageBox.warning(
                 self, "Profile not saved",
@@ -971,12 +1017,13 @@ class MainWindow(QMainWindow):
         host = self.config.get("host", "MySQL")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
         self.connection_badge.setText(f"●  {host} · Connected")
-        self.connection_details.setText(
-            f"{host}:{self.config.get('port', 3306)}\n"
-            f"{self.config.get('username', '')}\nDatabase: {schema}\n"
-            f"Server: {self.connect_result.get('server_version', 'MySQL')}\n"
+        details = (
+            f"{host}:{self.config.get('port', 3306)} · {self.config.get('username', '')} · "
+            f"Database: {schema} · Server: {self.connect_result.get('server_version', 'MySQL')} · "
             f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}"
         )
+        self.connection_details.setText(details)
+        self.connection_details.setToolTip(details)
 
     def show_safety_info(self):
         QMessageBox.information(
