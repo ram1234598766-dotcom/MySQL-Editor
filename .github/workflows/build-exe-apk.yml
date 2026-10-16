@@ -411,6 +411,73 @@ jobs:
           run-id: ${{ steps.find-signing-backup.outputs.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/key-backup
+      - name: Restore encrypted signing-key backup from the original MySQL-IDLE repo if needed
+        if: env.ANDROID_SIGNING_ENABLED == 'true' && steps.find-signing-backup.outputs.run_id == ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          repo = "ram1234598766-dotcom/MySQL-IDLE"
+          api = "https://api.github.com/repos/" + repo
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "MySQL-Editor-signing-backup-recovery",
+          }
+
+          def get_json(url):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  return json.load(response)
+
+          try:
+              runs = get_json(api + "/actions/runs?branch=main&per_page=50").get("workflow_runs", [])
+              archive_url = ""
+              for run in runs:
+                  if run.get("status") != "completed" or run.get("conclusion") != "success":
+                      continue
+                  run_id = run.get("id")
+                  if not run_id:
+                      continue
+                  try:
+                      artifacts = get_json(api + "/actions/runs/" + str(run_id) + "/artifacts?per_page=100").get("artifacts", [])
+                  except Exception:
+                      continue
+                  match = next((a for a in artifacts if a.get("name") == "MySQLIDLE-SigningKey-Backup" and not a.get("expired", True)), None)
+                  if match:
+                      archive_url = api + "/actions/artifacts/" + str(match["id"]) + "/zip"
+                      break
+
+              if not archive_url:
+                  print("::warning::No accessible encrypted signing-key backup was found in MySQL-IDLE.")
+              else:
+                  request = urllib.request.Request(archive_url, headers=headers)
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      payload = response.read()
+                  tmp = Path(os.environ["RUNNER_TEMP"])
+                  archive_path = tmp / "legacy-signing-backup.zip"
+                  archive_path.write_bytes(payload)
+                  backup_dir = tmp / "key-backup"
+                  backup_dir.mkdir(parents=True, exist_ok=True)
+                  with zipfile.ZipFile(archive_path) as archive:
+                      member = next((n for n in archive.namelist() if Path(n).name == "MySQLIDLE-SigningKey.jks.enc"), None)
+                      if not member:
+                          raise ValueError("Encrypted key backup file is missing from the artifact.")
+                      info = archive.getinfo(member)
+                      if info.file_size > 1024 * 1024:
+                          raise ValueError("Encrypted key backup exceeded the expected size limit.")
+                      (backup_dir / "MySQLIDLE-SigningKey.jks.enc").write_bytes(archive.read(member))
+                  print("Encrypted legacy signing-key backup located; no private-key plaintext was exported.")
+          except Exception:
+              print("::warning::Could not retrieve the public MySQL-IDLE encrypted signing-key backup; signing will remain blocked unless the supplied keystore validates.")
+          PY
       - name: Restore Android release keystore
         if: env.ANDROID_SIGNING_ENABLED == 'true'
         env:
