@@ -960,7 +960,7 @@ jobs:
       actions: read
       contents: write
     env:
-      WINDOWS_SIGNING_ENABLED: \${{ github.event_name != 'pull_request' && secrets.WINDOWS_CERTIFICATE_BASE64 != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+      WINDOWS_SIGNING_ENABLED: ${{ github.event_name != 'pull_request' && secrets.WINDOWS_CERTIFICATE_BASE64 != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
     steps:
       - name: Download Windows build artifacts
         uses: actions/download-artifact@v8.0.2
@@ -971,7 +971,7 @@ jobs:
       - name: Validate Windows package and calculate checksums
         shell: bash
         env:
-          WINDOWS_SIGNED: \${{ env.WINDOWS_SIGNING_ENABLED }}
+          WINDOWS_SIGNED: ${{ env.WINDOWS_SIGNING_ENABLED }}
         run: |
           set -euo pipefail
           test -s release-assets/MySQLEditor-Setup.exe
@@ -1000,9 +1000,9 @@ jobs:
       - name: Publish Windows preview release
         uses: softprops/action-gh-release@v3.0.3
         with:
-          tag_name: windows-preview-\${{ github.run_id }}
-          target_commitish: \${{ github.sha }}
-          name: MySQL Editor Windows Preview (Build \${{ github.run_number }})
+          tag_name: windows-preview-${{ github.run_id }}
+          target_commitish: ${{ github.sha }}
+          name: MySQL Editor Windows Preview (Build ${{ github.run_number }})
           prerelease: true
           make_latest: false
           generate_release_notes: true
