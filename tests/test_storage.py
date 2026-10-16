@@ -48,3 +48,50 @@ def test_history_is_opt_in_and_cleared_when_disabled(tmp_path: Path):
     repo.set_history_enabled(False)
     assert repo.history() == []
     repo.close()
+
+
+def test_saved_profile_builds_complete_connection_config_without_changing_tls_policy():
+    from mysql_editor.storage import connection_config_from_profile
+
+    profile = ConnectionProfile(
+        id="profile-123",
+        name="Production read-only",
+        host="db.example.invalid",
+        port=3307,
+        username="reporter",
+        default_schema="analytics",
+        tls_mode="Verify server identity",
+        ca_file="D:/certs/private-ca.pem",
+        read_timeout=90,
+        write_timeout=45,
+    )
+    config = connection_config_from_profile(profile, "sample-secret")
+
+    assert config == {
+        "profile_name": "Production read-only",
+        "profile_id": "profile-123",
+        "host": "db.example.invalid",
+        "port": 3307,
+        "username": "reporter",
+        "password": "sample-secret",
+        "default_schema": "analytics",
+        "tls_mode": "Verify server identity",
+        "ca_file": "D:/certs/private-ca.pem",
+        "read_timeout": 90,
+        "write_timeout": 45,
+        "save_profile": True,
+    }
+    assert not hasattr(profile, "password")
+
+
+def test_last_profile_setting_is_persisted_without_database_password(tmp_path: Path):
+    repo = LocalRepository(tmp_path / "settings.sqlite3")
+    profile = ConnectionProfile(id="recent-profile", name="Recent connection", username="reporter")
+    repo.save_profile(profile)
+    repo.set_setting("last_profile_id", profile.id)
+    repo.close()
+
+    reopened = LocalRepository(tmp_path / "settings.sqlite3")
+    assert reopened.get_setting("last_profile_id") == "recent-profile"
+    assert "password" not in {row[1] for row in reopened._db.execute("PRAGMA table_info(profiles)")}
+    reopened.close()

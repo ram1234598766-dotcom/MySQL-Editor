@@ -6,8 +6,9 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 
 ## Implemented in this branch
 
-- Native PySide6/Qt shell with three-panel layout, SQL tabs, syntax highlighting, line numbers and results grid.
-- Connect to MySQL dialog with saved profile selection, first-run master-password creation and subsequent local unlock.
+- Native PySide6/Qt shell with horizontal workspace navigation, resizable editor/results and schema inspector, SQL tabs, syntax highlighting, line numbers and results grid.
+- Animated guided tour available from the workspace header, the connection dialog, and Help (F1); the tour can insert a real sample SELECT into the editor.
+- First launch creates a local master password. Later launches request only that master password, then auto-reconnect to the last remembered MySQL profile using Windows Credential Manager when the saved password is available; missing/stale credentials fall back to the connection form.
 - Argon2id master-password verifier, local settings database and Windows Credential Manager-only saved-password adapter.
 - mysql-connector-python direct server access, configurable TLS choices and finite connection/read/write timeouts.
 - Dedicated database worker thread so SQL execution and schema navigation do not run on the Qt UI event loop.
@@ -16,7 +17,7 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 - Result switching between statements, sortable result grid, copy selected cells, bounded preview and CSV export of the fetched result set.
 - Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
 - Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
-- Remembers window geometry, split-pane sizes, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
+- Remembers window geometry, horizontal workspace pane sizes, vertical editor/results split, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
 - Handles SQL-file open/save errors inside the app without discarding the current buffer, and writes CSV exports atomically so an interrupted export preserves any previous destination file.
 
 This is a development implementation, not yet a release-approved or manually QA-certified binary. Review the workflow results and test the installer on a clean Windows account before distributing it.
@@ -49,6 +50,7 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+python tools/build_brand_assets.py
 python -m mysql_editor
 ~~~
 
@@ -56,7 +58,7 @@ The app begins in the Connect to MySQL dialog. On first launch, create the local
 
 ## Build Windows packages
 
-Build on Windows x64 with Inno Setup installed:
+Build on Windows x64 with Inno Setup installed. Run the branding step before launching from source to generate the transparent logo PNG and the multi-size Windows icon:
 
 ~~~powershell
 python -m pip install -e ".[dev]" pyinstaller
@@ -103,7 +105,7 @@ The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and
 - Table preview is limited to 1,000 rows. The result grid previews up to 2,000 rows per result, while CSV export includes all rows fetched into the current session spool.
 - Query cancellation is best-effort and does not guarantee immediate server-side cancellation.
 - Some DDL implicitly commits on MySQL, regardless of application transaction controls.
-- The repository's tracked logo image is the asset source. Icon resizing creates standard Windows icon dimensions but cannot add information missing from the source image.
+- The repository's tracked logo image is the asset source. The build creates an alpha-bearing PNG by making edge-connected near-white background pixels transparent while preserving enclosed white artwork; the original source remains unchanged. Icon resizing cannot add information missing from the source image.
 
 ## References
 

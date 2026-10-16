@@ -31,3 +31,12 @@
 Download MySQLEditor-Setup.exe for normal installation, or MySQLEditor-Portable.exe to launch without installing. Verify SHA-256 checksums before use. Create a local master password on first launch, then enter the host, port, username and MySQL password for the target database.
 
 This pre-release contains no APK/AAB files or cross-device password synchronization.
+
+
+## Workspace and onboarding refresh
+
+- Replaced the fixed vertical left navigation with a horizontal workspace bar for SQL Editor, Connections, Schema Explorer, Query History, and Saved Queries.
+- The editor/results boundary is a draggable vertical splitter and its ratio is remembered between launches. The schema inspector remains a separately resizable side panel.
+- Added an animated multi-step guided tour (workspace header, connection form and Help → Guided tour / F1). The tour can insert an actual sample SELECT into the editor.
+- After the first setup, startup asks for only the local master password and automatically reconnects to the last remembered profile when the password is available in Windows Credential Manager. If vault data is missing or MySQL rejects the saved password, the connection form is shown.
+- The branded icon and UI assets now use an alpha-bearing PNG created by removing only edge-connected near-white matte pixels from the original artwork. Enclosed white artwork is preserved, and the tracked source logo remains unchanged.

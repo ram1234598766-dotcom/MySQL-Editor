@@ -10,10 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
-from mysql_editor.storage import CredentialStore, LocalRepository
+from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.main_window import MainWindow
+from mysql_editor.ui.tutorial import ProductTourDialog
+from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
 
 
 class StubWorker(QObject):
@@ -77,7 +79,8 @@ def main():
 
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
-        first.main_split.setSizes([240, 800, 320])
+        first.main_split.setSizes([440, 320])
+        first.editor_results_split.setSizes([420, 300])
         app.processEvents()
         first.inspector_tabs.setCurrentIndex(1)
 
@@ -87,6 +90,32 @@ def main():
             assert first._open_sql_path(missing_file) is False
         assert first.editors.count() == original_count
 
+        # Exercise the animated tour's navigation and its real "insert sample SQL" action.
+        tour = ProductTourDialog(first, first_repo, first._insert_tour_example)
+        tour._go(2)
+        assert tour.pages.currentIndex() == 2
+        insert_button = next(
+            button for button in tour.findChildren(QPushButton)
+            if button.text() == "Insert a sample SELECT into the editor"
+        )
+        insert_button.click()
+        assert "information_schema.tables" in first._current_editor().toPlainText()
+        first._current_editor().document().setModified(False)
+        first.inspector_tabs.setCurrentIndex(1)
+        tour._skip()
+        assert first_repo.get_setting("guided_tour_completed") == "true"
+
+        # Verify the master-password-only gate rejects a wrong password and accepts the right one.
+        master = MasterPasswordStore(first_repo)
+        master.create("reliable local master", "reliable local master")
+        unlock = MasterUnlockDialog(first_repo)
+        unlock.password.setText("incorrect phrase")
+        unlock._unlock()
+        assert not unlock.is_unlocked
+        unlock.password.setText("reliable local master")
+        unlock._unlock()
+        assert unlock.is_unlocked
+        
         blocker = root / "not-a-directory"
         blocker.write_text("existing file", encoding="utf-8")
         editor.setPlainText("SELECT 1;")
@@ -102,7 +131,9 @@ def main():
         assert int(settings.value("ui/editorFontSize", 0)) == 11
         assert int(settings.value("ui/inspectorTab", -1)) == 1
         saved_sizes = settings.value("ui/mainSplitterSizes", [])
-        assert len(saved_sizes) == 3 and all(int(size) > 0 for size in saved_sizes)
+        result_sizes = settings.value("ui/editorResultsSplitterSizes", [])
+        assert len(saved_sizes) == 2 and all(int(size) > 0 for size in saved_sizes)
+        assert len(result_sizes) == 2 and all(int(size) > 0 for size in result_sizes)
 
         second, second_repo = make_window(root / "settings-two.sqlite3")
         second.show()
@@ -110,6 +141,8 @@ def main():
         restored = second._current_editor()
         assert restored is not None and restored.font().pointSize() == 11
         assert second.inspector_tabs.currentIndex() == 1
+        assert len(second.editor_results_split.sizes()) == 2
+        assert all(size > 0 for size in second.editor_results_split.sizes())
         second.close()
         second_repo.close()
         app.quit()
