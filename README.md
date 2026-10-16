@@ -2,7 +2,7 @@
 
 **A desktop SQL workspace for MySQL and MariaDB, with an optional authenticated Android companion.**
 
-MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and running SQL, inspecting query results, running `.sql` scripts, and exporting result sets. Its optional mobile companion lets a paired Android device use a responsive SQL workspace through an HTTPS service hosted by the Windows desktop.
+MySQL Editor provides a dark, Figma-inspired desktop SQL workspace with a multiline editor, line numbers, syntax highlighting, guarded execution, saved snippets, and an in-window result grid. It runs `.sql` scripts and exports full result sets. Its optional Android companion lets a paired device use a responsive SQL workspace through an HTTPS service hosted by the Windows desktop.
 
 ![MySQL Editor logo](assets/mysqlidle-logo.png)
 
@@ -21,7 +21,7 @@ MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and ru
 - [Run from source](#run-from-source)
 - [First launch and master password](#first-launch-and-master-password)
 - [Connect to MySQL or MariaDB](#connect-to-mysql-or-mariadb)
-- [Using the SQL shell](#using-the-sql-shell)
+- [Using the SQL editor](#using-the-sql-editor)
 - [Feature Governance](#feature-governance)
 - [Android companion setup](#android-companion-setup)
 - [Security and privacy](#security-and-privacy)
@@ -38,7 +38,7 @@ MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and ru
 
 - **Repository:** [`ram1234598766-dotcom/MySQL-Editor`](https://github.com/ram1234598766-dotcom/MySQL-Editor)
 - **Displayed product name:** MySQL Editor (Windows desktop, installer, Android launcher and mobile workspace).
-- **Desktop and Android implementation:** Python/Tkinter Windows client plus an Android app paired with the desktop-hosted HTTPS companion.
+- **Desktop and Android implementation:** Python/Tkinter Windows SQL workspace plus an Android app paired with the desktop-hosted HTTPS companion.
 - **Original application identity:** the Android package remains `com.mysqlidle.mobile`. Keep this application ID and the existing Android signing key stable for users to receive in-place updates.
 - **Upgrade compatibility:** the Windows installer uses the previous product's installer ID and retains the existing `MySQL IDLE` install/data directory paths. These are intentional compatibility paths, not the displayed product name.
 - **New download names:** the current build workflow uses `MySQLEditor-Setup.exe`, `MySQLEditor_Portable.exe`, `MySQLEditor-Folder.zip`, and `MySQLEditor-Mobile-release.apk` for Android. The workflow builds APK files only, with no additional package format.
@@ -50,13 +50,13 @@ Use the repository's [Build workflow](https://github.com/ram1234598766-dotcom/My
 ### Desktop SQL workspace
 
 - Connect to MySQL or MariaDB with a host, port, username, and database.
-- Enter multi-line SQL in a prompt-driven shell with syntax highlighting and completion for SQL keywords, databases, tables, and columns.
+- Edit multi-line SQL in a dedicated editor with a dark code surface, line numbers, syntax highlighting, and completion for SQL keywords, databases, tables, and columns.
 - Run individual statements, multi-statement input, or a `.sql` script.
-- Inspect results in the shell or in a sortable result grid, and export full result sets to CSV.
+- Preview actual query results in the workspace grid or open them in a sortable table window; export full result sets to CSV.
 - Stream query results in batches to temporary CSV files so large result sets do not all need to stay in memory.
 - Keep the interface responsive while a query runs on a background worker thread.
 - Cancel the active query with `Ctrl+Break` when the connected MySQL account has permission to do so.
-- Save the shell output to a log file when needed.
+- Save the current SQL buffer to a `.sql` file with **Ctrl+S**.
 - Format the current statement with **Ctrl+Shift+F** without modifying quoted strings, quoted identifiers, or comments.
 - Prepare an `EXPLAIN` plan for one `SELECT` using **Ctrl+Shift+E**; it inserts the statement for review and never executes it automatically.
 - Copy the current SQL statement with **Ctrl+Shift+C**.
@@ -211,9 +211,9 @@ The CA file path is resolved on the computer running the desktop app. The Androi
 - For a certificate-verification error, verify the CA, certificate hostname and device clock. For local/self-signed servers, understand the security trade-off before changing the verification setting.
 - The app cannot grant database privileges the connected account does not have.
 
-## Using the SQL shell
+## Using the SQL editor
 
-SQL statements normally end with a semicolon. Multi-line statements are supported; the prompt changes to `->` while a statement is incomplete.
+The SQL workspace starts with a safe `SELECT VERSION();` example. Replace it with your query or choose **Saved snippets**/**Query history** in the sidebar. The editor supports multiple statements, with or without a trailing semicolon. Press **Ctrl+Enter** to run the selected text, or the complete buffer when no text is selected. SQL is passed through Feature Governance before the background worker executes it.
 
 | Key or command | Action |
 | --- | --- |
@@ -224,20 +224,20 @@ SQL statements normally end with a semicolon. Multi-line statements are supporte
 | `Tab` | Autocomplete SQL keywords, databases, tables and columns |
 | `Esc` | Clear the current input line |
 | `Ctrl+N` | Open the connection dialog |
-| `Ctrl+S` | Save the shell output/log |
+| `Ctrl+S` | Save the current SQL buffer as a `.sql` file |
 | `F5` | Select and run a `.sql` script |
 | `F6` | Open the last result in a grid |
-| `Ctrl+L` | Clear the shell view |
-| `Ctrl++` / `Ctrl+-` | Zoom shell text |
+| `Ctrl+L` | Clear the SQL editor and activity output |
+| `Ctrl++` / `Ctrl+-` | Zoom the SQL editor text |
 | `Ctrl+Break` | Request cancellation of the active MySQL query; server permissions apply |
 | `help` | Show built-in help |
-| `clear` / `cls` | Clear the shell |
+| Sidebar → Query history | Browse and insert a previous query |
 | `exit` / `quit` | Close MySQL Editor |
 | `\\c` | Cancel the statement currently being typed |
 
 ### Query results and export
 
-- The shell retains a preview of up to **1,000 rows** for a query result.
+- The workspace grid retains a preview of up to **1,000 rows** for a query result.
 - The result grid loads up to **5,000 rows**.
 - Full result sets are streamed in batches to a temporary CSV file; the preview limits do not mean only those rows were fetched.
 - Temporary result data is stored locally during processing. The application attempts to remove temporary result files when sessions close or the application stops.
@@ -471,7 +471,7 @@ Use **Help → Check Environment** to inspect runtime and diagnostic paths. Revi
 
 ```text
 MySQL-Editor/
-├── mysql_idle.py                 # Desktop SQL shell and GUI
+├── mysql_idle.py                 # Desktop SQL workspace and GUI
 ├── mobile_companion.py           # HTTPS service hosted by the desktop
 ├── feature_governor.py           # SQL risk policy and audit events
 ├── password_auth.py              # Master-password verifier/authentication
