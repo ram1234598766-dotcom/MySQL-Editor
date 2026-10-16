@@ -15,6 +15,7 @@ description: "Use when building, packaging, testing, or publishing MySQL Editor 
 ## Packaged validation
 
 - Build both onedir and portable executables, plus the Inno Setup installer.
+- Run `tools/smoke_test_ui.py` on Windows with `QT_QPA_PLATFORM=offscreen` to verify UI preferences restore and file read/write failures preserve the user's buffer.
 - Smoke-launch both packaged executables and fail if either exits during startup.
 - Perform silent install/uninstall; verify the executable and uninstaller exist, the desktop shortcut appears, and uninstall removes it.
 - Verify output sizes and generate the SBOM, third-party license inventory, release notes, and SHA-256 manifest.
