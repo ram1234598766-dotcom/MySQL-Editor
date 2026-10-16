@@ -169,7 +169,11 @@ class ConnectionDialog(QDialog):
     def _logo_candidates() -> list[Path]:
         import sys
         roots = [Path(__file__).resolve().parents[3], Path(getattr(sys, "_MEIPASS", "."))]
-        return [root / "assets" / "mysql-editor-logo.webp" for root in roots]
+        return [
+            root / "assets" / filename
+            for root in roots
+            for filename in ("mysql-editor-logo-transparent.png", "mysql-editor-logo.webp")
+        ]
 
     def _set_logo(self, label: QLabel):
         for path in self._logo_candidates():
