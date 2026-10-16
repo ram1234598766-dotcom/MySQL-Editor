@@ -162,7 +162,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
         ) as response:
             data = response.read()
             self.assertEqual(response.status, 200)
-            self.assertTrue(response.headers.get("Content-Type", "").startswith("image/png"))
+            self.assertTrue(response.headers.get("Content-Type", "").startswith("image/jpeg"))
             self.assertEqual(response.headers.get("Cache-Control"), "no-store, max-age=0")
 
         expected = (Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.jpg").read_bytes()
