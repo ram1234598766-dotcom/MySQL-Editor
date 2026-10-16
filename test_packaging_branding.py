@@ -1,7 +1,7 @@
 """Packaging/UI resource contracts for the shared product logo."""
 from pathlib import Path
 import unittest
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent
 
@@ -16,6 +16,7 @@ class PackagingBrandingTests(unittest.TestCase):
 
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
         self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
+        self.assertIn("ImageFilter.UnsharpMask", generator)
         self.assertTrue((ROOT / "assets" / "mysql-editor-logo.jpg").is_file())
 
     def test_windows_ico_sizes_are_high_quality_resizes_of_the_high_resolution_master(self):
@@ -29,7 +30,9 @@ class PackagingBrandingTests(unittest.TestCase):
             for size in sorted(sizes):
                 with self.subTest(size=size):
                     actual = icon.ico.getimage(size).convert("RGBA")
-                    expected = source.resize(size, Image.Resampling.LANCZOS)
+                    expected = source.resize(size, Image.Resampling.LANCZOS).filter(
+                        ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+                    )
                     self.assertEqual(list(actual.getdata()), list(expected.getdata()),
                                      "Every Windows ICO frame must come directly from the original logo without blur.")
 
@@ -93,7 +96,9 @@ class PackagingBrandingTests(unittest.TestCase):
         # The installer side panel contains the original source pixels at native 96x96 size.
         with Image.open(ROOT / "assets" / "wizard-image.bmp") as actual_panel:
             self.assertEqual(actual_panel.size, (164, 314))
-            mark = source.resize((128, 128), Image.Resampling.LANCZOS)
+            mark = source.resize((128, 128), Image.Resampling.LANCZOS).filter(
+                ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+            )
             expected_panel = Image.new("RGB", (164, 314), (11, 24, 42))
             expected_panel.paste(mark, ((164 - mark.width) // 2, (314 - mark.height) // 2), mark)
             self.assertEqual(list(actual_panel.convert("RGB").getdata()), list(expected_panel.getdata()),
@@ -102,7 +107,9 @@ class PackagingBrandingTests(unittest.TestCase):
         # The small wizard badge must also be just the same fitted source image.
         with Image.open(ROOT / "assets" / "wizard-small.bmp") as actual_small:
             self.assertEqual(actual_small.size, (55, 55))
-            mark = source.resize((55, 55), Image.Resampling.LANCZOS)
+            mark = source.resize((55, 55), Image.Resampling.LANCZOS).filter(
+                ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+            )
             expected_small = Image.new("RGB", (55, 55), (11, 24, 42))
             expected_small.paste(mark, (0, 0), mark)
             self.assertEqual(list(actual_small.convert("RGB").getdata()), list(expected_small.getdata()),
@@ -144,6 +151,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertGreater(len(source), 0)
         self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
         self.assertIn("Image.Resampling.LANCZOS", desktop)
+        self.assertIn("ImageFilter.UnsharpMask", desktop)
         self.assertIn("def _apply_window_icon(window):", desktop)
 
     def test_compact_connect_dialog_confirms_password_below_and_hides_advanced_tls(self):
