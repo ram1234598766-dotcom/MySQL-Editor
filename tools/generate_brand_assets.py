@@ -39,12 +39,10 @@ def _render_mark(size: int) -> Image.Image:
 
 
 def _wizard_image() -> Image.Image:
-    """Place the supplied 128x128 logo at native resolution inside the installer panel."""
+    """High-quality fit of the supplied master logo inside the installer panel."""
     width, height = 164, 314
     image = Image.new("RGB", (width, height), NAVY)
-    with Image.open(LOGO_SOURCE) as source:
-        source.load()
-        logo = source.convert("RGBA")
+    logo = _contained_logo(128, 128)
     image.paste(
         logo,
         ((width - logo.width) // 2, (height - logo.height) // 2),
@@ -69,7 +67,7 @@ def main() -> None:
         (16, 16), (24, 24), (32, 32), (48, 48),
         (64, 64), (96, 96), (128, 128), (256, 256),
     ]
-    # Pre-render each ICO frame from the supplied JPEG using a high-quality downsample.
+    # Pre-render each ICO frame from the supplied high-resolution logo using a high-quality downsample.
     # Passing prepared frames keeps icon geometry identical across all embedded sizes.
     icon_frames = [_render_mark(size[0]) for size in icon_sizes]
     icon = next(frame for frame in icon_frames if frame.size == (256, 256))
