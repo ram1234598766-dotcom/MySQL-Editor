@@ -300,6 +300,24 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn("contact", privacy.lower())
 
 
+    def test_android_pipeline_builds_apk_only_without_app_bundles(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-exe-apk.yml").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        signing = (ROOT / "SIGNING.md").read_text(encoding="utf-8")
+
+        self.assertIn("gradle --no-daemon assembleDebug", workflow)
+        self.assertIn("gradle --no-daemon assembleRelease", workflow)
+        self.assertIn("dist/MySQLEditor-Mobile-release.apk", workflow)
+        self.assertIn("dist/MySQLEditor-Mobile-debug.apk", workflow)
+        self.assertNotIn("bundleDebug", workflow)
+        self.assertNotIn("bundleRelease", workflow)
+        self.assertNotIn(".aab", workflow)
+        self.assertNotIn(".aab", readme)
+        self.assertNotIn(".aab", signing)
+        self.assertNotIn("App Bundle", readme)
+        self.assertNotIn("App Bundle", signing)
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
