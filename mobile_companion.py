@@ -68,7 +68,7 @@ header{padding:18px 16px 12px;border-bottom:1px solid var(--line);position:stick
 @media(min-width:850px){.wrap{grid-template-columns:340px minmax(0,1fr);align-items:start}.editor{grid-column:2;grid-row:1/3}.connection{grid-column:1;grid-row:1}.result{grid-column:1/-1}.grid{grid-template-columns:1fr 1fr}.field.wide{grid-column:1/-1}}
 @media(max-width:420px){.wrap{padding:10px}.panel{padding:12px}.grid{grid-template-columns:1fr 1fr}.field.wide{grid-column:1/-1}header{padding:14px 12px 10px}}
 </style></head><body>
-<header><div class="rowhead"><div class="brand"><img class="brand-logo" src="/brand/mysql-editor-logo.jpg" alt="MySQL Editor logo"><div><h1>MySQL Editor <span class="badge">Android companion</span></h1><div class="sub">Responsive SQL workspace · session-only credentials</div></div></div><div id="connectionBadge" class="badge">Not connected</div></div></header>
+<header><div class="rowhead"><div class="brand"><img class="brand-logo" src="/brand/mysql-editor-logo.webp" alt="MySQL Editor logo"><div><h1>MySQL Editor <span class="badge">Android companion</span></h1><div class="sub">Responsive SQL workspace · session-only credentials</div></div></div><div id="connectionBadge" class="badge">Not connected</div></div></header>
 <main class="wrap">
 <section id="pairPanel" class="panel"><h2>Unlock and pair with desktop</h2><p class="muted">Enter the same MySQL Editor master password you set on Windows and the temporary code shown in Tools → Android / Mobile Companion. The Windows desktop rejects a wrong password. Compare the SHA-256 certificate fingerprint before connecting and keep both devices on the same trusted private network.</p><div class="field"><label for="masterPassword">MySQL Editor master password</label><div class="secret-control"><input id="masterPassword" type="password" autocomplete="current-password" aria-describedby="masterPasswordHint"><button id="masterPasswordToggle" type="button" aria-label="Show master password" aria-pressed="false">Show</button></div><span id="masterPasswordHint" class="hint">This must match the password configured on the Windows desktop. It is checked over HTTPS and is not saved on Android.</span></div><div class="field" style="margin-top:12px"><label for="pairCode">Temporary pairing code</label><input id="pairCode" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="10-digit code from desktop"></div><div class="actions"><button class="primary" id="pairBtn">Unlock and pair</button></div><div id="pairStatus" class="status" style="margin-top:12px">Both the master password and pairing code are required.</div></section>
 <section id="connectionPanel" class="panel connection hidden"><div class="rowhead"><h2>MySQL connection</h2><button id="disconnectBtn" class="danger">Disconnect</button></div><div class="grid"><div class="field"><label for="host">Host (as seen by desktop)</label><input id="host" value="localhost" autocomplete="off"></div><div class="field"><label for="port">Port</label><input id="port" value="3306" inputmode="numeric"></div><div class="field"><label for="user">Username</label><input id="user" autocomplete="username"></div><div class="field"><label for="password">Password (not saved)</label><div class="secret-control"><input id="password" type="password" autocomplete="current-password" aria-describedby="passwordHint"><button id="passwordToggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></div><span id="passwordHint" class="hint">Hidden by default and cleared after a successful connection.</span></div><div class="field wide"><label><input id="tlsVerify" type="checkbox" checked style="width:auto;margin-right:8px"> Require verified TLS to MySQL (recommended)</label><span class="hint">The MySQL server must present a certificate trusted by the desktop system or the CA file below.</span></div><div class="field wide"><label for="tlsCa">MySQL CA certificate path on desktop (optional)</label><input id="tlsCa" autocomplete="off" spellcheck="false" placeholder="C:\\certs\\mysql-ca.pem"><span class="hint">This path is read on the desktop computer, not on the phone.</span></div><div class="field wide"><label for="database">Database (optional)</label><input id="database" autocomplete="off"></div><div class="field wide"><label><input id="autocommit" type="checkbox" checked style="width:auto;margin-right:8px"> Auto-commit each statement</label></div></div><div class="actions"><button class="primary" id="connectBtn">Connect to MySQL</button></div><div class="hint">The desktop computer connects to MySQL. For a local database on that computer, use localhost.</div><div id="dbStatus" class="status" style="margin-top:10px">Not connected</div></section>
@@ -520,18 +520,18 @@ class MobileCompanionServer:
                     html = MOBILE_HTML.replace("<script>", f'<script nonce="{nonce}">', 1)
                     body = html.encode("utf-8")
                     self._send_bytes(200, body, "text/html; charset=utf-8", script_nonce=nonce)
-                elif path == "/brand/mysql-editor-logo.jpg":
+                elif path == "/brand/mysql-editor-logo.webp":
                     bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
                     logo_candidates = (
-                        bundle_root / "assets" / "mysql-editor-logo.jpg",
-                        Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.jpg",
+                        bundle_root / "assets" / "mysql-editor-logo.webp",
+                        Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.webp",
                     )
                     logo_path = next((candidate for candidate in logo_candidates if candidate.is_file()), None)
                     if logo_path is None:
                         self._json(404, {"ok": False, "error": "Brand logo is unavailable."})
                         return
                     try:
-                        self._send_bytes(200, logo_path.read_bytes(), "image/jpeg")
+                        self._send_bytes(200, logo_path.read_bytes(), "image/webp")
                     except OSError:
                         self._json(404, {"ok": False, "error": "Brand logo is unavailable."})
                 elif path == "/api/state":

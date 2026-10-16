@@ -7,7 +7,7 @@ from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
-LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"
+LOGO_SOURCE = ASSETS / "mysql-editor-logo.webp"
 
 NAVY = (11, 24, 42)
 DEEP_NAVY = (5, 14, 27)
@@ -82,7 +82,7 @@ def main() -> None:
     )
     _wizard_image().save(ASSETS / "wizard-image.bmp", format="BMP")
     _wizard_small().save(ASSETS / "wizard-small.bmp", format="BMP")
-    print("Generated Windows EXE, setup, wizard and shortcut icons from assets/mysql-editor-logo.jpg.")
+    print("Generated Windows EXE, setup, wizard and shortcut icons from assets/mysql-editor-logo.webp.")
 
 
 if __name__ == "__main__":

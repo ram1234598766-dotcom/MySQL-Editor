@@ -90,7 +90,7 @@ def _resize_logo_crisp(source_image, size):
 def _apply_window_icon(window):
     """Use the generated multi-size ICO, with the shared JPEG as a crisp fallback."""
     icon_path = _resource_path(Path("assets") / "mysqlidle.ico")
-    logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
+    logo_path = _resource_path(Path("assets") / "mysql-editor-logo.webp")
     icon_set = False
     if icon_path.is_file():
         try:
@@ -585,7 +585,7 @@ class ConnectDialog(tk.Toplevel):
         # Use the supplied MySQL Editor logo in a crisp, compact connection header.
         header = tk.Frame(self, bg="#0B182A", padx=12, pady=10)
         header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
-        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
+        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.webp")
         self.logo_source_image = None
         self.logo_image = None
         if logo_path.is_file():
@@ -1476,7 +1476,7 @@ class MySQLIDLE:
         header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=18, bd=0)
         header.pack(side=tk.TOP, fill=tk.X)
         self.brand_header = header
-        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
+        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.webp")
         self.brand_logo_source = None
         self.brand_logo_image = None
         self.brand_logo_display_image = None

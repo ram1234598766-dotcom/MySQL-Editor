@@ -134,7 +134,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertRegex(self.server.certificate_fingerprint, r"^([0-9A-F]{2}:){31}[0-9A-F]{2}$")
             self.assertIn("Android companion", body)
             self.assertIn("viewport", body)
-            self.assertIn('src="/brand/mysql-editor-logo.jpg"', body)
+            self.assertIn('src="/brand/mysql-editor-logo.webp"', body)
             self.assertIn('alt="MySQL Editor logo"', body)
             self.assertIn('id="masterPassword"', body)
             self.assertIn('id="masterPasswordToggle"', body)
@@ -156,16 +156,16 @@ class MobileCompanionHTTPTests(unittest.TestCase):
 
     def test_mobile_page_serves_original_logo_asset(self):
         with urlopen(
-            self.base + "/brand/mysql-editor-logo.jpg",
+            self.base + "/brand/mysql-editor-logo.webp",
             timeout=5,
             context=self.ssl_context,
         ) as response:
             data = response.read()
             self.assertEqual(response.status, 200)
-            self.assertTrue(response.headers.get("Content-Type", "").startswith("image/jpeg"))
+            self.assertTrue(response.headers.get("Content-Type", "").startswith("image/webp"))
             self.assertEqual(response.headers.get("Cache-Control"), "no-store, max-age=0")
 
-        expected = (Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.jpg").read_bytes()
+        expected = (Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.webp").read_bytes()
         self.assertEqual(data, expected, "Mobile companion must serve the exact shared logo asset.")
 
     def test_companion_refuses_to_start_without_master_password_verifier(self):

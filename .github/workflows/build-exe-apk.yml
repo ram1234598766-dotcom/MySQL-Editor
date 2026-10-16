@@ -14,7 +14,7 @@ on:
       - "android-app/**"
       - "tools/generate_brand_assets.py"
       - "tools/sync_logo_resources.py"
-      - "assets/mysql-editor-logo.jpg"
+      - "assets/mysql-editor-logo.webp"
   pull_request:
     paths:
       - ".github/workflows/build-exe-apk.yml"
@@ -26,7 +26,7 @@ on:
       - "android-app/**"
       - "tools/generate_brand_assets.py"
       - "tools/sync_logo_resources.py"
-      - "assets/mysql-editor-logo.jpg"
+      - "assets/mysql-editor-logo.webp"
   workflow_dispatch:
 
 permissions:

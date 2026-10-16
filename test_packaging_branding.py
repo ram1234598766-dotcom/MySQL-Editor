@@ -1,7 +1,7 @@
 """Packaging/UI resource contracts for the shared product logo."""
 from pathlib import Path
 import unittest
-from PIL import Image, ImageFilter, ImageChops
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent
 
@@ -15,12 +15,12 @@ class PackagingBrandingTests(unittest.TestCase):
                 self.assertIn("icon='assets/mysqlidle.ico'", source)
 
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
-        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
+        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.webp"', generator)
         self.assertIn("ImageFilter.UnsharpMask", generator)
-        self.assertTrue((ROOT / "assets" / "mysql-editor-logo.jpg").is_file())
+        self.assertTrue((ROOT / "assets" / "mysql-editor-logo.webp").is_file())
 
     def test_windows_ico_sizes_are_high_quality_resizes_of_the_high_resolution_master(self):
-        source_path = ROOT / "assets" / "mysql-editor-logo.jpg"
+        source_path = ROOT / "assets" / "mysql-editor-logo.webp"
         icon_path = ROOT / "assets" / "mysqlidle.ico"
         sizes = {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (96, 96), (128, 128), (256, 256)}
         with Image.open(source_path) as source_image:
@@ -79,7 +79,7 @@ class PackagingBrandingTests(unittest.TestCase):
     def test_setup_wizard_artwork_uses_the_same_logo_without_redesign(self):
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
         installer = (ROOT / "MySQLIDLE.iss").read_text(encoding="utf-8")
-        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
+        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.webp"', generator)
         self.assertIn("SetupIconFile=assets\\mysqlidle.ico", installer)
         self.assertIn("WizardImageFile=assets\\wizard-image.bmp", installer)
         self.assertIn("WizardSmallImageFile=assets\\wizard-small.bmp", installer)
@@ -89,7 +89,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertNotIn("BROWSE", generator)
         self.assertNotIn("EXPORT", generator)
 
-        source_path = ROOT / "assets" / "mysql-editor-logo.jpg"
+        source_path = ROOT / "assets" / "mysql-editor-logo.webp"
         with Image.open(source_path) as source_image:
             source = source_image.convert("RGBA")
 
@@ -118,7 +118,7 @@ class PackagingBrandingTests(unittest.TestCase):
     def test_main_workspace_renders_the_original_logo_with_refined_desktop_chrome(self):
         desktop = (ROOT / "mysql_idle.py").read_text(encoding="utf-8")
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
-        source = (ROOT / "assets" / "mysql-editor-logo.jpg").read_bytes()
+        source = (ROOT / "assets" / "mysql-editor-logo.webp").read_bytes()
 
         # The desktop shell uses a Figma-inspired dark workspace with a scaled
         # header rendering backed by the exact, unmodified original logo source.
@@ -143,13 +143,12 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn('text="SQL Console"', desktop)
         self.assertIn('text="Results"', desktop)
 
-        # The bundled artwork remains the exact 96x96 source PNG.
-        with Image.open(ROOT / "assets" / "mysql-editor-logo.jpg") as image:
-            self.assertGreaterEqual(image.width, 128)
-            self.assertGreaterEqual(image.height, 128)
-            self.assertEqual(image.format, "JPEG")
+        # The bundled artwork is the exact 256x256 source WebP.
+        with Image.open(ROOT / "assets" / "mysql-editor-logo.webp") as image:
+            self.assertEqual(image.size, (256, 256))
+            self.assertEqual(image.format, "WEBP")
         self.assertGreater(len(source), 0)
-        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
+        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.webp"', generator)
         self.assertIn("Image.Resampling.LANCZOS", desktop)
         self.assertIn("ImageFilter.UnsharpMask", desktop)
         self.assertIn("def _apply_window_icon(window):", desktop)
@@ -226,32 +225,30 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertNotIn("Tasks: desktopicon", source)
 
     def test_readme_logo_is_the_exact_shared_source_for_android_and_windows(self):
-        source_path = ROOT / "assets" / "mysql-editor-logo.jpg"
-        android_logo = ROOT / "android-app/app/src/main/res/drawable-nodpi/ic_mysqlidle_logo.jpg"
+        source_path = ROOT / "assets" / "mysql-editor-logo.webp"
+        android_logo = ROOT / "android-app/app/src/main/res/drawable-nodpi/ic_mysqlidle_logo.webp"
         self.assertTrue(source_path.is_file())
         self.assertTrue(android_logo.is_file())
         self.assertTrue((ROOT / "tools" / "sync_logo_resources.py").is_file())
         self.assertFalse((ROOT / "tools" / "generate_play_store_assets.py").exists())
 
         with Image.open(source_path) as source_image:
-            self.assertEqual(source_image.format, "JPEG")
+            self.assertEqual(source_image.format, "WEBP")
             self.assertGreaterEqual(source_image.width, 128)
             self.assertGreaterEqual(source_image.height, 128)
         with Image.open(android_logo) as generated:
-            self.assertEqual(generated.format, "JPEG")
+            self.assertEqual(generated.format, "WEBP")
             self.assertEqual(generated.size, (256, 256))
-            actual = generated.convert("RGB")
-        with Image.open(source_path) as source_image:
-            expected = source_image.convert("RGB").resize((256, 256), Image.Resampling.LANCZOS)
-            expected = expected.filter(ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2))
-        diff = ImageChops.difference(actual, expected)
-        mean_error = sum(diff.convert("RGB").resize((1, 1)).getpixel((0, 0))) / 3
-        self.assertLess(mean_error, 4.0, "Android icon should be a crisp resample of the shared logo.")
+        self.assertEqual(
+            android_logo.read_bytes(),
+            source_path.read_bytes(),
+            "Android must use the exact high-resolution shared logo bytes, not an upscaled/re-encoded JPG.",
+        )
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("![MySQL Editor logo](assets/mysql-editor-logo.jpg)", readme)
+        self.assertIn("![MySQL Editor logo](assets/mysql-editor-logo.webp)", readme)
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
-        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
+        self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.webp"', generator)
         self.assertNotIn("mysqlidle-logo-reference.webp", generator)
         workflow = (ROOT / ".github" / "workflows" / "build-exe-apk.yml").read_text(encoding="utf-8")
         self.assertIn("python tools/sync_logo_resources.py", workflow)
