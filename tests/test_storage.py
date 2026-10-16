@@ -82,3 +82,16 @@ def test_saved_profile_builds_complete_connection_config_without_changing_tls_po
         "save_profile": True,
     }
     assert not hasattr(profile, "password")
+
+
+def test_last_profile_setting_is_persisted_without_database_password(tmp_path: Path):
+    repo = LocalRepository(tmp_path / "settings.sqlite3")
+    profile = ConnectionProfile(id="recent-profile", name="Recent connection", username="reporter")
+    repo.save_profile(profile)
+    repo.set_setting("last_profile_id", profile.id)
+    repo.close()
+
+    reopened = LocalRepository(tmp_path / "settings.sqlite3")
+    assert reopened.get_setting("last_profile_id") == "recent-profile"
+    assert "password" not in {row[1] for row in reopened._db.execute("PRAGMA table_info(profiles)")}
+    reopened.close()
