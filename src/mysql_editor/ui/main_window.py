@@ -243,9 +243,9 @@ class MainWindow(QMainWindow):
         self.editors = QTabWidget()
         self.editors.setObjectName("editorTabs")
         self.editors.setTabsClosable(True)
+        self.editors.setTabPosition(QTabWidget.TabPosition.North)
         self.editors.tabCloseRequested.connect(self.close_query_tab)
         self.editors.currentChanged.connect(self._update_editor_actions)
-        center_layout.addWidget(self.editors, 4)
 
         result_panel = QWidget()
         result_layout = QVBoxLayout(result_panel)
@@ -295,10 +295,18 @@ class MainWindow(QMainWindow):
         self.result_message.setObjectName("mutedText")
         self.result_message.setWordWrap(True)
         result_layout.addWidget(self.result_message)
-        center_layout.addWidget(result_panel, 3)
+        self.editor_results_split = QSplitter(Qt.Orientation.Vertical)
+        self.editor_results_split.setObjectName("editorResultsSplit")
+        self.editor_results_split.addWidget(self.editors)
+        self.editor_results_split.addWidget(result_panel)
+        self.editor_results_split.setStretchFactor(0, 4)
+        self.editor_results_split.setStretchFactor(1, 3)
+        self.editor_results_split.setSizes([470, 300])
+        center_layout.addWidget(self.editor_results_split, 1)
         body.addWidget(self.center)
 
         self.inspector_tabs = QTabWidget()
+        self.inspector_tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.inspector_tabs.setObjectName("inspectorTabs")
         self.inspector_tabs.setMinimumWidth(245)
         self.inspector_tabs.setMaximumWidth(360)
@@ -402,6 +410,13 @@ class MainWindow(QMainWindow):
         if isinstance(sizes, (list, tuple)) and len(sizes) == self.main_split.count():
             try:
                 self.main_split.setSizes([max(1, int(value)) for value in sizes])
+            except (TypeError, ValueError):
+                pass
+
+        result_sizes = self._settings.value("ui/editorResultsSplitterSizes", [])
+        if isinstance(result_sizes, (list, tuple)) and len(result_sizes) == self.editor_results_split.count():
+            try:
+                self.editor_results_split.setSizes([max(1, int(value)) for value in result_sizes])
             except (TypeError, ValueError):
                 pass
 
@@ -1073,6 +1088,7 @@ class MainWindow(QMainWindow):
                 break
         self._settings.setValue("ui/windowGeometry", self.saveGeometry())
         self._settings.setValue("ui/mainSplitterSizes", self.main_split.sizes())
+        self._settings.setValue("ui/editorResultsSplitterSizes", self.editor_results_split.sizes())
         self._settings.setValue("ui/inspectorTab", self.inspector_tabs.currentIndex())
         self._settings.sync()
         self.worker.submit("disconnect", {})
