@@ -27,6 +27,13 @@ jobs:
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
           python -c "import mysql_editor.app; print('Application and complete Qt UI import graph passed')"
+      - name: Exercise Qt preferences and file-operation recovery
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "MySQLEditor-UISmokeData"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          python tools/smoke_test_ui.py
       - name: Create branded Windows icon
         run: python tools/build_brand_assets.py
       - name: Build application folder
