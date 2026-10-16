@@ -18,7 +18,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
         self.assertTrue((ROOT / "assets" / "mysql-editor-logo.jpg").is_file())
 
-    def test_windows_ico_sizes_are_direct_nearest_neighbor_resizes_of_the_original(self):
+    def test_windows_ico_sizes_are_high_quality_resizes_of_the_high_resolution_master(self):
         source_path = ROOT / "assets" / "mysql-editor-logo.jpg"
         icon_path = ROOT / "assets" / "mysqlidle.ico"
         sizes = {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (96, 96), (128, 128), (256, 256)}
@@ -93,7 +93,7 @@ class PackagingBrandingTests(unittest.TestCase):
         # The installer side panel contains the original source pixels at native 96x96 size.
         with Image.open(ROOT / "assets" / "wizard-image.bmp") as actual_panel:
             self.assertEqual(actual_panel.size, (164, 314))
-            mark = source.copy()
+            mark = source.resize((128, 128), Image.Resampling.LANCZOS)
             expected_panel = Image.new("RGB", (164, 314), (11, 24, 42))
             expected_panel.paste(mark, ((164 - mark.width) // 2, (314 - mark.height) // 2), mark)
             self.assertEqual(list(actual_panel.convert("RGB").getdata()), list(expected_panel.getdata()),
@@ -138,7 +138,7 @@ class PackagingBrandingTests(unittest.TestCase):
 
         # The bundled artwork remains the exact 96x96 source PNG.
         with Image.open(ROOT / "assets" / "mysql-editor-logo.jpg") as image:
-            self.assertEqual(image.size, (128, 128))
+            self.assertEqual(image.size, (660, 660))
             self.assertEqual(image.format, "JPEG")
         self.assertGreater(len(source), 0)
         self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
@@ -226,7 +226,7 @@ class PackagingBrandingTests(unittest.TestCase):
 
         with Image.open(source_path) as source_image:
             self.assertEqual(source_image.format, "JPEG")
-            self.assertEqual(source_image.size, (128, 128))
+            self.assertEqual(source_image.size, (660, 660))
         self.assertEqual(
             android_logo.read_bytes(),
             source_path.read_bytes(),
