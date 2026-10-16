@@ -95,7 +95,7 @@ python -m compileall -q src tests tools
 python -m pytest
 ~~~
 
-The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
+The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI runs an offscreen Qt UI smoke test for saved preferences and file-error recovery, builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
 
 ## Known v1 limitations
 
