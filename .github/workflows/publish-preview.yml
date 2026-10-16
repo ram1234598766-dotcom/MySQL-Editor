@@ -1,0 +1,78 @@
+name: Publish MySQL-Editor preview packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-preview.yml"
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Successful Build Windows EXE and Android APK run ID"
+        required: true
+        default: "38875778172"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-preview:
+    name: Publish clearly labelled preview packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select build run
+        id: run
+        shell: bash
+        env:
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "id=$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "id=38875778172" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download Windows build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MySQLEditor-Windows
+          path: release-assets
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download Android build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MySQLEditor-Android
+          path: android-assets
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare preview assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          apk="$(find android-assets -type f -name '*debug*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" release-assets/MySQLEditor-Android-DEBUG-preview.apk
+          test -s release-assets/MySQLEditor_Portable.exe
+          test -s release-assets/MySQLEditor-Setup.exe
+          test -s release-assets/MySQLEditor-Folder.zip
+          cat > release-assets/PREVIEW-NOTICE.txt <<'EOF'
+          MySQL-Editor preview build
+          The Android APK in this release is debug-signed for testing, NOT a production release-signed APK.
+          The Windows EXE and installer are unsigned unless a trusted code-signing certificate was configured.
+          These packages are published for testing only. Do not distribute as a production release.
+          EOF
+          cd release-assets
+          sha256sum MySQLEditor-Android-DEBUG-preview.apk MySQLEditor_Portable.exe MySQLEditor-Setup.exe MySQLEditor-Folder.zip PREVIEW-NOTICE.txt > SHA256SUMS
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ steps.run.outputs.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="preview-build-$RUN_ID"
+          gh release create "$tag" release-assets/MySQLEditor-Android-DEBUG-preview.apk release-assets/MySQLEditor_Portable.exe release-assets/MySQLEditor-Setup.exe release-assets/MySQLEditor-Folder.zip release-assets/PREVIEW-NOTICE.txt release-assets/SHA256SUMS             --repo "$REPOSITORY"             --title "MySQL-Editor Preview (Build $RUN_ID)"             --prerelease             --notes "Automated preview packages from successful CI run $RUN_ID. The Android APK is debug-signed and is not a production release APK. Configure Android release-signing secrets and run the main build workflow to publish a production-signed APK."
