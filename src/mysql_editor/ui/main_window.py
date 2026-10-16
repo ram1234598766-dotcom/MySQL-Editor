@@ -333,15 +333,16 @@ class MainWindow(QMainWindow):
             Path(__file__).resolve().parents[3],
             Path(getattr(sys, "_MEIPASS", ".")),
         ]:
-            image = root / "assets" / "mysql-editor-logo.webp"
-            if image.is_file():
-                pixmap = QPixmap(str(image))
-                if not pixmap.isNull():
-                    label.setPixmap(pixmap.scaled(
-                        34, 34, Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    ))
-                    return
+            for filename in ("mysql-editor-logo-transparent.png", "mysql-editor-logo.webp"):
+                image = root / "assets" / filename
+                if image.is_file():
+                    pixmap = QPixmap(str(image))
+                    if not pixmap.isNull():
+                        label.setPixmap(pixmap.scaled(
+                            34, 34, Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        ))
+                        return
         label.setText("◈")
         label.setObjectName("logoMark")
 
