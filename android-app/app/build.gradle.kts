@@ -14,6 +14,8 @@ val releaseSigningConfigured = listOf(
 ).all { !it.isNullOrBlank() }
 
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.takeIf { it > 0 }
+val explicitVersionCode = System.getenv("MYSQL_EDITOR_VERSION_CODE")?.toIntOrNull()?.takeIf { it > 0 }
+val safeVersionCode = explicitVersionCode ?: (100_000 + (ciBuildNumber ?: 1))
 
 android {
     namespace = "com.mysqlidle.mobile"
@@ -23,7 +25,7 @@ android {
         applicationId = "com.mysqlidle.mobile"
         minSdk = 24
         targetSdk = 36
-        versionCode = ciBuildNumber ?: 1
+        versionCode = safeVersionCode
         versionName = ciBuildNumber?.let { "3.0.0+$it" } ?: "3.0.0"
     }
 
