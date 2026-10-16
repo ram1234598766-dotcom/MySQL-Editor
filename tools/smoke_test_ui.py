@@ -80,6 +80,7 @@ def main():
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
         first.main_split.setSizes([440, 320])
+        first.editor_results_split.setSizes([420, 300])
         app.processEvents()
         first.inspector_tabs.setCurrentIndex(1)
 
@@ -129,7 +130,9 @@ def main():
         assert int(settings.value("ui/editorFontSize", 0)) == 11
         assert int(settings.value("ui/inspectorTab", -1)) == 1
         saved_sizes = settings.value("ui/mainSplitterSizes", [])
+        result_sizes = settings.value("ui/editorResultsSplitterSizes", [])
         assert len(saved_sizes) == 2 and all(int(size) > 0 for size in saved_sizes)
+        assert len(result_sizes) == 2 and all(int(size) > 0 for size in result_sizes)
 
         second, second_repo = make_window(root / "settings-two.sqlite3")
         second.show()
@@ -137,6 +140,8 @@ def main():
         restored = second._current_editor()
         assert restored is not None and restored.font().pointSize() == 11
         assert second.inspector_tabs.currentIndex() == 1
+        assert len(second.editor_results_split.sizes()) == 2
+        assert all(size > 0 for size in second.editor_results_split.sizes())
         second.close()
         second_repo.close()
         app.quit()
