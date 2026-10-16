@@ -52,6 +52,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from decimal import Decimal
 from pathlib import Path
+from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from feature_governor import APPROVAL_TTL_SECONDS, FeatureGovernor
@@ -81,9 +82,9 @@ def _resource_path(relative_path):
 
 
 def _apply_window_icon(window):
-    """Use the generated multi-size ICO where supported, avoiding DPI-induced blur."""
+    """Use the generated multi-size ICO, with the shared JPEG as a crisp fallback."""
     icon_path = _resource_path(Path("assets") / "mysqlidle.ico")
-    logo_path = _resource_path(Path("assets") / "mysqlidle-logo.png")
+    logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
     icon_set = False
     if icon_path.is_file():
         try:
@@ -94,9 +95,9 @@ def _apply_window_icon(window):
             pass
     if not icon_set and logo_path.is_file():
         try:
-            # PNG is a fallback for platforms that cannot use the Windows ICO.
-            # Keep a strong reference so Tk does not garbage-collect the icon.
-            window._mysqlidle_icon_photo = tk.PhotoImage(file=str(logo_path))
+            with Image.open(logo_path) as source_image:
+                icon_image = source_image.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+            window._mysqlidle_icon_photo = ImageTk.PhotoImage(icon_image, master=window)
             window.iconphoto(True, window._mysqlidle_icon_photo)
         except (tk.TclError, OSError):
             # Title-bar icon is optional when assets are missing from a source install.
@@ -575,16 +576,18 @@ class ConnectDialog(tk.Toplevel):
                 self.destroy()
                 return
 
-        # Use the original logo at native 96x96 size in a clean branded header.
+        # Use the supplied MySQL Editor logo in a crisp, compact connection header.
         header = tk.Frame(self, bg="#0B182A", padx=12, pady=10)
         header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
-        logo_path = _resource_path(Path("assets") / "mysqlidle-logo.png")
+        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
         self.logo_source_image = None
         self.logo_image = None
         if logo_path.is_file():
             try:
-                self.logo_source_image = tk.PhotoImage(file=str(logo_path))
-                self.logo_image = self.logo_source_image
+                with Image.open(logo_path) as source_image:
+                    self.logo_source_image = source_image.convert("RGBA")
+                display_image = self.logo_source_image.resize((64, 64), Image.Resampling.LANCZOS)
+                self.logo_image = ImageTk.PhotoImage(display_image, master=self)
                 tk.Label(
                     header, image=self.logo_image, bg="#0B182A", bd=0,
                     highlightthickness=0,
@@ -1467,18 +1470,18 @@ class MySQLIDLE:
         header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=18, bd=0)
         header.pack(side=tk.TOP, fill=tk.X)
         self.brand_header = header
-        logo_path = _resource_path(Path("assets") / "mysqlidle-logo.png")
+        logo_path = _resource_path(Path("assets") / "mysql-editor-logo.jpg")
         self.brand_logo_source = None
         self.brand_logo_image = None
+        self.brand_logo_display_image = None
         self.brand_logo_label = None
         if logo_path.is_file():
             try:
-                self.brand_logo_source = tk.PhotoImage(file=str(logo_path))
-                source = self.brand_logo_source
-                sx = max(1, (source.width() + 33) // 34)
-                sy = max(1, (source.height() + 33) // 34)
+                with Image.open(logo_path) as source_image:
+                    self.brand_logo_source = source_image.convert("RGBA")
                 self.brand_logo_image = self.brand_logo_source
-                self.brand_logo_display_image = source.subsample(sx, sy)
+                display_image = self.brand_logo_source.resize((34, 34), Image.Resampling.LANCZOS)
+                self.brand_logo_display_image = ImageTk.PhotoImage(display_image, master=self.root)
                 logo_box = tk.Frame(header, bg=c["surface"], width=34, height=34)
                 logo_box.pack(side=tk.LEFT, padx=(0, 14))
                 logo_box.pack_propagate(False)
@@ -1490,6 +1493,7 @@ class MySQLIDLE:
             except (tk.TclError, OSError):
                 self.brand_logo_source = None
                 self.brand_logo_image = None
+                self.brand_logo_display_image = None
 
         brand_copy = tk.Frame(header, bg=c["surface"], bd=0)
         brand_copy.pack(side=tk.LEFT, fill=tk.Y)
