@@ -1699,6 +1699,7 @@ class MySQLIDLE:
         self.text.tag_configure("ok", foreground=c["success"])
         self.text.tag_configure("info", foreground=c["muted"])
         self.text.tag_raise("sel")
+        self.highlight_input()
 
         # Saved SQL snippet shelf.
         shelf = tk.Frame(
@@ -1832,6 +1833,13 @@ class MySQLIDLE:
             padx=8, pady=5, state=tk.DISABLED,
             highlightthickness=1, highlightbackground=c["line"],
         )
+        self.output_text.tag_configure("kw", foreground="#62A4FF")
+        self.output_text.tag_configure("str", foreground="#3DD194")
+        self.output_text.tag_configure("comment", foreground="#9CB0CC")
+        self.output_text.tag_configure("prompt", foreground="#3687F5")
+        self.output_text.tag_configure("error", foreground=c["danger"])
+        self.output_text.tag_configure("ok", foreground=c["success"])
+        self.output_text.tag_configure("info", foreground=c["muted"])
         self.output_text.pack(fill=tk.X)
 
         self.context_menu = tk.Menu(self.root, tearoff=0)
@@ -2132,7 +2140,36 @@ class MySQLIDLE:
         self.write("SQL editor ready. Press Ctrl+Enter to run the selected SQL or complete buffer.\n", "info")
 
     def show_help(self):
-        self.write(HELP_TEXT + "\n", "info")
+        """Display keyboard and editor guidance in a readable, scrollable window."""
+        win = tk.Toplevel(self.root, bg="#090E17")
+        _apply_window_icon(win)
+        win.title(f"{APP_NAME} · Help")
+        win.geometry("760x560")
+        win.minsize(560, 380)
+        win.transient(self.root)
+        outer = tk.Frame(win, bg="#090E17", padx=16, pady=14)
+        outer.pack(fill=tk.BOTH, expand=True)
+        tk.Label(
+            outer, text="MySQL Editor · Help", bg="#090E17", fg="#E8F2FF",
+            font=("Segoe UI", 15, "bold"), anchor="w",
+        ).pack(fill=tk.X, pady=(0, 8))
+        viewer = tk.Text(
+            outer, wrap=tk.WORD, bg="#060A11", fg="#E8F2FF",
+            font=("Segoe UI", 10), relief=tk.FLAT, bd=0, padx=12, pady=10,
+            highlightthickness=1, highlightbackground="#29384F",
+        )
+        scroll = tk.Scrollbar(outer, command=viewer.yview, bg="#172130", troughcolor="#060A11")
+        viewer.configure(yscrollcommand=scroll.set)
+        viewer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        viewer.insert("1.0", HELP_TEXT)
+        viewer.configure(state=tk.DISABLED)
+        tk.Button(
+            outer, text="Close", command=win.destroy, bg="#3687F5",
+            fg="#FFFFFF", activebackground="#2B6CC0", relief=tk.FLAT, bd=0,
+            padx=14, pady=7, cursor="hand2",
+        ).pack(side=tk.BOTTOM, anchor="e", pady=(10, 0))
+        win.grab_set()
 
     def clear_shell(self):
         """Clear SQL text and activity output, never insert a shell prompt."""
@@ -2507,15 +2544,15 @@ class MySQLIDLE:
                 tree.configure(columns=("status",), show="headings")
                 tree.heading("status", text="Status")
                 tree.column("status", width=760, anchor="w", stretch=True)
-                tree.insert("", tk.END, values=(f"Statement executed in {elapsed:.3f} s; no row set was returned.",))
+                tree.insert("", tk.END, values=(f"Statement completed · {row_count:,} affected row(s) · {elapsed:.3f} s.",))
 
         if row_count == 0 and columns:
             self.result_meta_var.set(f"0 rows · {elapsed:.3f} s · {len(columns)} columns")
             self.write(f"Query completed: empty result set ({elapsed:.3f} s).\n", "info")
             return
         if not columns:
-            self.result_meta_var.set(f"Statement completed · {elapsed:.3f} s")
-            self.write(f"Statement completed ({elapsed:.3f} s); no result rows were returned.\n", "ok")
+            self.result_meta_var.set(f"Statement completed · {row_count:,} affected row(s) · {elapsed:.3f} s")
+            self.write(f"Statement completed; {row_count:,} affected row(s) in {elapsed:.3f} s.\n", "ok")
             return
 
         self.result_meta_var.set(
