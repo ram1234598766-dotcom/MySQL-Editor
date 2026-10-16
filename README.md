@@ -9,6 +9,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 ## Contents
 
 - [Highlights](#highlights)
+- [UX and upgrade roadmap](#ux-and-upgrade-roadmap)
 - [Platform and scope](#platform-and-scope)
 - [Download a Windows build](#download-a-windows-build)
 - [Quick start](#quick-start)
@@ -55,6 +56,14 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - CI includes lint, compile checks, unit/integration tests, a Windows UI smoke test, launch tests, installer/uninstaller tests, and dependency auditing.
 - Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
+
+## UX and upgrade roadmap
+
+The next planned quality phase is documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. It covers the visual design system, a restrained colour palette, reusable UI styling, smooth but purposeful animation, a Reduce Motion preference, deeper SQL-editor completion, clearer connection and schema workflows, improved result handling, accessibility, reliability, dependency compatibility, and staged Windows release verification.
+
+The intended visual direction is a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and short transitions that never block work. The plan proposes motion tokens and explicit checks for keyboard focus, interrupted animations, high-DPI layouts, and result-grid performance.
+
+**Roadmap status:** planned—not a claim that all visual redesign, theme switching, animation utilities, or future editor features already exist. Implement each phase through focused pull requests with regression tests and visual verification. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
@@ -378,6 +387,7 @@ SQL snippets, query results, credentials, production connection strings, and scr
 - [Privacy policy](PRIVACY_POLICY.md)
 - [Windows signing guide](WINDOWS_SIGNING.md)
 - [Desktop implementation plan](DESKTOP_REBUILD_PLAN.md)
+- [Advanced UX, motion, and engineering upgrade roadmap](UPGRADE_ROADMAP.md)
 - [Qt for Python / PySide6](https://doc.qt.io/qtforpython-6/)
 - [PySide6 deployment with PyInstaller](https://doc.qt.io/qtforpython-6/deployment/deployment-pyinstaller.html)
 - [MySQL Connector/Python documentation](https://dev.mysql.com/doc/connector-python/en/)
