@@ -6,8 +6,8 @@ MySQL IDLE provides a lightweight, IDLE-style desktop shell for writing and runn
 
 ![MySQL IDLE logo](assets/mysqlidle-logo.png)
 
-[![Build Windows EXE and Android APK](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/build-exe-apk.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/build-exe-apk.yml)
-[![Security checks](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/security.yml)
+[![Build Windows EXE and Android APK](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml)
+[![Security checks](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml)
 
 ---
 
@@ -74,7 +74,7 @@ These controls reduce risk but do not replace least-privilege database accounts,
 
 ## Latest downloads
 
-Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-IDLE/releases) and select the newest successful **MySQL IDLE 3.0 Build N** release. Release numbers increase as CI runs; don't rely on an older hard-coded build number. Each release includes a `SHA256SUMS` manifest.
+Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases) and select the newest successful **MySQL IDLE 3.0 Build N** release. Release numbers increase as CI runs; don't rely on an older hard-coded build number. Each release includes a `SHA256SUMS` manifest.
 
 | Package | Asset filename | Intended use |
 | --- | --- | --- |
@@ -115,7 +115,7 @@ The APK is signed and the release workflow checks its signature, target API, per
 
 ## Install on Windows
 
-1. Download `MySQLIDLE-Setup.exe` from the [latest successful GitHub release](https://github.com/ram1234598766-dotcom/MySQL-IDLE/releases).
+1. Download `MySQLIDLE-Setup.exe` from the [latest successful GitHub release](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
 2. Run the installer. The default installation is under your Windows user's local application-data programs directory and is designed for per-user installation.
 3. Use the Start Menu or desktop shortcut to launch **MySQL IDLE**. The branded **Connect to MySQL** page opens automatically.
 4. On first launch, create a master password and re-enter the same password in the confirmation field immediately below it. Then fill in the MySQL/MariaDB connection fields and select **Connect**.
@@ -133,7 +133,7 @@ The installer creates desktop and Start Menu shortcuts. Uninstall uses Inno Setu
 The following commands are for PowerShell on Windows, from a clone of this repository:
 
 ```powershell
-git clone https://github.com/ram1234598766-dotcom/MySQL-IDLE.git
+git clone https://github.com/ram1234598766-dotcom/MySQL-Editor.git
 Set-Location MySQL-IDLE
 
 py -3.15 --version
@@ -285,7 +285,7 @@ The Android app is a companion interface; **the MySQL connection is made by the 
 
 ### On Android
 
-1. Install the signed `MySQLIDLE-Mobile-release.apk` from the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-IDLE/releases).
+1. Install the signed `MySQLIDLE-Mobile-release.apk` from the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
 2. Open MySQL IDLE Mobile.
 3. Enter the HTTPS address shown on Windows (for example, `https://192.168.1.20:8765`).
 4. Type the full SHA-256 certificate fingerprint shown on the desktop. Compare it carefully; do not accept a mismatch.
@@ -415,7 +415,7 @@ The GitHub Actions workflows run checks for the source and packaged application,
 - Windows build and regression tests, including installer launch, desktop shortcut checks, and uninstall cleanup.
 - Android package signature verification, permission auditing, and emulator install/launch checks when the appropriate release signing configuration is available.
 
-See the [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/build-exe-apk.yml) and [Security workflow](https://github.com/ram1234598766-dotcom/MySQL-IDLE/actions/workflows/security.yml) for current results.
+See the [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml) and [Security workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml) for current results.
 
 ## Troubleshooting
 
@@ -443,7 +443,7 @@ See the [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-IDLE/acti
 
 ### Android reports “This app is harmful”
 
-Cancel installation and do not override the warning. The presence of a valid signature, passing build checks, or a new version cannot guarantee Google's classification. Confirm that the APK came from the official [MySQL-IDLE release page](https://github.com/ram1234598766-dotcom/MySQL-IDLE/releases), retain the warning details, and request review using [Google's app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033). Do not disable Play Protect or use repackaging tricks to evade it.
+Cancel installation and do not override the warning. The presence of a valid signature, passing build checks, or a new version cannot guarantee Google's classification. Confirm that the APK came from the official [MySQL-IDLE release page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases), retain the warning details, and request review using [Google's app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033). Do not disable Play Protect or use repackaging tricks to evade it.
 
 ### Script or query behavior is unexpected
 
@@ -512,4 +512,4 @@ No explicit open-source license file is currently present in the repository. Unl
 
 ## Editable UI concepts
 
-Cross-platform desktop and Android concepts are available in [Figma](https://www.figma.com/design/EFFQpRTE8pKybt1lQR0eQH).
+The Windows and Android workspace concepts are maintained in [Figma](https://www.figma.com/design/EFFQpRTE8pKybt1lQR0eQH).
