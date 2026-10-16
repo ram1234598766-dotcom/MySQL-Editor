@@ -1010,6 +1010,7 @@ class MainWindow(QMainWindow):
             self.repository.set_setting("last_profile_id", profile["id"])
             self.status.setText("Connection profile and password saved in Windows Credential Manager.")
         except Exception as exc:
+            self.repository.set_setting("last_profile_id", "")
             QMessageBox.warning(
                 self, "Profile not saved",
                 "Connected successfully, but the profile/password was not saved securely. "
