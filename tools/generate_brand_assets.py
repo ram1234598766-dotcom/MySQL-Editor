@@ -27,7 +27,7 @@ def _contained_logo(max_width: int, max_height: int) -> Image.Image:
     resized = logo.resize(size, Image.Resampling.LANCZOS)
     # Lanczos preserves detail; a light unsharp mask restores edge contrast after
     # downsampling, particularly at Windows shell-icon and installer sizes.
-    return resized.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+    return resized.filter(ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2))
 
 
 def _render_mark(size: int) -> Image.Image:
