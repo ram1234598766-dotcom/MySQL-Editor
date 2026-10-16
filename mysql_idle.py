@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-MySQL Editor - an IDLE-style desktop shell for MySQL / MariaDB.
+MySQL Editor - a dark, Figma-inspired SQL workspace for MySQL / MariaDB.
 
-Looks and behaves like Python's IDLE: one white window, a menu bar on top,
-and a live `mysql>` prompt where you type SQL. Results are printed as
-mysql-style ASCII tables, and can also be opened in a sortable grid window.
+The desktop UI is a multiline SQL editor with line numbers, SQL syntax
+highlighting, a guarded Run SQL action, saved snippets, a result grid, and
+an activity panel. It uses a background worker for database operations.
+An optional Android companion connects to a temporary HTTPS service hosted
+by the Windows desktop.
 
 Setup
 -----
@@ -22,16 +24,15 @@ For a single-file executable instead, use:
 
 Notes
 -----
-* No password is stored in this file. You type it in the Connect dialog.
-* Host / port / user / database are remembered in the per-user settings file.
-  SQL command history remains in memory by default and is not persisted. Set
-  MYSQLIDLE_SAVE_HISTORY=1 before launch to opt into SQL history persistence.
-  Passwords are never saved.
-* SQL runs on a dedicated worker thread so the window remains responsive.
-* Query results are streamed in batches to a temporary CSV file; only a small
-  preview is retained in RAM. Temporary result files are removed on normal exit.
-* The shell keeps a bounded number of lines to prevent unbounded UI memory use.
-* The `DELIMITER` command (stored-procedure scripts) is not supported.
+* MySQL account passwords are not saved in the app's connection preferences.
+* The local master password is stored as a salted verifier, not plaintext.
+* Host / port / user / database are remembered in per-user settings.
+* Query history is kept in memory by default; persistent history is opt-in
+  through MYSQLIDLE_SAVE_HISTORY=1.
+* SQL runs on a dedicated worker thread so the window stays responsive.
+* Query results are streamed in batches to a temporary CSV file. The workspace
+  previews rows in a grid; the complete result remains available for CSV export.
+* The editor does not provide MySQL's DELIMITER command for stored procedures.
 * Tools > Android / Mobile Companion starts a temporary, paired web UI for Android.
 """
 
@@ -164,9 +165,9 @@ MAX_COMPLETION_IDENTIFIERS = 20000
 
 PS1 = "mysql> "          # main prompt
 PS2 = "    -> "          # continuation prompt
-MAX_DISPLAY_ROWS = 1000  # rows retained for shell preview; full results are spooled to disk
+MAX_DISPLAY_ROWS = 1000  # rows retained for the workspace preview; full results are spooled to disk
 MAX_GRID_ROWS = 5000     # rows loaded into the grid window
-MAX_CELL_WIDTH = 80      # longer cell text is cut with "..." in the shell
+MAX_CELL_WIDTH = 80      # long cells are truncated in the sortable grid preview
 
 KEYWORDS = """
 ADD ALL ALTER AND AS ASC AUTO_INCREMENT AVG BEGIN BETWEEN BIGINT BOOLEAN BY CALL CASE CHARSET
@@ -192,36 +193,38 @@ _NAV_KEYS = {
     "Meta_L", "Meta_R", "Menu", "Insert", "Pause", "Print", "ISO_Level3_Shift",
 }
 
-HELP_TEXT = """\
-Shell commands (no ';' needed):
-  help            show this text
-  clear / cls     clear the shell
-  exit / quit     close the program
-  \\c              cancel the statement you are typing
+HELP_TEXT = """\\
+SQL editor workflow:
+  Ctrl+Enter       run selected SQL, or the full editor buffer
+  Enter            insert a new line in the SQL editor
+  Ctrl+N           open Connect to MySQL
+  Ctrl+S           save the SQL editor buffer as a .sql file
+  Ctrl+L           clear the editor and activity output
+  Ctrl+Break       cancel the active MySQL query (server permissions apply)
+  F5               choose and run a .sql script
+  F6               open the last result in a sortable grid window
 
-SQL statements end with ';' and may span several lines (the prompt changes
-to '    ->' until the statement is finished).
+SQL tools:
+  Ctrl+Shift+F     format SQL locally
+  Ctrl+Shift+E     prepare EXPLAIN for one SELECT; review before execution
+  Ctrl+Shift+C     copy the selected SQL or the current buffer
+  Tab              autocomplete SQL keywords and known database identifiers
+  Ctrl +/-         zoom the editor text
+  SQL Console      run multi-statement input with or without a trailing semicolon
+  Query history    select a previous query from the workspace sidebar
+  Saved snippets   insert locally saved SQL snippets
+  Schema explorer  list databases/tables after connecting
 
-Keys:
-  Enter           run the statement      Shift+Enter  new line inside a statement
-  Up / Down       command history        Alt+P / Alt+N  (same)
-  Tab             autocomplete keywords, databases, tables and columns
-  Esc             clear the current line
-  Ctrl+N          connect                Ctrl+S  save shell log
-  F5              run a .sql script      F6      show last result in a grid
-  Ctrl+L          clear shell            Ctrl +/-  zoom text
-  Ctrl+Shift+F    format current SQL      Ctrl+Shift+E  prepare EXPLAIN SELECT
-  Ctrl+Shift+C    copy current SQL
-  Ctrl+Break      cancel the active MySQL query (server permissions apply)
+Safety and performance:
+  High-impact SQL is reviewed by Feature Governance before the worker runs it.
+  Results stream in batches; the result grid displays the retained preview.
+  The complete result is kept in a temporary CSV for export.
+  SQL history is in memory by default; saved snippets are stored locally.
+  The DELIMITER command for stored-procedure scripts is not supported.
 
 Tools:
-  Android / Mobile Companion  use a phone browser on the same trusted private Wi-Fi
-  Help > Check Environment    show runtime and diagnostic paths
-
-Performance:
-  Results stream in batches; only the first 1000 rows are shown in the shell.
-  Full results are spooled to a temporary CSV for export; the grid loads at
-  most 5000 rows. Old shell lines and command history are bounded in memory.
+  Android / Mobile Companion  pair a phone on the same trusted private network
+  Help > Check Environment    inspect runtime and diagnostic paths
 """
 
 
@@ -2759,9 +2762,9 @@ class MySQLIDLE:
     # --------------------------------------------------------- menu actions --
 
     def inject(self, sql):
-        """Type a statement into the prompt and run it, as if the user had typed it."""
+        """Place a statement in the SQL editor and run it through the guarded worker."""
         self.pending = ""
-        self.with_output(lambda: None)      # fresh 'mysql> ' prompt
+        self.with_output(lambda: None)      # keep the activity pane independent of SQL text
         self.set_input(sql)
         self.submit()
         self.text.focus_set()
@@ -3007,7 +3010,7 @@ class MySQLIDLE:
     def menu_about(self):
         messagebox.showinfo(
             f"About {APP_NAME}",
-            f"{APP_NAME} {APP_VERSION}\nAn IDLE-style shell for MySQL / MariaDB.\n\n"
+            f"{APP_NAME} {APP_VERSION}\nA desktop SQL workspace for MySQL / MariaDB.\n\n"
             f"Python {os.sys.version.split()[0]}  |  PyMySQL {getattr(pymysql, '__version__', '?')}",
             parent=self.root,
         )
@@ -3204,7 +3207,7 @@ def main():
         root.withdraw()
         _apply_window_icon(root)
         app = MySQLIDLE(root)
-        # Keep the shell hidden until the single Connect to MySQL page completes
+        # Keep the SQL workspace hidden until the Connect to MySQL page completes
         # its local master-password check and database connection form.
         root.after_idle(app.connect_dialog)
         root.mainloop()
