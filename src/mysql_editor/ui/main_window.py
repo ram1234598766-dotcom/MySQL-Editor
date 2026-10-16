@@ -1,0 +1,926 @@
+"""Main SQL workspace: query tabs, schema navigation, results and local query tools."""
+
+from __future__ import annotations
+
+import uuid
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
+    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
+    QTabWidget, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+)
+
+from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
+from mysql_editor.database import MAX_PREVIEW_ROWS, DatabaseWorker
+from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
+from mysql_editor.ui.connection_dialog import ConnectionDialog
+from mysql_editor.ui.editor import SqlEditor
+
+
+class ResultsModel(QAbstractTableModel):
+    def __init__(self, headers=None, rows=None, parent=None):
+        super().__init__(parent)
+        self.headers = list(headers or [])
+        self.rows = list(rows or [])
+
+    def update(self, headers, rows):
+        self.beginResetModel()
+        self.headers = list(headers)
+        self.rows = list(rows)
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.headers)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        value = self.rows[index.row()][index.column()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return "(NULL)" if value is None else str(value)
+        if role == Qt.ItemDataRole.ForegroundRole and value is None:
+            return QColor("#71839b")
+        if role == Qt.ItemDataRole.TextAlignmentRole and isinstance(value, (int, float, Decimal)):
+            return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal and section < len(self.headers):
+            return self.headers[section]
+        if orientation == Qt.Orientation.Vertical:
+            return str(section + 1)
+        return None
+
+    def sort(self, column, order=Qt.SortOrder.AscendingOrder):
+        if column >= len(self.headers):
+            return
+        self.layoutAboutToBeChanged.emit()
+
+        def sort_key(row):
+            value = row[column]
+            if value is None:
+                return (1, 0, "")
+            try:
+                return (0, 0, Decimal(str(value)))
+            except (InvalidOperation, ValueError):
+                return (0, 1, str(value).casefold())
+
+        self.rows.sort(key=sort_key, reverse=order == Qt.SortOrder.DescendingOrder)
+        self.layoutChanged.emit()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, worker: DatabaseWorker, repository: LocalRepository,
+                 credentials: CredentialStore, profile: dict, config: dict, connect_result: dict):
+        super().__init__()
+        self.worker = worker
+        self.repository = repository
+        self.credentials = credentials
+        self.profile = profile
+        self.config = config
+        self.connect_result = connect_result
+        self._jobs: dict[str, tuple[str, dict]] = {}
+        self._query_running = False
+        self._current_result_id: str | None = None
+        self._query_results: list[dict] = []
+        self._last_duration = 0
+        self._last_sql = ""
+        self._last_saved_paths: dict[int, str] = {}
+        self.setWindowTitle("MySQL Editor")
+        self.setMinimumSize(1120, 720)
+        self.resize(1500, 940)
+        self._set_icon()
+        self.worker.completed.connect(self._on_worker_completed)
+        self.worker.activity.connect(self._on_activity)
+        self._build_ui()
+        self._build_menus()
+        self.new_query_tab()
+        self._update_connection_status()
+        QTimer.singleShot(150, self.refresh_schema)
+
+    def _set_icon(self):
+        import sys
+        candidates = [
+            Path(__file__).resolve().parents[3] / "assets" / "mysql-editor.ico",
+            Path(getattr(sys, "_MEIPASS", ".")) / "assets" / "mysql-editor.ico",
+        ]
+        for item in candidates:
+            if item.is_file():
+                self.setWindowIcon(QIcon(str(item)))
+                return
+        for item in [
+            Path(__file__).resolve().parents[3] / "assets" / "mysql-editor-logo.webp",
+            Path(getattr(sys, "_MEIPASS", ".")) / "assets" / "mysql-editor-logo.webp",
+        ]:
+            if item.is_file():
+                self.setWindowIcon(QIcon(str(item)))
+                return
+
+    def _build_ui(self):
+        root = QWidget()
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        top = QWidget()
+        top.setObjectName("topBar")
+        top_layout = QHBoxLayout(top)
+        top_layout.setContentsMargins(18, 9, 18, 9)
+        logo = QLabel()
+        logo.setFixedSize(36, 36)
+        self._set_brand_logo(logo)
+        brand = QVBoxLayout()
+        name = QLabel("MySQL Editor")
+        name.setObjectName("brandTitle")
+        subtitle = QLabel("DESKTOP SQL WORKSPACE")
+        subtitle.setObjectName("brandSubtitle")
+        brand.addWidget(name)
+        brand.addWidget(subtitle)
+        top_layout.addWidget(logo)
+        top_layout.addLayout(brand)
+        top_layout.addStretch(1)
+        self.connection_badge = QLabel()
+        self.connection_badge.setObjectName("connectionBadge")
+        top_layout.addWidget(self.connection_badge)
+        switch = QPushButton("Switch connection")
+        switch.clicked.connect(self.open_connection_dialog)
+        top_layout.addWidget(switch)
+        outer.addWidget(top)
+
+        body = QSplitter(Qt.Orientation.Horizontal)
+        body.setObjectName("mainSplit")
+        nav = QWidget()
+        nav.setObjectName("navigationPanel")
+        nav.setMinimumWidth(205)
+        nav.setMaximumWidth(285)
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(12, 18, 12, 14)
+        nav_layout.setSpacing(7)
+        nav_title = QLabel("WORKSPACE")
+        nav_title.setObjectName("sectionLabel")
+        nav_layout.addWidget(nav_title)
+        for label, icon in [
+            ("SQL Editor", "▤"), ("Connections", "◇"), ("Schema explorer", "▦"),
+            ("Query history", "◷"), ("Saved queries", "☆"),
+        ]:
+            button = QToolButton()
+            button.setText(f"{icon}   {label}")
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            button.setObjectName("navButton")
+            button.setMinimumHeight(39)
+            button.clicked.connect(lambda checked=False, value=label: self._navigate(value))
+            nav_layout.addWidget(button)
+        nav_layout.addSpacing(14)
+        section = QLabel("ACTIVE CONNECTION")
+        section.setObjectName("sectionLabel")
+        nav_layout.addWidget(section)
+        self.connection_details = QLabel()
+        self.connection_details.setObjectName("mutedText")
+        self.connection_details.setWordWrap(True)
+        nav_layout.addWidget(self.connection_details)
+        nav_layout.addStretch(1)
+        safety = QLabel("LOCAL-FIRST\nCredentials in Windows Credential Manager\nNo account or cloud relay")
+        safety.setObjectName("securityNotice")
+        safety.setWordWrap(True)
+        nav_layout.addWidget(safety)
+        body.addWidget(nav)
+
+        self.center = QWidget()
+        center_layout = QVBoxLayout(self.center)
+        center_layout.setContentsMargins(18, 17, 18, 10)
+        center_layout.setSpacing(9)
+        heading_row = QHBoxLayout()
+        heading_box = QVBoxLayout()
+        title = QLabel("Query workspace")
+        title.setObjectName("pageTitle")
+        caption = QLabel("Write SQL, inspect results, and manage your MySQL schema.")
+        caption.setObjectName("mutedText")
+        heading_box.addWidget(title)
+        heading_box.addWidget(caption)
+        heading_row.addLayout(heading_box, 1)
+        self.format_button = QPushButton("✦  Format SQL")
+        self.format_button.clicked.connect(self.format_current_sql)
+        self.explain_button = QPushButton("Explain")
+        self.explain_button.clicked.connect(self.explain_query)
+        self.run_selection_button = QPushButton("Run selection")
+        self.run_selection_button.clicked.connect(lambda: self.execute_current(selection_only=True))
+        self.run_button = QPushButton("▶  Run SQL   Ctrl+Enter")
+        self.run_button.setObjectName("primaryButton")
+        self.run_button.clicked.connect(self.execute_current)
+        heading_row.addWidget(self.format_button)
+        heading_row.addWidget(self.explain_button)
+        heading_row.addWidget(self.run_selection_button)
+        heading_row.addWidget(self.run_button)
+        center_layout.addLayout(heading_row)
+
+        self.editors = QTabWidget()
+        self.editors.setObjectName("editorTabs")
+        self.editors.setTabsClosable(True)
+        self.editors.tabCloseRequested.connect(self.close_query_tab)
+        self.editors.currentChanged.connect(self._update_editor_actions)
+        center_layout.addWidget(self.editors, 4)
+
+        result_panel = QWidget()
+        result_layout = QVBoxLayout(result_panel)
+        result_layout.setContentsMargins(0, 2, 0, 0)
+        result_layout.setSpacing(6)
+        toolbar = QHBoxLayout()
+        self.results_title = QLabel("Results")
+        self.results_title.setObjectName("panelTitle")
+        self.result_picker = QComboBox()
+        self.result_picker.setMinimumWidth(165)
+        self.result_picker.setMaximumWidth(245)
+        self.result_picker.currentIndexChanged.connect(self._select_result)
+        self.query_meta = QLabel("Ready")
+        self.query_meta.setObjectName("mutedText")
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_query)
+        self.commit_button = QPushButton("Commit")
+        self.commit_button.clicked.connect(lambda: self._dispatch("commit", {}))
+        self.rollback_button = QPushButton("Rollback")
+        self.rollback_button.clicked.connect(lambda: self._dispatch("rollback", {}))
+        self.export_button = QPushButton("↓  Export CSV")
+        self.export_button.clicked.connect(self.export_results)
+        toolbar.addWidget(self.results_title)
+        toolbar.addWidget(self.result_picker)
+        toolbar.addWidget(self.query_meta, 1)
+        toolbar.addWidget(self.stop_button)
+        toolbar.addWidget(self.commit_button)
+        toolbar.addWidget(self.rollback_button)
+        toolbar.addWidget(self.export_button)
+        result_layout.addLayout(toolbar)
+        self.result_model = ResultsModel()
+        self.result_grid = QTableView()
+        self.result_grid.setObjectName("resultsGrid")
+        self.result_grid.setModel(self.result_model)
+        self.result_grid.setSortingEnabled(True)
+        self.result_grid.setAlternatingRowColors(True)
+        self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.result_grid.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
+        self.result_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.result_grid.horizontalHeader().setStretchLastSection(True)
+        self.result_grid.verticalHeader().setDefaultSectionSize(28)
+        self.result_grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.result_grid.customContextMenuRequested.connect(self._show_result_context)
+        result_layout.addWidget(self.result_grid, 1)
+        self.result_message = QLabel("Ready. Run a query to view results.")
+        self.result_message.setObjectName("mutedText")
+        self.result_message.setWordWrap(True)
+        result_layout.addWidget(self.result_message)
+        center_layout.addWidget(result_panel, 3)
+        body.addWidget(self.center)
+
+        self.inspector_tabs = QTabWidget()
+        self.inspector_tabs.setObjectName("inspectorTabs")
+        self.inspector_tabs.setMinimumWidth(245)
+        self.inspector_tabs.setMaximumWidth(360)
+        self.schema_tree = QTreeWidget()
+        self.schema_tree.setHeaderHidden(True)
+        self.schema_tree.itemDoubleClicked.connect(self._schema_item_activated)
+        self.inspector_tabs.addTab(self.schema_tree, "Schema")
+        self.history_list = QListWidget()
+        self.history_list.itemDoubleClicked.connect(self._history_selected)
+        self.inspector_tabs.addTab(self.history_list, "History")
+        self.saved_list = QListWidget()
+        self.saved_list.itemDoubleClicked.connect(self._saved_selected)
+        self.inspector_tabs.addTab(self.saved_list, "Saved")
+        body.addWidget(self.inspector_tabs)
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        body.setStretchFactor(2, 0)
+        body.setSizes([228, 980, 292])
+        outer.addWidget(body, 1)
+
+        self.status = QLabel("Ready")
+        self.status.setObjectName("statusBar")
+        outer.addWidget(self.status)
+        self.setCentralWidget(root)
+        self._set_result_controls()
+        self.refresh_history()
+        self._refresh_saved_queries()
+
+    def _set_brand_logo(self, label: QLabel):
+        import sys
+        for root in [
+            Path(__file__).resolve().parents[3],
+            Path(getattr(sys, "_MEIPASS", ".")),
+        ]:
+            image = root / "assets" / "mysql-editor-logo.webp"
+            if image.is_file():
+                pixmap = QPixmap(str(image))
+                if not pixmap.isNull():
+                    label.setPixmap(pixmap.scaled(
+                        34, 34, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                    return
+        label.setText("◈")
+        label.setObjectName("logoMark")
+
+    def _build_menus(self):
+        file_menu = self.menuBar().addMenu("&File")
+        self._action(file_menu, "New query", "Ctrl+N", self.new_query_tab)
+        self._action(file_menu, "Open SQL file…", "Ctrl+O", self.open_sql_file)
+        self._action(file_menu, "Save SQL file", "Ctrl+S", self.save_sql_file)
+        self._action(file_menu, "Save SQL snippet", "Ctrl+Shift+S", self.save_query_snippet)
+        file_menu.addSeparator()
+        self._action(file_menu, "Switch connection…", "", self.open_connection_dialog)
+        file_menu.addSeparator()
+        self._action(file_menu, "Exit", "Alt+F4", self.close)
+
+        edit_menu = self.menuBar().addMenu("&Edit")
+        self._action(edit_menu, "Find…", "Ctrl+F", self.find_text)
+        self._action(edit_menu, "Replace…", "Ctrl+H", self.replace_text)
+        query_menu = self.menuBar().addMenu("&Query")
+        self._action(query_menu, "Run current statement", "Ctrl+Return", self.execute_current)
+        self._action(query_menu, "Run selection", "Ctrl+Shift+Return",
+                     lambda: self.execute_current(selection_only=True))
+        self._action(query_menu, "Run entire script", "Ctrl+Alt+Return", self.execute_script)
+        self._action(query_menu, "Format SQL", "Ctrl+Shift+F", self.format_current_sql)
+        self._action(query_menu, "Explain SELECT", "", self.explain_query)
+        self._action(query_menu, "Refresh schema", "F5", self.refresh_schema)
+        settings_menu = self.menuBar().addMenu("&Settings")
+        history_action = QAction("Enable local query history", self)
+        history_action.setCheckable(True)
+        history_action.setChecked(self.repository.history_enabled())
+        history_action.toggled.connect(self._set_history_enabled)
+        settings_menu.addAction(history_action)
+        self._action(settings_menu, "Clear query history", "", self.clear_history)
+        help_menu = self.menuBar().addMenu("&Help")
+        self._action(help_menu, "SQL safety information", "", self.show_safety_info)
+        self._action(help_menu, "About MySQL Editor", "", self.show_about)
+
+    def _action(self, menu: QMenu, text: str, shortcut: str, callback):
+        action = QAction(text, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        action.triggered.connect(lambda _checked=False: callback())
+        menu.addAction(action)
+        return action
+
+    def _dispatch(self, action: str, payload: dict, context: dict | None = None):
+        job_id = uuid.uuid4().hex
+        self._jobs[job_id] = (action, context or {})
+        self.worker.submit(action, payload, job_id)
+        if action == "query":
+            self._query_running = True
+            self.run_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+            self.query_meta.setText("Running…")
+        return job_id
+
+    def _navigate(self, destination: str):
+        if destination == "SQL Editor":
+            if self._current_editor():
+                self._current_editor().setFocus()
+        elif destination == "Connections":
+            self.open_connection_dialog()
+        elif destination == "Schema explorer":
+            self.inspector_tabs.setCurrentIndex(0)
+            self.refresh_schema()
+        elif destination == "Query history":
+            self.inspector_tabs.setCurrentIndex(1)
+            self.refresh_history()
+        elif destination == "Saved queries":
+            self.inspector_tabs.setCurrentIndex(2)
+            self._refresh_saved_queries()
+
+    def _current_editor(self) -> SqlEditor | None:
+        editor = self.editors.currentWidget()
+        return editor if isinstance(editor, SqlEditor) else None
+
+    def new_query_tab(self, text: str = "", path: str | None = None):
+        editor = SqlEditor()
+        if text:
+            editor.setPlainText(text)
+        index = self.editors.addTab(editor, Path(path).name if path else "untitled.sql")
+        self._last_saved_paths[id(editor)] = path or ""
+        self.editors.setCurrentIndex(index)
+        editor.document().setModified(False)
+        editor.textChanged.connect(lambda ed=editor: self._update_tab_title(ed))
+        editor.setFocus()
+
+    def _update_tab_title(self, editor):
+        index = self.editors.indexOf(editor)
+        if index < 0:
+            return
+        label = self.editors.tabText(index).removesuffix(" *")
+        self.editors.setTabText(index, label + (" *" if editor.document().isModified() else ""))
+
+    def close_query_tab(self, index: int):
+        editor = self.editors.widget(index)
+        if editor and editor.document().isModified():
+            answer = QMessageBox.question(
+                self, "Unsaved query", "This query has unsaved changes. Close it?",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+        if editor:
+            self._last_saved_paths.pop(id(editor), None)
+        self.editors.removeTab(index)
+        if editor:
+            editor.deleteLater()
+        if self.editors.count() == 0:
+            self.new_query_tab()
+
+    def _update_editor_actions(self, *_):
+        self._set_result_controls()
+
+    def _set_result_controls(self):
+        self.export_button.setEnabled(bool(self._current_result_id))
+
+    def _query_for_run(self, selection_only=False, whole_script=False):
+        editor = self._current_editor()
+        if not editor:
+            return ""
+        cursor = editor.textCursor()
+        if selection_only and cursor.hasSelection():
+            return cursor.selectedText().replace("\u2029", "\n")
+        if whole_script:
+            return editor.toPlainText()
+        return current_statement(editor.toPlainText(), cursor.position())
+
+    def execute_current(self, selection_only: bool = False):
+        self._execute_sql(self._query_for_run(selection_only=selection_only))
+
+    def execute_script(self):
+        self._execute_sql(self._query_for_run(whole_script=True))
+
+    def _execute_sql(self, sql: str):
+        statements = split_sql_statements(sql)
+        if not statements:
+            QMessageBox.information(
+                self, "No SQL selected", "Place the cursor inside a statement or select SQL to run."
+            )
+            return
+        if len(statements) == 1:
+            risk, explanation = classify_statement(statements[0])
+            if risk == "high":
+                answer = QMessageBox.warning(
+                    self, "High-impact SQL",
+                    explanation + "\n\nConfirm you have reviewed this statement and its scope.",
+                    QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+        else:
+            high = [classify_statement(item) for item in statements if classify_statement(item)[0] == "high"]
+            if high:
+                answer = QMessageBox.warning(
+                    self, "High-impact SQL script",
+                    f"The script contains {len(high)} high-impact statement(s). "
+                    "Review the complete script before continuing.",
+                    QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+        self._last_sql = sql
+        self._last_duration = 0
+        self._current_result_id = None
+        self._query_results = []
+        self.result_picker.blockSignals(True)
+        self.result_picker.clear()
+        self.result_picker.blockSignals(False)
+        self.result_model.update([], [])
+        self._set_result_controls()
+        self._dispatch("query", {"sql": sql}, {
+            "sql": sql, "profile_name": self.profile.get("name", "Connection"),
+        })
+        self.result_message.setText(
+            "SQL is running in the database worker. The editor remains responsive."
+        )
+        self.status.setText("Executing…")
+
+    def explain_query(self):
+        editor = self._current_editor()
+        if not editor:
+            return
+        sql = current_statement(editor.toPlainText(), editor.textCursor().position()).strip()
+        if not sql:
+            QMessageBox.information(self, "Explain SELECT", "Place the cursor inside a SELECT statement.")
+            return
+        if not sql.lstrip().upper().startswith("SELECT"):
+            QMessageBox.warning(self, "Explain SELECT", "EXPLAIN is offered for SELECT statements.")
+            return
+        self._execute_sql("EXPLAIN " + sql)
+
+    def stop_query(self):
+        if self._query_running:
+            self.status.setText("Sending a best-effort cancellation request to MySQL…")
+            self.worker.cancel_current_query()
+
+    def format_current_sql(self):
+        editor = self._current_editor()
+        if not editor:
+            return
+        cursor = editor.textCursor()
+        selected = cursor.selectedText().replace("\u2029", "\n")
+        source = selected or editor.toPlainText()
+        try:
+            formatted = format_sql(source)
+        except Exception as exc:
+            QMessageBox.warning(self, "SQL formatting", redact_secrets(str(exc)))
+            return
+        if selected:
+            cursor.insertText(formatted)
+        else:
+            position = cursor.position()
+            editor.setPlainText(formatted)
+            editor.document().setModified(True)
+            cursor = editor.textCursor()
+            cursor.setPosition(min(position, len(formatted)))
+            editor.setTextCursor(cursor)
+
+    def refresh_schema(self):
+        schema = str(self.config.get("default_schema", "") or self.connect_result.get("database", ""))
+        self._dispatch("schema", {"schema": schema})
+
+    def _fill_schema_tree(self, result: dict):
+        self.schema_tree.clear()
+        active_schema = result.get("schema", "")
+        for database in result.get("databases", []):
+            item = QTreeWidgetItem([("▾  " if database == active_schema else "▸  ") + database])
+            item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema", "schema": database})
+            if database == active_schema:
+                for record in result.get("objects", []):
+                    name = record["name"]
+                    kind = record.get("type", "BASE TABLE")
+                    child = QTreeWidgetItem([("▤  " if kind == "BASE TABLE" else "◇  ") + name])
+                    child.setData(0, Qt.ItemDataRole.UserRole, {
+                        "kind": "table", "schema": database, "table": name, "object_type": kind,
+                    })
+                    item.addChild(child)
+                item.setExpanded(True)
+            self.schema_tree.addTopLevelItem(item)
+        self.status.setText(f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)")
+
+    def _schema_item_activated(self, item, _column):
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        if data.get("kind") == "schema":
+            self.config["default_schema"] = data["schema"]
+            self.refresh_schema()
+        elif data.get("kind") == "table":
+            self._dispatch("table_preview", {
+                "schema": data["schema"], "table": data["table"],
+            }, {
+                "profile_name": self.profile.get("name", "Connection"),
+                "sql": f"Preview {data['schema']}.{data['table']}",
+            })
+
+    def _select_result(self, index: int, total_duration: int | None = None):
+        if index < 0 or index >= len(self._query_results):
+            self._current_result_id = None
+            self._set_result_controls()
+            return
+        item = self._query_results[index]
+        self.result_model.update(item.get("headers", []), item.get("rows", []))
+        self._current_result_id = item.get("result_id")
+        total = item.get("row_count", len(item.get("rows", [])))
+        duration = item.get("duration_ms", 0)
+        self._last_duration = duration
+        if total_duration is not None:
+            self.query_meta.setText(f"{total:,} row(s) · {total_duration} ms total")
+        else:
+            self.query_meta.setText(f"{total:,} row(s) · {duration} ms")
+        suffix = (
+            f" Showing first {MAX_PREVIEW_ROWS:,}; CSV export includes all fetched rows."
+            if item.get("preview_truncated") else ""
+        )
+        if item.get("kind") == "error":
+            suffix = " Statement failed; review the error details."
+        self.result_message.setText(
+            f"{item.get('kind', 'result').title()} result · {total:,} row(s) received.{suffix}"
+        )
+        self._set_result_controls()
+
+    def _on_worker_completed(self, job_id: str, action: str, result: dict):
+        pending = self._jobs.pop(job_id, None)
+        if pending is None:
+            return
+        expected_action, context = pending
+        if expected_action != action:
+            return
+        if action == "query":
+            self._query_running = False
+            self.run_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+        if action in {"query", "table_preview"}:
+            if not result.get("ok"):
+                self.query_meta.setText("Query failed")
+                self.result_message.setText(result.get("error", "Query failed."))
+            if result.get("results"):
+                self._query_results = list(result["results"])
+                self.result_picker.blockSignals(True)
+                self.result_picker.clear()
+                for index, item in enumerate(self._query_results, start=1):
+                    label = (
+                        f"Result {index} · {item.get('kind', 'result')} · "
+                        f"{item.get('row_count', 0):,} row(s)"
+                    )
+                    self.result_picker.addItem(label, index - 1)
+                self.result_picker.setCurrentIndex(len(self._query_results) - 1)
+                self.result_picker.blockSignals(False)
+                self._select_result(self.result_picker.currentIndex(), result.get("duration_ms", 0))
+            elif result.get("ok"):
+                self.query_meta.setText("No result rows")
+                self.result_message.setText("Statement completed. No result set was returned.")
+            self.status.setText(result.get("error") or "Query complete.")
+            if context.get("sql"):
+                self.repository.add_history(
+                    context.get("profile_name", "Connection"), redact_sql_secrets(context["sql"]),
+                    self._last_duration, "success" if result.get("ok") else "error",
+                )
+                self.refresh_history()
+            return
+        if action == "schema":
+            if result.get("ok"):
+                self._fill_schema_tree(result)
+            else:
+                self.status.setText(result.get("error", "Could not load schemas."))
+                self.schema_tree.clear()
+            return
+        if action in {"commit", "rollback"}:
+            self.status.setText(result.get("message", result.get("error", action.title())))
+            if not result.get("ok"):
+                QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
+            return
+        if action == "export_csv":
+            if result.get("ok"):
+                self.status.setText(f"CSV exported · {result.get('row_count', 0):,} row(s)")
+                QMessageBox.information(
+                    self, "CSV export complete",
+                    f"Exported {result.get('row_count', 0):,} row(s) to:\n{result['path']}",
+                )
+            else:
+                QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
+
+    def _on_activity(self, message: str):
+        self.status.setText(message)
+
+    def export_results(self):
+        if not self._current_result_id:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export result grid", "mysql-query-results.csv", "CSV files (*.csv)"
+        )
+        if path:
+            self._dispatch("export_csv", {"result_id": self._current_result_id, "path": path})
+
+    def _show_result_context(self, point):
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy selected cells")
+        export_action = menu.addAction("Export result to CSV")
+        chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
+        if chosen == copy_action:
+            self.copy_selected_cells()
+        elif chosen == export_action:
+            self.export_results()
+
+    def copy_selected_cells(self):
+        indexes = self.result_grid.selectedIndexes()
+        if not indexes:
+            return
+        by_row: dict[int, list[tuple[int, str]]] = {}
+        for index in indexes:
+            value = self.result_model.rows[index.row()][index.column()]
+            by_row.setdefault(index.row(), []).append((index.column(), "" if value is None else str(value)))
+        lines = [
+            "\t".join(value for _, value in sorted(items))
+            for _, items in sorted(by_row.items())
+        ]
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText("\n".join(lines))
+        self.status.setText(f"Copied {len(indexes)} selected cell(s).")
+
+    def _set_history_enabled(self, enabled: bool):
+        self.repository.set_history_enabled(enabled)
+        self.refresh_history()
+        self.status.setText(
+            "Query history enabled (local, opt-in)." if enabled
+            else "Query history disabled and cleared."
+        )
+
+    def refresh_history(self):
+        self.history_list.clear()
+        if not self.repository.history_enabled():
+            self.history_list.addItem("Query history is off. Enable it in Settings to opt in.")
+            return
+        for entry in self.repository.history():
+            item = QListWidgetItem(
+                f"{entry['created_at']} · {entry['status']} · {entry['duration_ms']} ms"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, entry["sql_text"])
+            item.setToolTip(entry["sql_text"])
+            self.history_list.addItem(item)
+
+    def _history_selected(self, item):
+        sql = item.data(Qt.ItemDataRole.UserRole)
+        if sql:
+            self.new_query_tab(sql)
+
+    def _saved_root(self) -> Path:
+        path = app_data_dir() / "saved_queries"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _refresh_saved_queries(self):
+        self.saved_list.clear()
+        for path in sorted(self._saved_root().glob("*.sql"), key=lambda p: p.name.casefold()):
+            item = QListWidgetItem(path.name)
+            item.setData(Qt.ItemDataRole.UserRole, str(path))
+            self.saved_list.addItem(item)
+        if self.saved_list.count() == 0:
+            self.saved_list.addItem("Save a query snippet to see it here.")
+
+    def _saved_selected(self, item):
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if path and Path(path).is_file():
+            self.new_query_tab(Path(path).read_text(encoding="utf-8"), path)
+
+    def open_sql_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open SQL file", "", "SQL files (*.sql);;Text files (*.txt);;All files (*)"
+        )
+        if path:
+            self.new_query_tab(Path(path).read_text(encoding="utf-8-sig"), path)
+
+    def _write_current_editor(self, path: str):
+        editor = self._current_editor()
+        if not editor:
+            return
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(editor.toPlainText(), encoding="utf-8")
+        editor.document().setModified(False)
+        self._last_saved_paths[id(editor)] = str(destination)
+        self.editors.setTabText(self.editors.currentIndex(), destination.name)
+        self._refresh_saved_queries()
+        self.status.setText(f"Saved {destination.name}")
+
+    def save_sql_file(self, force_dialog: bool = False):
+        editor = self._current_editor()
+        if not editor:
+            return
+        path = "" if force_dialog else self._last_saved_paths.get(id(editor), "")
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save SQL file", "query.sql", "SQL files (*.sql)"
+            )
+        if path:
+            self._write_current_editor(path)
+
+    def save_query_snippet(self):
+        editor = self._current_editor()
+        if not editor or not editor.toPlainText().strip():
+            QMessageBox.information(self, "Save SQL snippet", "Write a query before saving a snippet.")
+            return
+        name, ok = QInputDialog.getText(self, "Save SQL snippet", "Snippet name:")
+        if not ok or not name.strip():
+            return
+        safe_name = "".join(ch for ch in name.strip() if ch.isalnum() or ch in " _-.").strip()
+        if not safe_name:
+            QMessageBox.warning(self, "Save SQL snippet", "Enter a valid snippet name.")
+            return
+        path = self._saved_root() / (safe_name if safe_name.lower().endswith(".sql") else safe_name + ".sql")
+        if path.exists():
+            answer = QMessageBox.question(
+                self, "Replace snippet", f"{path.name} already exists. Replace it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._write_current_editor(str(path))
+
+    def find_text(self):
+        editor = self._current_editor()
+        if not editor:
+            return
+        phrase, ok = QInputDialog.getText(self, "Find", "Search text:")
+        if ok and phrase and not editor.find(phrase):
+            cursor = editor.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            editor.setTextCursor(cursor)
+            if not editor.find(phrase):
+                self.status.setText("No matching text found.")
+
+    def replace_text(self):
+        editor = self._current_editor()
+        if not editor:
+            return
+        old, ok = QInputDialog.getText(self, "Replace", "Find:")
+        if not ok or not old:
+            return
+        new, ok = QInputDialog.getText(self, "Replace", "Replace with:")
+        if not ok:
+            return
+        source = editor.toPlainText()
+        count = source.count(old)
+        if count:
+            editor.setPlainText(source.replace(old, new))
+            editor.document().setModified(True)
+            self.status.setText(f"Replaced {count} occurrence(s).")
+        else:
+            self.status.setText("No matching text found.")
+
+    def clear_history(self):
+        self.repository.set_history_enabled(False)
+        self.refresh_history()
+        self.status.setText("Local query history cleared and disabled.")
+
+    def open_connection_dialog(self):
+        dialog = ConnectionDialog(self.worker, self.repository, self.credentials, self)
+        dialog.connected.connect(self._switch_connection)
+        dialog.exec()
+
+    def _switch_connection(self, profile: dict, config: dict, connect_result: dict):
+        self._persist_profile(profile, config)
+        self.profile = profile
+        self.config = config
+        self.connect_result = connect_result
+        self._update_connection_status()
+        self.refresh_schema()
+
+    def _persist_profile(self, profile: dict, config: dict):
+        if not config.get("save_profile"):
+            return
+        try:
+            self.repository.save_profile(ConnectionProfile(**profile))
+            self.credentials.save(profile["id"], config.get("password", ""))
+            self.status.setText("Connection profile saved securely.")
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Profile not saved",
+                "Connected successfully, but the profile/password was not saved securely. "
+                "The password was not written to a file.\n\n" + redact_secrets(str(exc)),
+            )
+
+    def _update_connection_status(self):
+        host = self.config.get("host", "MySQL")
+        schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
+        self.connection_badge.setText(f"●  {host} · Connected")
+        self.connection_details.setText(
+            f"{host}:{self.config.get('port', 3306)}\n"
+            f"{self.config.get('username', '')}\nDatabase: {schema}\n"
+            f"Server: {self.connect_result.get('server_version', 'MySQL')}\n"
+            f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}"
+        )
+
+    def show_safety_info(self):
+        QMessageBox.information(
+            self, "SQL execution and safety",
+            "High-impact SQL receives a confirmation prompt, but the prompt is advisory only. "
+            "Use least-privilege MySQL accounts and server-side grants for access control. "
+            "Transactions are manual: use Commit or Rollback. Some MySQL DDL statements commit implicitly.",
+        )
+
+    def show_about(self):
+        QMessageBox.about(
+            self, "About MySQL Editor",
+            "MySQL Editor 0.1.0\nA clean-room Windows SQL IDE for MySQL.\n"
+            "SQL execution runs in a dedicated worker thread. Database passwords do not live in SQLite.",
+        )
+
+    def closeEvent(self, event):
+        if self._query_running:
+            answer = QMessageBox.question(
+                self, "Query running",
+                "A query is still running. Ask MySQL to cancel it and close?",
+                QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self.worker.cancel_current_query()
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if editor and editor.document().isModified():
+                answer = QMessageBox.question(
+                    self, "Unsaved query",
+                    "One or more query tabs have unsaved edits. Close MySQL Editor anyway?",
+                    QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Discard:
+                    event.ignore()
+                    return
+                break
+        self.worker.submit("disconnect", {})
+        self.worker.shutdown()
+        self.worker.wait(5000)
+        event.accept()

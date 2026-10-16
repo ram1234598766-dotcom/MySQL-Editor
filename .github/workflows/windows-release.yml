@@ -1,0 +1,142 @@
+name: MySQL Editor Windows packages
+
+on:
+  push:
+    branches: [main, desktop-rebuild]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install runtime and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pyinstaller pip-licenses
+      - name: Create branded Windows icon
+        run: python tools/build_brand_assets.py
+      - name: Build application folder
+        run: python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
+      - name: Build portable executable
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build setup installer
+        run: iscc installer/MySQLEditor.iss
+      - name: Smoke test installer install and uninstall
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path "dist/installer/MySQLEditor-Setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP "MySQLEditor-SmokeInstall"
+          $installArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ('/DIR="{0}"' -f $installDir))
+          $installProcess = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { throw "Silent installation failed with exit code $($installProcess.ExitCode)" }
+          $installedExe = Join-Path $installDir "MySQLEditor.exe"
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (!(Test-Path $installedExe)) { throw "Installer did not install MySQLEditor.exe" }
+          if (!(Test-Path $uninstaller)) { throw "Inno Setup uninstaller was not created" }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "MySQL Editor.lnk"
+          if (!(Test-Path $desktopShortcut)) { throw "Installer did not create the default desktop shortcut" }
+          $uninstallArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+          $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList $uninstallArgs -Wait -PassThru
+          if ($uninstallProcess.ExitCode -ne 0) { throw "Uninstall failed with exit code $($uninstallProcess.ExitCode)" }
+          if (Test-Path $desktopShortcut) { throw "Uninstaller left the desktop shortcut behind" }
+      - name: Smoke launch packaged applications
+        shell: pwsh
+        run: |
+          $apps = @(
+            (Resolve-Path "dist/MySQLEditor/MySQLEditor.exe").Path,
+            (Resolve-Path "dist/MySQLEditor-Portable.exe").Path
+          )
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "MySQLEditor-SmokeData"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          foreach ($appPath in $apps) {
+            $process = Start-Process -FilePath $appPath -PassThru
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Application exited during startup: $appPath (exit code $($process.ExitCode))"
+            }
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Verify expected output files
+        shell: pwsh
+        run: |
+          $expected = @(
+            "dist/MySQLEditor/MySQLEditor.exe",
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe"
+          )
+          foreach ($path in $expected) {
+            if (!(Test-Path $path)) { throw "Expected package was not created: $path" }
+            $item = Get-Item $path
+            if ($item.Length -lt 100000) { throw "Package looks incomplete: $path ($($item.Length) bytes)" }
+          }
+          Get-Item $expected | Format-Table Name,Length
+      - name: Generate CycloneDX dependency SBOM and stage release notes
+        shell: pwsh
+        run: |
+          python -m pip_audit -r requirements.txt --format cyclonedx-json --output dist/sbom.cdx.json
+          pip-licenses --format=markdown --output-file="dist/THIRD_PARTY_LICENSES.md"
+          Copy-Item "RELEASE-NOTES.md" "dist/RELEASE-NOTES.md"
+          Copy-Item "WINDOWS_SIGNING.md" "dist/WINDOWS_SIGNING.md"
+      - name: Create folder archive and SHA-256 manifest
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/MySQLEditor/*" -DestinationPath "dist/MySQLEditor-Folder.zip" -CompressionLevel Optimal
+          $items = @(
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe",
+            "dist/MySQLEditor-Folder.zip",
+            "dist/sbom.cdx.json",
+            "dist/RELEASE-NOTES.md",
+            "dist/WINDOWS_SIGNING.md",
+            "dist/THIRD_PARTY_LICENSES.md"
+          )
+          foreach ($item in $items) {
+            $hash = (Get-FileHash $item -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path $item -Leaf)" | Add-Content "dist/SHA256SUMS"
+          }
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: MySQLEditor-Windows
+          path: |
+            dist/MySQLEditor/
+            dist/MySQLEditor-Portable.exe
+            dist/installer/MySQLEditor-Setup.exe
+            dist/MySQLEditor-Folder.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish tagged GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $releaseArgs = @(
+            "release", "create", "$env:GITHUB_REF_NAME",
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe",
+            "dist/MySQLEditor-Folder.zip",
+            "dist/SHA256SUMS",
+            "dist/sbom.cdx.json",
+            "dist/RELEASE-NOTES.md",
+            "dist/WINDOWS_SIGNING.md",
+            "dist/THIRD_PARTY_LICENSES.md",
+            "--title", "MySQL Editor $env:GITHUB_REF_NAME",
+            "--notes-file", "dist/RELEASE-NOTES.md"
+          )
+          if ($env:GITHUB_REF_NAME -match "-(alpha|beta|rc)") {
+            $releaseArgs += "--prerelease"
+          }
+          gh @releaseArgs

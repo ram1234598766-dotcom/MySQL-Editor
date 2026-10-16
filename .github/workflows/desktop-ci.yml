@@ -1,0 +1,93 @@
+name: MySQL Editor desktop CI
+
+on:
+  push:
+    branches: [main, desktop-rebuild]
+    paths-ignore:
+      - "README.md"
+      - "DESKTOP_REBUILD_PLAN.md"
+  pull_request:
+    branches: [main, desktop-rebuild]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mysql-integration:
+    name: MySQL integration (Python 3.14, MySQL 8.4)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-root-password
+          MYSQL_DATABASE: mysql_editor_test
+          MYSQL_USER: editor_test
+          MYSQL_PASSWORD: integration-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      MYSQL_EDITOR_TEST_HOST: 127.0.0.1
+      MYSQL_EDITOR_TEST_PORT: "3306"
+      MYSQL_EDITOR_TEST_DATABASE: mysql_editor_test
+      MYSQL_EDITOR_TEST_USER: editor_test
+      MYSQL_EDITOR_TEST_PASSWORD: integration-test-password
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install application and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Exercise MySQL query, schema, transaction and CSV workflow
+        run: python -m pytest tests/test_mysql_integration.py -v
+
+  tests:
+    name: Tests on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install application and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Lint
+        run: python -m ruff check src tests tools
+      - name: Compile Python
+        run: python -m compileall -q src tests tools
+      - name: Unit tests
+        run: python -m pytest
+      - name: Reject legacy application imports
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          roots = list(Path("src/mysql_editor").rglob("*.py"))
+          forbidden = ("mysql_idle", "sql_toolbox", "feature_governor", "password_auth", "mobile_companion")
+          violations = [(str(path), name) for path in roots for name in forbidden
+                        if name in path.read_text(encoding="utf-8")]
+          assert not violations, violations
+          PY
