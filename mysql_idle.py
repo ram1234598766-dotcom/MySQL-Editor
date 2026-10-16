@@ -52,7 +52,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from decimal import Decimal
 from pathlib import Path
-from PIL import Image, ImageTk
+from PIL import Image, ImageFilter, ImageTk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from feature_governor import APPROVAL_TTL_SECONDS, FeatureGovernor
@@ -81,6 +81,12 @@ def _resource_path(relative_path):
     return bundle_root / relative_path
 
 
+def _resize_logo_crisp(source_image, size):
+    """Resize the shared logo with Lanczos and a restrained edge-sharpening pass."""
+    resized = source_image.resize(size, Image.Resampling.LANCZOS)
+    return resized.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+
+
 def _apply_window_icon(window):
     """Use the generated multi-size ICO, with the shared JPEG as a crisp fallback."""
     icon_path = _resource_path(Path("assets") / "mysqlidle.ico")
@@ -96,7 +102,7 @@ def _apply_window_icon(window):
     if not icon_set and logo_path.is_file():
         try:
             with Image.open(logo_path) as source_image:
-                icon_image = source_image.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+                icon_image = _resize_logo_crisp(source_image.convert("RGBA"), (64, 64))
             window._mysqlidle_icon_photo = ImageTk.PhotoImage(icon_image, master=window)
             window.iconphoto(True, window._mysqlidle_icon_photo)
         except (tk.TclError, OSError):
@@ -586,7 +592,7 @@ class ConnectDialog(tk.Toplevel):
             try:
                 with Image.open(logo_path) as source_image:
                     self.logo_source_image = source_image.convert("RGBA")
-                display_image = self.logo_source_image.resize((64, 64), Image.Resampling.LANCZOS)
+                display_image = _resize_logo_crisp(self.logo_source_image, (64, 64))
                 self.logo_image = ImageTk.PhotoImage(display_image, master=self)
                 tk.Label(
                     header, image=self.logo_image, bg="#0B182A", bd=0,
@@ -1480,7 +1486,7 @@ class MySQLIDLE:
                 with Image.open(logo_path) as source_image:
                     self.brand_logo_source = source_image.convert("RGBA")
                 self.brand_logo_image = self.brand_logo_source
-                display_image = self.brand_logo_source.resize((34, 34), Image.Resampling.LANCZOS)
+                display_image = _resize_logo_crisp(self.brand_logo_source, (34, 34))
                 self.brand_logo_display_image = ImageTk.PhotoImage(display_image, master=self.root)
                 logo_box = tk.Frame(header, bg=c["surface"], width=34, height=34)
                 logo_box.pack(side=tk.LEFT, padx=(0, 14))
