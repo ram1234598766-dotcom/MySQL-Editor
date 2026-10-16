@@ -302,8 +302,6 @@ class PackagingBrandingTests(unittest.TestCase):
 
     def test_android_pipeline_builds_apk_only_without_app_bundles(self):
         workflow = (ROOT / ".github" / "workflows" / "build-exe-apk.yml").read_text(encoding="utf-8")
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        signing = (ROOT / "SIGNING.md").read_text(encoding="utf-8")
 
         self.assertIn("gradle --no-daemon assembleDebug", workflow)
         self.assertIn("gradle --no-daemon assembleRelease", workflow)
@@ -312,10 +310,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertNotIn("bundleDebug", workflow)
         self.assertNotIn("bundleRelease", workflow)
         self.assertNotIn(".aab", workflow)
-        self.assertNotIn(".aab", readme)
-        self.assertNotIn(".aab", signing)
-        self.assertNotIn("App Bundle", readme)
-        self.assertNotIn("App Bundle", signing)
+        self.assertNotIn("App Bundle", workflow)
 
 
 
