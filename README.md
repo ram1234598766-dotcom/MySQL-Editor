@@ -17,7 +17,7 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 - Result switching between statements, sortable result grid, copy selected cells, bounded preview and CSV export of the fetched result set.
 - Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
 - Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
-- Remembers window geometry, split-pane sizes, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
+- Remembers window geometry, horizontal workspace pane sizes, vertical editor/results split, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
 - Handles SQL-file open/save errors inside the app without discarding the current buffer, and writes CSV exports atomically so an interrupted export preserves any previous destination file.
 
 This is a development implementation, not yet a release-approved or manually QA-certified binary. Review the workflow results and test the installer on a clean Windows account before distributing it.
