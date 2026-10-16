@@ -16,6 +16,7 @@ Use GitHub's private vulnerability reporting feature where available, or open a 
 - TLS behavior is explicit. Automatic TLS may encrypt transport without verifying server identity. Strict mode enables certificate and hostname verification. Disabled TLS is an explicit choice for trusted local use only.
 - Query history is opt-in and stores SQL text when enabled.
 - The temporary result spool can contain the query's fetched rows. Treat the local app data directory and exports as potentially sensitive.
+- CSV exports use a temporary sibling file and only replace the destination after a complete successful write; failed exports should leave any previous destination file intact.
 - Errors are redacted before display; query result contents are not emitted to telemetry because this build has no telemetry.
 - High-impact SQL confirmations are advisory only. MySQL server grants and least-privilege accounts enforce database permissions.
 
