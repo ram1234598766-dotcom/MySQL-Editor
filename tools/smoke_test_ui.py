@@ -101,6 +101,7 @@ def main():
         insert_button.click()
         assert "information_schema.tables" in first._current_editor().toPlainText()
         first._current_editor().document().setModified(False)
+        first.inspector_tabs.setCurrentIndex(1)
         tour._skip()
         assert first_repo.get_setting("guided_tour_completed") == "true"
 
