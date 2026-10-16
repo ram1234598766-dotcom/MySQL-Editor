@@ -381,6 +381,7 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(history_action)
         self._action(settings_menu, "Clear query history", "", self.clear_history)
         help_menu = self.menuBar().addMenu("&Help")
+        self._action(help_menu, "Guided tour", "F1", self._show_product_tour)
         self._action(help_menu, "SQL safety information", "", self.show_safety_info)
         self._action(help_menu, "About MySQL Editor", "", self.show_about)
 
@@ -1001,6 +1002,7 @@ class MainWindow(QMainWindow):
 
     def _persist_profile(self, profile: dict, config: dict):
         if not config.get("save_profile"):
+            self.repository.set_setting("last_profile_id", "")
             return
         try:
             self.repository.save_profile(ConnectionProfile(**profile))
