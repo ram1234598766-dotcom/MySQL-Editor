@@ -1,9 +1,9 @@
-"""SQL editor with line numbers, syntax highlighting and indentation."""
+""""SQL editor with line numbers, syntax highlighting and indentation."""
 from __future__ import annotations
 import re
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat, QTextFormat, QTextEdit
-from PySide6.QtWidgets import QPlainTextEdit, QWidget
+from PySide6.QtGui import QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat, QTextFormat
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
 class SqlHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
@@ -20,28 +20,23 @@ class SqlHighlighter(QSyntaxHighlighter):
             "DATE INTERVAL CURRENT_DATE CURRENT_TIMESTAMP BEGIN COMMIT ROLLBACK START TRANSACTION "
             "EXPLAIN DESCRIBE SHOW USE GRANT REVOKE"
         ).split()
-        self.rules = [(re.compile(r"\b(?:" + "|".join(words) + r")\b", re.I), keyword)]
+        self.rules = [(re.compile(r"\\b(?:" + "|".join(words) + r")\\b", re.I), keyword)]
         string = QTextCharFormat()
         string.setForeground(QColor("#f6c56f"))
-        self.rules.append((re.compile(r"'(?:''|\\.|[^'])*'|\"(?:\"\"|\\.|[^\"])*\""), string))
+        self.rules.append((re.compile(r"'(?:''|\\\\.|[^'])*'|\"(?:\"\"|\\\\.|[^\"])*\""), string))
         comment = QTextCharFormat()
         comment.setForeground(QColor("#7f93ad"))
         comment.setFontItalic(True)
         self.rules.extend([
-            (re.compile(r"--[^\r\n]*|#[^\r\n]*"), comment),
-            (re.compile(r"/\*.*?\*/"), comment),
+            (re.compile(r"--[^\\r\\n]*|#[^\\r\\n]*"), comment),
+            (re.compile(r"/\\*.*?\\*/"), comment),
         ])
         number = QTextCharFormat()
         number.setForeground(QColor("#bd9cff"))
-        self.rules.append((re.compile(r"\b\d+(?:\.\d+)?\b"), number))
+        self.rules.append((re.compile(r"\\b\\d+(?:\\.\\d+)?\\b"), number))
         function = QTextCharFormat()
         function.setForeground(QColor("#69b7ff"))
-        self.rules.append((re.compile(r"\b[A-Za-z_]\w*(?=\s*\()"), function))
-
-    def highlightBlock(self, text: str) -> None:
-        for pattern, style in self.rules:
-            for match in pattern.finditer(text):
-                self.setFormat(match.start(), match.end() - match.start(), style)
+        self.rules.append((re.compile(r"\\b[A-Za-z_]\\w*(?=\\s*\\()"), function))
 
 class LineNumberArea(QWidget):
     def __init__(self, editor: SqlEditor):
@@ -67,9 +62,9 @@ class SqlEditor(QPlainTextEdit):
         self.setFont(font)
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
         self.setPlaceholderText(
-            "-- Write a query after connecting to MySQL.\n"
-            "SELECT table_name\nFROM information_schema.tables\n"
-            "WHERE table_schema = DATABASE()\nORDER BY table_name;"
+            "-- Write a query after connecting to MySQL.\\n"
+            "SELECT table_name\\nFROM information_schema.tables\\n"
+            "WHERE table_schema = DATABASE()\\nORDER BY table_name;"
         )
         self.blockCountChanged.connect(self.update_line_number_area_width)
         self.updateRequest.connect(self.update_line_number_area)
@@ -132,7 +127,7 @@ class SqlEditor(QPlainTextEdit):
             self.insertPlainText("    ")
             return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers():
-            indent = re.match(r"\s*", self.textCursor().block().text()).group(0)
+            indent = re.match(r"\\s*", self.textCursor().block().text()).group(0)
             if self.textCursor().block().text().rstrip().endswith(("(", ",")):
                 indent += "    "
             super().keyPressEvent(event)
