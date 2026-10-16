@@ -29,7 +29,7 @@ class MasterUnlockDialog(QDialog):
         title = QLabel("Welcome back")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
-        intro = QLabel("Enter your local master password to unlock your saved connection.")
+        intro = QLabel("Enter your local master password. MySQL Editor will reconnect using your saved Windows credential when it is available.")
         intro.setObjectName("mutedText")
         intro.setWordWrap(True)
         root.addWidget(intro)
