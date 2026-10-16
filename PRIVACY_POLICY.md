@@ -6,7 +6,7 @@ The clean-room MySQL Editor is a local Windows SQL client. This implementation i
 
 ## Data stored on the device
 
-- Connection metadata: profile name, host, port, username, default schema, TLS policy, CA file path and timeout values.
+- Connection metadata: profile name, host, port, username, default schema, TLS policy, CA file path and timeout values. When saving is enabled, the last-used profile identifier is remembered so the app can reconnect after the master-password unlock.
 - Master-password verifier: Argon2id hash; the passphrase itself is not stored.
 - Saved database password: only in Windows Credential Manager when the user elects to save a profile.
 - Query history: disabled by default. If enabled, SQL text, profile label, status, duration and timestamp are stored in the local SQLite settings database.
