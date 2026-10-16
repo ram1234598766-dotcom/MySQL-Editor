@@ -1023,7 +1023,9 @@ class MainWindow(QMainWindow):
             f"Database: {schema} · Server: {self.connect_result.get('server_version', 'MySQL')} · "
             f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}"
         )
-        self.connection_details.setText(details)
+        self.connection_details.setText(
+            f"{self.config.get('username', '')}@{host}:{self.config.get('port', 3306)} · {schema}"
+        )
         self.connection_details.setToolTip(details)
 
     def show_safety_info(self):
