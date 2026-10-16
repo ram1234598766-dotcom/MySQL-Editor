@@ -8,6 +8,7 @@ import ssl
 import sys
 import types
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -133,7 +134,8 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertRegex(self.server.certificate_fingerprint, r"^([0-9A-F]{2}:){31}[0-9A-F]{2}$")
             self.assertIn("Android companion", body)
             self.assertIn("viewport", body)
-            self.assertIn('aria-label="MySQL Editor logo"', body)
+            self.assertIn('src="/brand/mysqlidle-logo.png"', body)
+            self.assertIn('alt="MySQL Editor logo"', body)
             self.assertIn('id="masterPassword"', body)
             self.assertIn('id="masterPasswordToggle"', body)
             self.assertIn("master password you set on Windows", body)
@@ -151,6 +153,20 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertIn("queryHistory.push(sql)", body)
             self.assertIn("50 queries in memory", body)
             self.assertIn("Run SQL", body)
+
+    def test_mobile_page_serves_original_logo_asset(self):
+        with urlopen(
+            self.base + "/brand/mysqlidle-logo.png",
+            timeout=5,
+            context=self.ssl_context,
+        ) as response:
+            data = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertTrue(response.headers.get("Content-Type", "").startswith("image/png"))
+            self.assertEqual(response.headers.get("Cache-Control"), "no-store, max-age=0")
+
+        expected = (Path(__file__).resolve().parent / "assets" / "mysqlidle-logo.png").read_bytes()
+        self.assertEqual(data, expected, "Mobile companion must serve the exact shared logo asset.")
 
     def test_companion_refuses_to_start_without_master_password_verifier(self):
         with self.assertRaisesRegex(ValueError, "Set a master password"):
