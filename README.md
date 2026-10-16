@@ -6,7 +6,7 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 
 ## Implemented in this branch
 
-- Native PySide6/Qt shell with horizontal workspace navigation, resizable editor/results and schema inspector, SQL tabs, syntax highlighting, line numbers and results grid.
+- Native PySide6/Qt shell with horizontal workspace navigation, resizable editor/results and schema inspector, SQL tabs, syntax highlighting, line numbers, Ctrl+Space/inline completion for MySQL keywords/functions and safe schema/result identifiers, plus a case-insensitive quick filter over visible result rows.
 - Animated guided tour available from the workspace header, the connection dialog, and Help (F1); the tour can insert a real sample SELECT into the editor.
 - First launch creates a local master password. Later launches request only that master password, then auto-reconnect to the last remembered MySQL profile using Windows Credential Manager when the saved password is available; missing/stale credentials fall back to the connection form.
 - Argon2id master-password verifier, local settings database and Windows Credential Manager-only saved-password adapter.
@@ -14,7 +14,7 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 - Dedicated database worker thread so SQL execution and schema navigation do not run on the Qt UI event loop.
 - Multi-statement query execution, statement/selection/script run actions, SQL formatter and Explain SELECT.
 - Schema navigation for databases, tables and views; double-click tables for a capped preview.
-- Result switching between statements, sortable result grid, copy selected cells, bounded preview and CSV export of the fetched result set.
+- Result switching between statements, type-aware sortable result grid, case-insensitive row filtering, copy selected cells, bounded preview and CSV export of the full fetched result set; quick filtering never truncates exports.
 - Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
 - Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
 - Remembers window geometry, horizontal workspace pane sizes, vertical editor/results split, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
@@ -27,7 +27,7 @@ This is a development implementation, not yet a release-approved or manually QA-
 - src/mysql_editor/core.py — SQL boundaries, risk advisories, formatting and redaction.
 - src/mysql_editor/storage.py — local versioned SQLite metadata, history, Argon2id verifier and Credential Manager.
 - src/mysql_editor/database.py — background thread, MySQL operations, result spool and CSV export.
-- src/mysql_editor/ui/editor.py — editor widget and syntax highlighter.
+- src/mysql_editor/ui/editor.py — editor widget, multiline comment-aware syntax highlighter and MySQL/schema-aware completion.
 - src/mysql_editor/ui/connection_dialog.py — connection and first-run lock dialog.
 - src/mysql_editor/ui/main_window.py — query tabs, result picker, schema/history/snippets and transaction controls.
 - src/mysql_editor/app.py — startup and shared product theme.
@@ -64,7 +64,7 @@ Build on Windows x64 with Inno Setup installed. Run the branding step before lau
 python -m pip install -e ".[dev]" pyinstaller
 python tools/build_brand_assets.py
 python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
-python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
+python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor-logo-transparent.png;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
 iscc installer/MySQLEditor.iss
 ~~~
 
@@ -97,7 +97,7 @@ python -m compileall -q src tests tools
 python -m pytest
 ~~~
 
-The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI runs an offscreen Qt UI smoke test for saved preferences and file-error recovery, builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
+The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. Regression tests cover SQL risk advisories for mutations wrapped in common CTEs, comments and string literals, and nested subqueries. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI runs an offscreen Qt UI smoke test for saved preferences and file-error recovery, builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
 
 ## Known v1 limitations
 
