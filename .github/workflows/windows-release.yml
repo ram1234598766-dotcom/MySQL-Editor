@@ -32,6 +32,35 @@ jobs:
         run: choco install innosetup --yes --no-progress
       - name: Build setup installer
         run: iscc installer/MySQLEditor.iss
+      - name: Smoke test installer install and uninstall
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path "dist/installer/MySQLEditor-Setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP "MySQLEditor-SmokeInstall"
+          & $installer "/VERYSILENT" "/SUPPRESSMSGBOXES" "/NORESTART" "/DIR=$installDir"
+          if ($LASTEXITCODE -ne 0) { throw "Silent installation failed with exit code $LASTEXITCODE" }
+          $installedExe = Join-Path $installDir "MySQLEditor.exe"
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (!(Test-Path $installedExe)) { throw "Installer did not install MySQLEditor.exe" }
+          if (!(Test-Path $uninstaller)) { throw "Inno Setup uninstaller was not created" }
+          & $uninstaller "/VERYSILENT" "/SUPPRESSMSGBOXES" "/NORESTART"
+          if ($LASTEXITCODE -ne 0) { throw "Uninstall failed with exit code $LASTEXITCODE" }
+      - name: Smoke launch packaged applications
+        shell: pwsh
+        run: |
+          $apps = @(
+            (Resolve-Path "dist/MySQLEditor/MySQLEditor.exe").Path,
+            (Resolve-Path "dist/MySQLEditor-Portable.exe").Path
+          )
+          foreach ($appPath in $apps) {
+            $process = Start-Process -FilePath $appPath -PassThru
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Application exited during startup: $appPath (exit code $($process.ExitCode))"
+            }
+            Stop-Process -Id $process.Id -Force
+          }
       - name: Verify expected output files
         shell: pwsh
         run: |
