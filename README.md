@@ -41,7 +41,7 @@ MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and ru
 - **Desktop and Android implementation:** Python/Tkinter Windows client plus an Android app paired with the desktop-hosted HTTPS companion.
 - **Original application identity:** the Android package remains `com.mysqlidle.mobile`. Keep this application ID and the existing Android signing key stable for users to receive in-place updates.
 - **Upgrade compatibility:** the Windows installer uses the previous product's installer ID and retains the existing `MySQL IDLE` install/data directory paths. These are intentional compatibility paths, not the displayed product name.
-- **New download names:** the current build workflow uses `MySQLEditor-Setup.exe`, `MySQLEditor_Portable.exe`, `MySQLEditor-Folder.zip`, and `MySQLEditor-Mobile-release.apk/.aab` for its intended distribution packages.
+- **New download names:** the current build workflow uses `MySQLEditor-Setup.exe`, `MySQLEditor_Portable.exe`, `MySQLEditor-Folder.zip`, and `MySQLEditor-Mobile-release.apk` for Android. The workflow intentionally builds APK files only.
 
 Use the repository's [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml) for the current build result. A workflow artifact is a temporary CI output; only a published asset on the [Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases) is a GitHub release download. The Android workflow intentionally does not publish a debug APK as a public release.
 
@@ -98,7 +98,6 @@ Expected public-release filenames:
 | Windows portable executable | `MySQLEditor_Portable.exe` | Run without installing |
 | Windows application folder | `MySQLEditor-Folder.zip` | Extract the entire folder and keep its files together |
 | Android APK | `MySQLEditor-Mobile-release.apk` | Direct Android installation/testing |
-| Android App Bundle | `MySQLEditor-Mobile-release.aab` | Upload to Google Play Console; not directly installable |
 | SHA-256 manifest | `SHA256SUMS` | Verify downloaded assets |
 
 A valid signature and passing CI checks do **not** guarantee that Google Play Protect will classify an app as safe. If Android explicitly says an app is harmful, cancel installation rather than overriding the warning. Do not disable Play Protect or repackage the app to evade it. If a released build appears to be misclassified, use Google's [official app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033).
@@ -342,7 +341,7 @@ Read [SECURITY.md](SECURITY.md) before deploying the app in a sensitive environm
 
 ### Android permission and installation status
 
-The Android manifest requests `INTERNET`; cleartext HTTP is disabled. CI checks requested permissions and installs/launches an APK on an Android emulator. When all four Android signing secrets are configured and validated, CI builds a release-signed APK/App Bundle and verifies the APK signature. Without those secrets, CI builds a debug package for CI testing and does not publish it as a public release. The Python dependency and static-analysis security workflow runs separately.
+The Android manifest requests `INTERNET`; cleartext HTTP is disabled. CI checks requested permissions and installs/launches an APK on an Android emulator. When all four Android signing secrets are configured and validated, CI builds a release-signed APK and verifies its signature. Without those secrets, CI builds a debug APK for CI testing and does not publish it as a public release. This workflow does not build or publish an Android App Bundle. The Python dependency and static-analysis security workflow runs separately.
 
 Those checks are useful evidence about the package and source but **are not a guarantee of zero vulnerabilities or Google's Play Protect verdict**. Do not bypass a “harmful app” warning. Cancel installation and submit an appeal if you believe Google has misclassified the app; see [Google's official process](https://support.google.com/googleplay/android-developer/answer/2992033).
 
@@ -391,19 +390,18 @@ Install JDK 17 and Android SDK Platform 36/build tools. The exact logo is alread
 
 ```powershell
 Set-Location android-app
-gradle --no-daemon assembleDebug bundleDebug
+gradle --no-daemon assembleDebug
 ```
 
 Expected debug output:
 
 - `app\build\outputs\apk\debug\app-debug.apk`
-- `app\build\outputs\bundle\debug\app-debug.aab`
 
 Debug packages are for development/testing and are not the signed public release artifacts. For a release build, configure the Android signing secrets in GitHub Actions and use the project workflow. Read [SIGNING.md](SIGNING.md) carefully before creating, replacing or migrating signing keys. Losing or rotating the signing identity can prevent installed users from updating in place.
 
 ### Android release signing
 
-The workflow produces a release-signed APK and an additional App Bundle only when the required signing secrets are configured and validated. Use the APK for direct installation/testing. Do not commit keystores, private keys, passwords, PFX files or other signing secrets to Git. See [SIGNING.md](SIGNING.md) for exact setup, recovery, signing continuity and Windows code-signing instructions.
+The workflow produces a release-signed APK only when the required signing secrets are configured and validated. This project intentionally produces no `.aab` file. Use the APK for direct installation/testing. Do not commit keystores, private keys, passwords, PFX files or other signing secrets to Git. See [SIGNING.md](SIGNING.md) for exact setup, recovery, signing continuity and Windows code-signing instructions.
 
 ## Tests and continuous integration
 
