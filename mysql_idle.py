@@ -1355,9 +1355,9 @@ class MySQLIDLE:
         root.title(APP_NAME)
         _apply_window_icon(root)
         _configure_ttk_style(root)
-        root.geometry("1080x720")
-        root.minsize(760, 500)
-        root.configure(bg="#F5F8FC")
+        root.geometry("1360x860")
+        root.minsize(1000, 640)
+        root.configure(bg="#090E17")
 
         families = set(tkfont.families())
         family = next((f for f in ("Consolas", "Menlo", "DejaVu Sans Mono") if f in families), "Courier New")
@@ -1451,93 +1451,462 @@ class MySQLIDLE:
         self.root.config(menu=bar)
 
     def build_ui(self):
-        # Application chrome: show the same untouched logo that appears in the README
-        # and connection page. Display it at its original 96x96 pixels; do not scale it.
-        header = tk.Frame(self.root, bg="#0B182A", padx=18, pady=10)
+        """Build the responsive, dark SQL workspace from the Figma desktop concept."""
+        c = {
+            "canvas": "#090E17", "surface": "#121A26", "surface_alt": "#172130",
+            "editor": "#060A11", "line": "#29384F", "text": "#E8F2FF",
+            "muted": "#9CB0CC", "accent": "#3687F5", "success": "#3DD194",
+            "danger": "#FF8F98",
+        }
+        self.ui_colors = c
+
+        # Top chrome uses the actual bundled logo, not a recreated placeholder.
+        header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=10, bd=0)
         header.pack(side=tk.TOP, fill=tk.X)
         self.brand_header = header
         logo_path = _resource_path(Path("assets") / "mysqlidle-logo.png")
         self.brand_logo_source = None
         self.brand_logo_image = None
+        self.brand_logo_label = None
         if logo_path.is_file():
             try:
                 self.brand_logo_source = tk.PhotoImage(file=str(logo_path))
-                self.brand_logo_image = self.brand_logo_source
+                source = self.brand_logo_source
+                sx = max(1, (source.width() + 33) // 34)
+                sy = max(1, (source.height() + 33) // 34)
+                self.brand_logo_image = source.subsample(sx, sy)
+                logo_box = tk.Frame(header, bg=c["surface"], width=34, height=34)
+                logo_box.pack(side=tk.LEFT, padx=(0, 14))
+                logo_box.pack_propagate(False)
                 self.brand_logo_label = tk.Label(
-                    header, image=self.brand_logo_image, bg="#0B182A", bd=0,
-                    highlightthickness=0,
+                    logo_box, image=self.brand_logo_image, bg=c["surface"],
+                    bd=0, highlightthickness=0,
                 )
-                self.brand_logo_label.pack(side=tk.LEFT, padx=(0, 16))
+                self.brand_logo_label.place(relx=0.5, rely=0.5, anchor="center")
             except (tk.TclError, OSError):
                 self.brand_logo_source = None
                 self.brand_logo_image = None
-                self.brand_logo_label = None
 
-        brand_copy = tk.Frame(header, bg="#0B182A", bd=0, highlightthickness=0)
-        brand_copy.pack(side=tk.LEFT, fill=tk.Y, expand=False, pady=(12, 0))
+        brand_copy = tk.Frame(header, bg=c["surface"], bd=0)
+        brand_copy.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(
-            brand_copy, text="MySQL Editor", bg="#0B182A", fg="#FFFFFF",
-            font=("Segoe UI", 18, "bold"), anchor="w",
+            brand_copy, text="MySQL Editor", bg=c["surface"], fg=c["text"],
+            font=("Segoe UI", 15, "bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
-            brand_copy, text="MySQL / MariaDB SQL workspace", bg="#0B182A",
-            fg="#B9C8DD", font=("Segoe UI", 10), anchor="w",
-        ).pack(anchor="w", pady=(4, 0))
+            brand_copy, text="MySQL / MariaDB workspace", bg=c["surface"],
+            fg=c["muted"], font=("Segoe UI", 9), anchor="w",
+        ).pack(anchor="w", pady=(2, 0))
 
-        brand_note = tk.Label(
-            header, text="DESKTOP SQL WORKSPACE", bg="#0B182A", fg="#8FA8C8",
-            font=("Segoe UI", 9, "bold"), padx=12, pady=7,
-            bd=0, highlightthickness=0,
-        )
-        brand_note.pack(side=tk.RIGHT, anchor="center", padx=(8, 4))
+        self.connection_badge_var = tk.StringVar(value="●  Not connected")
+        tk.Label(
+            header, textvariable=self.connection_badge_var, bg=c["surface_alt"],
+            fg=c["muted"], font=("Segoe UI", 9, "bold"), padx=12, pady=8,
+            bd=0, highlightthickness=1, highlightbackground=c["line"],
+        ).pack(side=tk.RIGHT, padx=(10, 0))
+        tk.Button(
+            header, text="Help", command=self.menu_help, bg=c["surface_alt"],
+            fg=c["text"], activebackground=c["line"], activeforeground=c["text"],
+            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, bd=0, padx=15, pady=7,
+            cursor="hand2", highlightthickness=1, highlightbackground=c["line"],
+        ).pack(side=tk.RIGHT, padx=(0, 2))
+        tk.Frame(self.root, bg=c["line"], height=1, bd=0).pack(side=tk.TOP, fill=tk.X)
 
-        tk.Frame(self.root, bg="#263852", height=1, bd=0).pack(side=tk.TOP, fill=tk.X)
-
-        status = tk.Frame(self.root, bg="#EAF0F7", padx=10, pady=5)
+        # Fixed footer status line remains visible while the query console resizes.
+        status = tk.Frame(self.root, bg="#0C141F", padx=14, pady=7)
         status.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_var = tk.StringVar(value="Not connected")
         self.hint_var = tk.StringVar()
         tk.Label(
-            status, textvariable=self.status_var, bg="#EAF0F7", fg="#334155",
+            status, textvariable=self.status_var, bg="#0C141F", fg=c["muted"],
             anchor="w", padx=4, font=("Segoe UI", 9),
         ).pack(side=tk.LEFT)
         tk.Label(
-            status, textvariable=self.hint_var, bg="#EAF0F7", fg="#64748B",
+            status, textvariable=self.hint_var, bg="#0C141F", fg="#7F98B8",
             anchor="e", padx=4, font=("Segoe UI", 9),
         ).pack(side=tk.RIGHT)
 
-        frame = tk.Frame(self.root, bg="#F5F8FC", padx=10, pady=10)
-        frame.pack(fill=tk.BOTH, expand=True)
-        self.text = tk.Text(
-            frame, wrap=tk.NONE, font=self.font, bg="#FFFFFF", fg="#172033",
-            insertbackground="#2563EB", relief=tk.FLAT, undo=False, padx=14, pady=12,
-            selectbackground="#C9DDFB", selectforeground="#14213A",
-            highlightthickness=1, highlightbackground="#E2E8F0", highlightcolor="#93B4E8",
+        body = tk.Frame(self.root, bg=c["canvas"], bd=0)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Left rail mirrors Figma navigation, connection context and governance card.
+        sidebar = tk.Frame(body, bg=c["surface"], width=230, padx=12, pady=18)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.pack_propagate(False)
+        tk.Label(
+            sidebar, text="WORKSPACE", bg=c["surface"], fg=c["muted"],
+            font=("Segoe UI", 8, "bold"), anchor="w",
+        ).pack(fill=tk.X, padx=10, pady=(2, 12))
+
+        def nav_item(label, icon, command, active=False):
+            tk.Button(
+                sidebar, text=f"{icon}   {label}", command=command, anchor="w",
+                justify=tk.LEFT, bg=c["accent"] if active else c["surface"],
+                fg="#FFFFFF" if active else c["muted"],
+                activebackground=c["surface_alt"], activeforeground=c["text"],
+                font=("Segoe UI", 10, "bold" if active else "normal"),
+                relief=tk.FLAT, bd=0, padx=12, pady=10, cursor="hand2",
+                highlightthickness=0,
+            ).pack(fill=tk.X, pady=2)
+
+        nav_item("SQL Console", "⌘", self.focus_sql_console, active=True)
+        nav_item("Query history", "◷", self.open_history_browser)
+        nav_item("Saved snippets", "▤", self.insert_sql_snippet)
+        nav_item("Schema explorer", "▦", self.explore_schema)
+        tk.Frame(sidebar, bg=c["line"], height=1).pack(fill=tk.X, padx=7, pady=(16, 16))
+        tk.Label(
+            sidebar, text="ACTIVE CONNECTION", bg=c["surface"], fg=c["muted"],
+            font=("Segoe UI", 8, "bold"), anchor="w",
+        ).pack(fill=tk.X, padx=10, pady=(0, 12))
+
+        self.connection_host_var = tk.StringVar(value="Not connected")
+        self.connection_database_var = tk.StringVar(value="Open Connect to MySQL")
+        self.connection_tls_var = tk.StringVar(value="Certificate optional · advanced")
+        tk.Label(
+            sidebar, textvariable=self.connection_host_var, bg=c["surface"],
+            fg=c["text"], font=("Segoe UI", 10, "bold"), anchor="w",
+            justify=tk.LEFT, wraplength=190,
+        ).pack(fill=tk.X, padx=10)
+        tk.Label(
+            sidebar, textvariable=self.connection_database_var, bg=c["surface"],
+            fg=c["muted"], font=("Segoe UI", 9), anchor="w",
+            justify=tk.LEFT, wraplength=190,
+        ).pack(fill=tk.X, padx=10, pady=(5, 10))
+        tls_row = tk.Frame(sidebar, bg=c["surface"])
+        tls_row.pack(fill=tk.X, padx=10)
+        tk.Label(tls_row, text="●", bg=c["surface"], fg=c["success"],
+                 font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=(0, 7))
+        tk.Label(
+            tls_row, textvariable=self.connection_tls_var, bg=c["surface"],
+            fg=c["muted"], font=("Segoe UI", 8), anchor="w",
+            justify=tk.LEFT, wraplength=165,
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        policy = tk.Frame(
+            sidebar, bg=c["surface_alt"], padx=12, pady=11,
+            highlightthickness=1, highlightbackground=c["line"],
         )
-        ys = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.text.yview)
-        xs = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=self.text.xview)
+        policy.pack(side=tk.BOTTOM, fill=tk.X, padx=1, pady=(12, 1))
+        tk.Label(
+            policy, text="FEATURE GOVERNANCE", bg=c["surface_alt"], fg=c["muted"],
+            font=("Segoe UI", 7, "bold"), anchor="w",
+        ).pack(fill=tk.X)
+        tk.Button(
+            policy, text="Guarded execution  ›", command=self.show_feature_governance,
+            bg=c["surface_alt"], fg=c["text"], activebackground=c["line"],
+            activeforeground=c["text"], font=("Segoe UI", 9, "bold"),
+            relief=tk.FLAT, bd=0, anchor="w", cursor="hand2",
+        ).pack(fill=tk.X, pady=(5, 1))
+        tk.Label(
+            policy, text="High-impact SQL asks first", bg=c["surface_alt"],
+            fg=c["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(fill=tk.X)
+
+        # Main content column.
+        main = tk.Frame(body, bg=c["canvas"], padx=22, pady=18)
+        main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        heading = tk.Frame(main, bg=c["canvas"])
+        heading.pack(fill=tk.X, pady=(0, 14))
+        heading_copy = tk.Frame(heading, bg=c["canvas"])
+        heading_copy.pack(side=tk.LEFT, fill=tk.Y, expand=True)
+        tk.Label(
+            heading_copy, text="SQL Console", bg=c["canvas"], fg=c["text"],
+            font=("Segoe UI", 20, "bold"), anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            heading_copy, text="Write, inspect, and run queries with safer defaults.",
+            bg=c["canvas"], fg=c["muted"], font=("Segoe UI", 9), anchor="w",
+        ).pack(anchor="w", pady=(3, 0))
+
+        actions = tk.Frame(heading, bg=c["canvas"])
+        actions.pack(side=tk.RIGHT, anchor="center", padx=(10, 0))
+        def action_button(label, command, primary=False):
+            return tk.Button(
+                actions, text=label, command=command,
+                bg=c["accent"] if primary else c["surface_alt"],
+                fg="#FFFFFF" if primary else c["text"],
+                activebackground=c["line"], activeforeground=c["text"],
+                font=("Segoe UI", 8, "bold"), relief=tk.FLAT, bd=0,
+                padx=9, pady=7, cursor="hand2", highlightthickness=1,
+                highlightbackground=c["accent"] if primary else c["line"],
+            )
+        action_button("✦ Format SQL", self.format_current_sql).pack(side=tk.LEFT, padx=(0, 5))
+        action_button("Explain SELECT", self.explain_current_sql).pack(side=tk.LEFT, padx=(0, 5))
+        action_button("Copy SQL", self.copy_current_sql).pack(side=tk.LEFT, padx=(0, 5))
+        action_button("▶ Run SQL", self.run_current_sql, primary=True).pack(side=tk.LEFT)
+
+        # Existing terminal-style interaction is preserved inside the Figma editor card.
+        editor_card = tk.Frame(
+            main, bg=c["editor"], highlightthickness=1,
+            highlightbackground=c["line"], bd=0,
+        )
+        editor_card.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        editor_bar = tk.Frame(editor_card, bg=c["surface_alt"], padx=14, pady=10)
+        editor_bar.pack(side=tk.TOP, fill=tk.X)
+        tk.Label(
+            editor_bar, text="●  query.sql", bg=c["surface_alt"], fg=c["text"],
+            font=("Segoe UI", 9, "bold"), anchor="w",
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            editor_bar, text="Ctrl+Enter to run  ·  Ctrl+Shift+F to format",
+            bg=c["surface_alt"], fg=c["muted"], font=("Segoe UI", 8), anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        text_frame = tk.Frame(editor_card, bg=c["editor"], padx=9, pady=8)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        families = set(tkfont.families(self.root))
+        mono = next((name for name in ("Cascadia Code", "Consolas", "Menlo", "DejaVu Sans Mono") if name in families), "Courier New")
+        self.font = tkfont.Font(family=mono, size=10)
+        self.text = tk.Text(
+            text_frame, wrap=tk.NONE, font=self.font, bg=c["editor"], fg=c["text"],
+            insertbackground=c["accent"], relief=tk.FLAT, undo=False,
+            padx=14, pady=12, selectbackground="#21436E",
+            selectforeground="#FFFFFF", highlightthickness=0, borderwidth=0,
+            spacing1=2, spacing3=2,
+        )
+        ys = tk.Scrollbar(
+            text_frame, orient=tk.VERTICAL, command=self.text.yview,
+            bg=c["surface_alt"], activebackground=c["accent"],
+            troughcolor=c["editor"], relief=tk.FLAT, bd=0, width=12,
+        )
+        xs = tk.Scrollbar(
+            editor_card, orient=tk.HORIZONTAL, command=self.text.xview,
+            bg=c["surface_alt"], activebackground=c["accent"],
+            troughcolor=c["editor"], relief=tk.FLAT, bd=0, width=12,
+        )
         self.text.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
         xs.pack(side=tk.BOTTOM, fill=tk.X)
         ys.pack(side=tk.RIGHT, fill=tk.Y)
-        self.text.pack(fill=tk.BOTH, expand=True)
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text.tag_configure("kw", foreground="#62A4FF")
+        self.text.tag_configure("str", foreground="#3DD194")
+        self.text.tag_configure("comment", foreground="#9CB0CC")
+        self.text.tag_configure("prompt", foreground="#3687F5")
+        self.text.tag_configure("error", foreground=c["danger"])
+        self.text.tag_configure("ok", foreground=c["success"])
+        self.text.tag_configure("info", foreground=c["muted"])
+        self.text.tag_raise("sel")
 
-        t = self.text
-        # Later tags have higher priority, like IDLE's colours.
-        t.tag_configure("kw", foreground="#C45B0A")
-        t.tag_configure("str", foreground="#16803C")
-        t.tag_configure("comment", foreground="#B42318")
-        t.tag_configure("prompt", foreground="#2457C5")
-        t.tag_configure("error", foreground="#B42318")
-        t.tag_configure("ok", foreground="#18794E")
-        t.tag_configure("info", foreground="#64748B")
-        t.tag_raise("sel")
+        # Saved SQL snippet shelf.
+        shelf = tk.Frame(
+            main, bg=c["surface"], padx=14, pady=9,
+            highlightthickness=1, highlightbackground=c["line"],
+        )
+        shelf.pack(fill=tk.X, pady=(0, 12))
+        shelf_copy = tk.Frame(shelf, bg=c["surface"])
+        shelf_copy.pack(side=tk.LEFT, padx=(0, 15))
+        tk.Label(
+            shelf_copy, text="Saved snippets", bg=c["surface"], fg=c["text"],
+            font=("Segoe UI", 10, "bold"), anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            shelf_copy, text="Private to this device", bg=c["surface"],
+            fg=c["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(anchor="w", pady=(2, 0))
+        style = ttk.Style(self.root)
+        style.configure(
+            "Dark.TCombobox", fieldbackground=c["editor"], background=c["surface_alt"],
+            foreground=c["text"], arrowcolor=c["muted"], bordercolor=c["line"],
+            lightcolor=c["line"], darkcolor=c["line"], padding=(8, 7),
+        )
+        style.map(
+            "Dark.TCombobox", fieldbackground=[("readonly", c["editor"])],
+            foreground=[("readonly", c["text"])],
+            background=[("readonly", c["surface_alt"])],
+        )
+        self.snippet_choice = tk.StringVar(value="")
+        self.snippet_combo = ttk.Combobox(
+            shelf, textvariable=self.snippet_choice, state="readonly",
+            style="Dark.TCombobox", width=28,
+        )
+        self.snippet_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.snippet_insert_button = tk.Button(
+            shelf, text="Insert snippet", command=self.insert_selected_snippet,
+            bg=c["surface_alt"], fg=c["text"], activebackground=c["line"],
+            activeforeground=c["text"], font=("Segoe UI", 8, "bold"),
+            relief=tk.FLAT, bd=0, padx=12, pady=7, cursor="hand2",
+            highlightthickness=1, highlightbackground=c["line"],
+        )
+        self.snippet_insert_button.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(
+            shelf, text="SQL stays local", bg=c["surface"], fg=c["muted"],
+            font=("Segoe UI", 8), anchor="e",
+        ).pack(side=tk.RIGHT)
+        self.refresh_snippet_choices()
+
+        # Honest last-result metadata without displaying artificial demo rows.
+        result_card = tk.Frame(
+            main, bg=c["surface"], padx=14, pady=10,
+            highlightthickness=1, highlightbackground=c["line"],
+        )
+        result_card.pack(fill=tk.X)
+        result_top = tk.Frame(result_card, bg=c["surface"])
+        result_top.pack(fill=tk.X)
+        result_copy = tk.Frame(result_top, bg=c["surface"])
+        result_copy.pack(side=tk.LEFT, fill=tk.Y, expand=True)
+        tk.Label(
+            result_copy, text="Latest result", bg=c["surface"], fg=c["text"],
+            font=("Segoe UI", 10, "bold"), anchor="w",
+        ).pack(anchor="w")
+        self.result_meta_var = tk.StringVar(value="Run a query to see row counts and execution time.")
+        tk.Label(
+            result_copy, textvariable=self.result_meta_var, bg=c["surface"],
+            fg=c["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(anchor="w", pady=(3, 0))
+        result_actions = tk.Frame(result_top, bg=c["surface"])
+        result_actions.pack(side=tk.RIGHT)
+        tk.Button(
+            result_actions, text="CSV export", command=self.save_csv,
+            bg=c["surface_alt"], fg=c["text"], activebackground=c["line"],
+            activeforeground=c["text"], font=("Segoe UI", 8, "bold"),
+            relief=tk.FLAT, bd=0, padx=12, pady=7, cursor="hand2",
+            highlightthickness=1, highlightbackground=c["line"],
+        ).pack(side=tk.LEFT, padx=(0, 7))
+        tk.Button(
+            result_actions, text="Open table", command=self.show_grid,
+            bg=c["surface_alt"], fg=c["text"], activebackground=c["line"],
+            activeforeground=c["text"], font=("Segoe UI", 8, "bold"),
+            relief=tk.FLAT, bd=0, padx=12, pady=7, cursor="hand2",
+            highlightthickness=1, highlightbackground=c["line"],
+        ).pack(side=tk.LEFT)
 
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.context_menu.add_command(label="Cut", command=self.do_cut)
         self.context_menu.add_command(label="Copy", command=self.do_copy)
         self.context_menu.add_command(label="Paste", command=self.do_paste)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="Format Current SQL", command=self.format_current_sql)
+        self.context_menu.add_command(label="Explain Current SELECT", command=self.explain_current_sql)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="Clear Shell", command=self.clear_shell)
+
+    def refresh_connection_visuals(self):
+        """Reflect the live connection without placeholder or demo data."""
+        if not hasattr(self, "connection_badge_var"):
+            return
+        if self.connected:
+            info = self.conn_info or {}
+            host = str(info.get("host") or "MySQL server")
+            database = self.current_db or info.get("database") or ""
+            self.connection_badge_var.set("●  Connected")
+            self.connection_host_var.set(host)
+            self.connection_database_var.set("database: " + (str(database) if database else "no schema selected"))
+            self.connection_tls_var.set(
+                "TLS certificate verified" if info.get("tls_verify")
+                else "Certificate optional · advanced"
+            )
+        else:
+            self.connection_badge_var.set("●  Not connected")
+            self.connection_host_var.set("Not connected")
+            self.connection_database_var.set("Open Connect to MySQL")
+            self.connection_tls_var.set("Certificate optional · advanced")
+
+    def focus_sql_console(self):
+        try:
+            self.text.focus_set()
+            self.status_var.set("SQL Console ready.")
+        except tk.TclError:
+            pass
+
+    def open_history_browser(self):
+        entries = list(reversed(self.history[-MAX_HISTORY:]))
+        if not entries:
+            messagebox.showinfo("Query history", "No queries have been run in this session yet.", parent=self.root)
+            return
+        win = tk.Toplevel(self.root)
+        _apply_window_icon(win)
+        win.title("MySQL Editor · Query history")
+        win.configure(bg="#090E17")
+        win.geometry("720x430")
+        win.transient(self.root)
+        outer = tk.Frame(win, bg="#090E17", padx=16, pady=14)
+        outer.pack(fill=tk.BOTH, expand=True)
+        tk.Label(
+            outer, text="Session query history", bg="#090E17", fg="#E8F2FF",
+            font=("Segoe UI", 14, "bold"), anchor="w",
+        ).pack(fill=tk.X, pady=(0, 9))
+        list_frame = tk.Frame(
+            outer, bg="#060A11", highlightthickness=1, highlightbackground="#29384F",
+        )
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        box = tk.Listbox(
+            list_frame, bg="#060A11", fg="#E8F2FF", selectbackground="#21436E",
+            selectforeground="#FFFFFF", font=("Consolas", 10), relief=tk.FLAT,
+            borderwidth=0, activestyle="dotbox",
+        )
+        scroll = tk.Scrollbar(list_frame, command=box.yview, bg="#172130", troughcolor="#060A11")
+        box.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        for sql in entries:
+            box.insert(tk.END, sql.replace("\n", "  ↵  "))
+        def use_selected(_event=None):
+            selected = box.curselection()
+            if not selected:
+                return
+            self.set_input(entries[selected[0]])
+            self.text.focus_set()
+            self.status_var.set("Selected a history entry. Review it before execution.")
+            win.destroy()
+        box.bind("<Double-Button-1>", use_selected)
+        row = tk.Frame(outer, bg="#090E17")
+        row.pack(fill=tk.X, pady=(10, 0))
+        tk.Label(
+            row, text="Stored in memory only for this session by default.",
+            bg="#090E17", fg="#9CB0CC", font=("Segoe UI", 8),
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            row, text="Insert selected", command=use_selected, bg="#3687F5",
+            fg="#FFFFFF", activebackground="#2B6CC0", relief=tk.FLAT, bd=0,
+            padx=13, pady=7, cursor="hand2",
+        ).pack(side=tk.RIGHT)
+
+    def explore_schema(self):
+        if not self.connected:
+            self.status_var.set("Connect to MySQL before exploring the schema.")
+            self.connect_dialog()
+            return
+        self.inject("SHOW TABLES;" if self.current_db else "SHOW DATABASES;")
+        self.text.focus_set()
+
+    def refresh_snippet_choices(self):
+        if not hasattr(self, "snippet_combo"):
+            return
+        snippets = load_snippets(SQL_SNIPPETS_PATH)
+        self._snippet_map = snippets
+        names = sorted(snippets, key=str.casefold)
+        self.snippet_combo.configure(values=names or ["No saved snippets"])
+        self.snippet_choice.set(names[0] if names else "No saved snippets")
+        self.snippet_insert_button.configure(state=tk.NORMAL if names else tk.DISABLED)
+
+    def insert_selected_snippet(self):
+        snippets = getattr(self, "_snippet_map", {})
+        name = self.snippet_choice.get()
+        sql = snippets.get(name)
+        if not sql:
+            self.insert_sql_snippet()
+            self.refresh_snippet_choices()
+            return
+        self.set_input(sql)
+        self.text.focus_set()
+        self.status_var.set(f"Inserted SQL snippet: {name}. Review it before execution.")
+
+    def run_current_sql(self):
+        selected = ""
+        try:
+            selected = self.text.get("sel.first", "sel.last").strip()
+        except tk.TclError:
+            pass
+        current = self._current_sql()
+        sql = selected or current
+        if not sql:
+            self.status_var.set("Enter a SQL statement before running it.")
+            self.text.focus_set()
+            return
+        if selected and selected != current:
+            self.set_input(selected)
+        self.text.focus_set()
+        self.submit()
 
     def bind_keys(self):
         t = self.text
@@ -1872,6 +2241,7 @@ class MySQLIDLE:
             logging.exception("Could not save SQL snippet")
             messagebox.showerror("Save SQL Snippet", str(exc), parent=self.root)
             return
+        self.refresh_snippet_choices()
         self.status_var.set(f"Saved SQL snippet: {name}")
 
     def insert_sql_snippet(self):
@@ -2015,6 +2385,11 @@ class MySQLIDLE:
         return approvals
 
     def show_result(self, columns, rows, row_count, elapsed):
+        if hasattr(self, "result_meta_var"):
+            self.result_meta_var.set(
+                f"Empty set · {elapsed:.2f} s" if row_count == 0
+                else f"{row_count:,} rows · {elapsed:.3f} s · {len(columns)} columns"
+            )
         if row_count == 0:
             self.write(f"Empty set ({elapsed:.2f} sec)\n", "info")
             return
@@ -2064,6 +2439,7 @@ class MySQLIDLE:
                     self.conn_info = info
                     self.current_db = current_db
                     self.identifiers = identifiers
+                    self.refresh_connection_visuals()
                     if connected and self._startup_reveal_pending:
                         self._startup_reveal_pending = False
                         self._pending_startup_connect_error = None
