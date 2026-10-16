@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
+from mysql_editor.core import redact_secrets
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import CredentialStore, ConnectionProfile, LocalRepository
 from mysql_editor.ui.connection_dialog import ConnectionDialog
@@ -94,7 +95,7 @@ def main() -> int:
                 QMessageBox.warning(
                     None, "Profile not saved",
                     "Connected successfully, but the connection could not be saved to secure storage. "
-                    "The password was not written to a plaintext file.\n\n" + str(exc),
+                    "The password was not written to a plaintext file.\n\n" + redact_secrets(str(exc)),
                 )
         window = MainWindow(worker, repository, credentials, profile, config, result)
         windows["main"] = window
