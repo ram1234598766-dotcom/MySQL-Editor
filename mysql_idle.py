@@ -1359,7 +1359,7 @@ class MySQLIDLE:
         _apply_window_icon(root)
         _configure_ttk_style(root)
         root.geometry("1360x860")
-        root.minsize(1000, 640)
+        root.minsize(1080, 700)
         root.configure(bg="#090E17")
 
         families = set(tkfont.families())
@@ -1464,7 +1464,7 @@ class MySQLIDLE:
         self.ui_colors = c
 
         # Top chrome uses the actual bundled logo, not a recreated placeholder.
-        header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=10, bd=0)
+        header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=18, bd=0)
         header.pack(side=tk.TOP, fill=tk.X)
         self.brand_header = header
         logo_path = _resource_path(Path("assets") / "mysqlidle-logo.png")
@@ -1717,7 +1717,7 @@ class MySQLIDLE:
             font=("Segoe UI", 10, "bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
-            shelf_copy, text="Private to this device", bg=c["surface"],
+            shelf_copy, text="Stored locally on Windows", bg=c["surface"],
             fg=c["muted"], font=("Segoe UI", 8), anchor="w",
         ).pack(anchor="w", pady=(2, 0))
         style = ttk.Style(self.root)
@@ -1746,7 +1746,7 @@ class MySQLIDLE:
         )
         self.snippet_insert_button.pack(side=tk.LEFT, padx=(0, 10))
         tk.Label(
-            shelf, text="SQL stays local", bg=c["surface"], fg=c["muted"],
+            shelf, text="Only save reviewed SQL", bg=c["surface"], fg=c["muted"],
             font=("Segoe UI", 8), anchor="e",
         ).pack(side=tk.RIGHT)
         self.refresh_snippet_choices()
@@ -1762,7 +1762,7 @@ class MySQLIDLE:
         result_copy = tk.Frame(result_top, bg=c["surface"])
         result_copy.pack(side=tk.LEFT, fill=tk.Y, expand=True)
         tk.Label(
-            result_copy, text="Latest result", bg=c["surface"], fg=c["text"],
+            result_copy, text="Results", bg=c["surface"], fg=c["text"],
             font=("Segoe UI", 10, "bold"), anchor="w",
         ).pack(anchor="w")
         self.result_meta_var = tk.StringVar(value="Run a query to see row counts and execution time.")
@@ -1773,7 +1773,7 @@ class MySQLIDLE:
         result_actions = tk.Frame(result_top, bg=c["surface"])
         result_actions.pack(side=tk.RIGHT)
         tk.Button(
-            result_actions, text="CSV export", command=self.save_csv,
+            result_actions, text="Export CSV", command=self.save_csv,
             bg=c["surface_alt"], fg=c["text"], activebackground=c["line"],
             activeforeground=c["text"], font=("Segoe UI", 8, "bold"),
             relief=tk.FLAT, bd=0, padx=12, pady=7, cursor="hand2",
