@@ -11,7 +11,8 @@ Use GitHub's private vulnerability reporting feature where available, or open a 
 ## Security controls and limits
 
 - The local master password is stored as an Argon2id verifier, not reversibly. It protects this PC only and is not synchronized to other devices.
-- Saved database passwords are stored through Windows Credential Manager only. No plaintext file fallback is available.
+- Saved database passwords are stored through Windows Credential Manager only. No plaintext file fallback is available. After the master password is verified, the app uses the last remembered profile to reconnect automatically; missing or rejected credentials return to the connection form.
+- The master password is an application-session gate, not the encryption key for Windows Credential Manager. Credential-vault security is provided by the Windows user account and operating system.
 - Database passwords should never be pasted into SQL text or saved SQL files.
 - TLS behavior is explicit. Automatic TLS may encrypt transport without verifying server identity. Strict mode enables certificate and hostname verification. Disabled TLS is an explicit choice for trusted local use only.
 - Query history is opt-in and stores SQL text when enabled.
