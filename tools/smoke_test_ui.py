@@ -9,11 +9,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PySide6.QtCore import QSettings, Signal
+from PySide6.QtCore import QObject, QSettings, Signal
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject
 
 from mysql_editor.storage import CredentialStore, LocalRepository
 from mysql_editor.ui.main_window import MainWindow
@@ -72,6 +69,8 @@ def main():
 
         first, first_repo = make_window(root / "settings-one.sqlite3")
         first.resize(1360, 900)
+        first.show()
+        app.processEvents()
         editor = first._current_editor()
         assert editor is not None
         assert editor.font().pointSize() == 10
@@ -79,6 +78,7 @@ def main():
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
         first.main_split.setSizes([240, 800, 320])
+        app.processEvents()
         first.inspector_tabs.setCurrentIndex(1)
 
         original_count = first.editors.count()
@@ -102,9 +102,11 @@ def main():
         assert int(settings.value("ui/editorFontSize", 0)) == 11
         assert int(settings.value("ui/inspectorTab", -1)) == 1
         saved_sizes = settings.value("ui/mainSplitterSizes", [])
-        assert len(saved_sizes) == 3
+        assert len(saved_sizes) == 3 and all(int(size) > 0 for size in saved_sizes)
 
         second, second_repo = make_window(root / "settings-two.sqlite3")
+        second.show()
+        app.processEvents()
         restored = second._current_editor()
         assert restored is not None and restored.font().pointSize() == 11
         assert second.inspector_tabs.currentIndex() == 1
