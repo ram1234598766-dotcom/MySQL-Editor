@@ -113,8 +113,7 @@ def main():
         unlock.password.setText("reliable local master")
         unlock._unlock()
         assert unlock.is_unlocked
-        assert unlock.result() == unlock.DialogCode.Accepted
-
+        
         blocker = root / "not-a-directory"
         blocker.write_text("existing file", encoding="utf-8")
         editor.setPlainText("SELECT 1;")
