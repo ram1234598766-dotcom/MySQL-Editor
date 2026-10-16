@@ -14,7 +14,7 @@ on:
       - "android-app/**"
       - "tools/generate_brand_assets.py"
       - "tools/sync_logo_resources.py"
-      - "assets/mysqlidle-logo.png"
+      - "assets/mysql-editor-logo.jpg"
   pull_request:
     paths:
       - ".github/workflows/build-exe-apk.yml"
@@ -26,7 +26,7 @@ on:
       - "android-app/**"
       - "tools/generate_brand_assets.py"
       - "tools/sync_logo_resources.py"
-      - "assets/mysqlidle-logo.png"
+      - "assets/mysql-editor-logo.jpg"
   workflow_dispatch:
 
 permissions:
