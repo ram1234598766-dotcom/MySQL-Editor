@@ -6,11 +6,11 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, Qt, QTimer
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
-    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
+    QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
     QTabWidget, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -44,6 +44,8 @@ class ResultsModel(QAbstractTableModel):
         if not index.isValid():
             return None
         value = self.rows[index.row()][index.column()]
+        if role == Qt.ItemDataRole.UserRole:
+            return value
         if role == Qt.ItemDataRole.DisplayRole:
             return "(NULL)" if value is None else str(value)
         if role == Qt.ItemDataRole.ForegroundRole and value is None:
@@ -79,6 +81,23 @@ class ResultsModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
 
+class ResultsFilterProxyModel(QSortFilterProxyModel):
+    """Searchable result model with numeric-aware sorting for heterogeneous SQL values."""
+
+    @staticmethod
+    def _sort_key(index):
+        value = index.data(Qt.ItemDataRole.UserRole)
+        if value is None:
+            return (1, 0, "")
+        try:
+            return (0, 0, Decimal(str(value)))
+        except (InvalidOperation, ValueError):
+            return (0, 1, str(value).casefold())
+
+    def lessThan(self, left, right):
+        return self._sort_key(left) < self._sort_key(right)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, worker: DatabaseWorker, repository: LocalRepository,
                  credentials: CredentialStore, profile: dict, config: dict, connect_result: dict):
@@ -90,6 +109,8 @@ class MainWindow(QMainWindow):
         self.config = config
         self.connect_result = connect_result
         self._jobs: dict[str, tuple[str, dict]] = {}
+        self._schema_completion_words: set[str] = set()
+        self._result_completion_words: set[str] = set()
         self._query_running = False
         self._current_result_id: str | None = None
         self._query_results: list[dict] = []
@@ -258,6 +279,17 @@ class MainWindow(QMainWindow):
         self.result_picker.setMinimumWidth(165)
         self.result_picker.setMaximumWidth(245)
         self.result_picker.currentIndexChanged.connect(self._select_result)
+        self.result_filter = QLineEdit()
+        self.result_filter.setObjectName("resultQuickFilter")
+        self.result_filter.setPlaceholderText("Filter visible rows…")
+        self.result_filter.setAccessibleName("Filter result rows")
+        self.result_filter.setClearButtonEnabled(True)
+        self.result_filter.setMinimumWidth(150)
+        self.result_filter.setMaximumWidth(250)
+        self.result_filter.setToolTip(
+            "Filters the visible grid only. CSV export still includes every fetched row."
+        )
+        self.result_filter.textChanged.connect(self._filter_results)
         self.query_meta = QLabel("Ready")
         self.query_meta.setObjectName("mutedText")
         self.stop_button = QPushButton("Stop")
@@ -271,6 +303,7 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export_results)
         toolbar.addWidget(self.results_title)
         toolbar.addWidget(self.result_picker)
+        toolbar.addWidget(self.result_filter)
         toolbar.addWidget(self.query_meta, 1)
         toolbar.addWidget(self.stop_button)
         toolbar.addWidget(self.commit_button)
@@ -280,7 +313,11 @@ class MainWindow(QMainWindow):
         self.result_model = ResultsModel()
         self.result_grid = QTableView()
         self.result_grid.setObjectName("resultsGrid")
-        self.result_grid.setModel(self.result_model)
+        self.result_proxy = ResultsFilterProxyModel(self)
+        self.result_proxy.setSourceModel(self.result_model)
+        self.result_proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.result_proxy.setFilterKeyColumn(-1)
+        self.result_grid.setModel(self.result_proxy)
         self.result_grid.setSortingEnabled(True)
         self.result_grid.setAlternatingRowColors(True)
         self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
@@ -514,6 +551,7 @@ class MainWindow(QMainWindow):
 
     def new_query_tab(self, text: str = "", path: str | None = None):
         editor = SqlEditor()
+        editor.set_completion_words(self._schema_completion_words | self._result_completion_words)
         font = editor.font()
         font.setPointSize(self._editor_font_size)
         editor.setFont(font)
@@ -683,7 +721,36 @@ class MainWindow(QMainWindow):
                     item.addChild(child)
                 item.setExpanded(True)
             self.schema_tree.addTopLevelItem(item)
+        self._schema_completion_words = {
+            str(database) for database in result.get("databases", [])
+        }
+        self._schema_completion_words.update(
+            str(record.get("name", "")) for record in result.get("objects", [])
+        )
+        self._update_all_editor_completions()
         self.status.setText(f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)")
+
+    def _update_all_editor_completions(self) -> None:
+        words = self._schema_completion_words | self._result_completion_words
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                editor.set_completion_words(words)
+
+    def _set_result_completion_words(self, headers) -> None:
+        self._result_completion_words = {str(header) for header in headers}
+        self._update_all_editor_completions()
+
+    def _filter_results(self, value: str) -> None:
+        query = value.strip()
+        self.result_proxy.setFilterFixedString(query)
+        if query:
+            total = len(self.result_model.rows)
+            visible = self.result_proxy.rowCount()
+            self.result_message.setText(
+                f"Quick filter: {visible:,} of {total:,} visible row(s) match. "
+                f"CSV export still includes all {total:,} fetched rows."
+            )
 
     def _schema_item_activated(self, item, _column):
         data = item.data(0, Qt.ItemDataRole.UserRole) or {}
@@ -704,6 +771,8 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
             return
         item = self._query_results[index]
+        self.result_filter.clear()
+        self._set_result_completion_words(item.get("headers", []))
         self.result_model.update(item.get("headers", []), item.get("rows", []))
         self._current_result_id = item.get("result_id")
         total = item.get("row_count", len(item.get("rows", [])))
@@ -769,6 +838,8 @@ class MainWindow(QMainWindow):
             else:
                 self.status.setText(result.get("error", "Could not load schemas."))
                 self.schema_tree.clear()
+                self._schema_completion_words.clear()
+                self._update_all_editor_completions()
             return
         if action in {"commit", "rollback"}:
             self.status.setText(result.get("message", result.get("error", action.title())))
@@ -813,7 +884,8 @@ class MainWindow(QMainWindow):
             return
         by_row: dict[int, list[tuple[int, str]]] = {}
         for index in indexes:
-            value = self.result_model.rows[index.row()][index.column()]
+            source_index = self.result_proxy.mapToSource(index)
+            value = self.result_model.rows[source_index.row()][source_index.column()]
             by_row.setdefault(index.row(), []).append((index.column(), "" if value is None else str(value)))
         lines = [
             "\t".join(value for _, value in sorted(items))
