@@ -2,7 +2,7 @@ name: MySQL Editor Windows packages
 
 on:
   push:
-    branches: [desktop-rebuild]
+    branches: [main, desktop-rebuild]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -75,11 +75,24 @@ jobs:
             if ($item.Length -lt 100000) { throw "Package looks incomplete: $path ($($item.Length) bytes)" }
           }
           Get-Item $expected | Format-Table Name,Length
+      - name: Generate CycloneDX dependency SBOM and stage release notes
+        shell: pwsh
+        run: |
+          python -m pip_audit -r requirements.txt --format cyclonedx-json --output dist/sbom.cdx.json
+          Copy-Item "RELEASE-NOTES.md" "dist/RELEASE-NOTES.md"
+          Copy-Item "WINDOWS_SIGNING.md" "dist/WINDOWS_SIGNING.md"
       - name: Create folder archive and SHA-256 manifest
         shell: pwsh
         run: |
           Compress-Archive -Path "dist/MySQLEditor/*" -DestinationPath "dist/MySQLEditor-Folder.zip" -CompressionLevel Optimal
-          $items = @("dist/MySQLEditor-Portable.exe","dist/installer/MySQLEditor-Setup.exe","dist/MySQLEditor-Folder.zip")
+          $items = @(
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe",
+            "dist/MySQLEditor-Folder.zip",
+            "dist/sbom.cdx.json",
+            "dist/RELEASE-NOTES.md",
+            "dist/WINDOWS_SIGNING.md"
+          )
           foreach ($item in $items) {
             $hash = (Get-FileHash $item -Algorithm SHA256).Hash.ToLower()
             "$hash  $(Split-Path $item -Leaf)" | Add-Content "dist/SHA256SUMS"
@@ -101,4 +114,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release create "$env:GITHUB_REF_NAME" dist/MySQLEditor-Portable.exe dist/installer/MySQLEditor-Setup.exe dist/MySQLEditor-Folder.zip dist/SHA256SUMS --title "MySQL Editor $env:GITHUB_REF_NAME" --notes "Windows desktop-only build. Verify signing status and manually test the package before broad distribution."
+          $releaseArgs = @(
+            "release", "create", "$env:GITHUB_REF_NAME",
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe",
+            "dist/MySQLEditor-Folder.zip",
+            "dist/SHA256SUMS",
+            "dist/sbom.cdx.json",
+            "dist/RELEASE-NOTES.md",
+            "dist/WINDOWS_SIGNING.md",
+            "--title", "MySQL Editor $env:GITHUB_REF_NAME",
+            "--notes-file", "dist/RELEASE-NOTES.md"
+          )
+          if ($env:GITHUB_REF_NAME -match "-(alpha|beta|rc)") {
+            $releaseArgs += "--prerelease"
+          }
+          gh @releaseArgs
