@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
@@ -24,7 +24,10 @@ def _contained_logo(max_width: int, max_height: int) -> Image.Image:
         logo = source.convert("RGBA")
     scale = min(max_width / logo.width, max_height / logo.height)
     size = (max(1, round(logo.width * scale)), max(1, round(logo.height * scale)))
-    return logo.resize(size, Image.Resampling.LANCZOS)
+    resized = logo.resize(size, Image.Resampling.LANCZOS)
+    # Lanczos preserves detail; a light unsharp mask restores edge contrast after
+    # downsampling, particularly at Windows shell-icon and installer sizes.
+    return resized.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
 
 
 def _render_mark(size: int) -> Image.Image:
