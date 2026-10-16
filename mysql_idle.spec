@@ -9,7 +9,7 @@ a = Analysis(
     ['mysql_idle.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets/mysqlidle.ico', 'assets'), ('assets/mysqlidle-logo.png', 'assets')],
+    datas=[('assets/mysqlidle.ico', 'assets'), ('assets/mysql-editor-logo.jpg', 'assets')],
     hiddenimports=['pymysql', 'pymysql.cursors', 'mobile_companion'],
     hookspath=[],
     hooksconfig={},
