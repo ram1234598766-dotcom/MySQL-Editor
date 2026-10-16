@@ -1404,7 +1404,7 @@ class MySQLIDLE:
         edit_m.add_command(label="Save SQL Snippet...", command=self.save_sql_snippet)
         edit_m.add_command(label="Insert Saved SQL Snippet...", command=self.insert_sql_snippet)
         edit_m.add_separator()
-        edit_m.add_command(label="Clear Shell", accelerator="Ctrl+L", command=self.clear_shell)
+        edit_m.add_command(label="Clear SQL editor", accelerator="Ctrl+L", command=self.clear_shell)
         bar.add_cascade(label="Edit", menu=edit_m)
 
         db_m = tk.Menu(bar, tearoff=0)
@@ -1636,7 +1636,7 @@ class MySQLIDLE:
         action_button("Copy SQL", self.copy_current_sql).pack(side=tk.LEFT, padx=(0, 5))
         action_button("▶ Run SQL", self.run_current_sql, primary=True).pack(side=tk.LEFT)
 
-        # Existing terminal-style interaction is preserved inside the Figma editor card.
+        # Real multiline SQL editor: no mysql> prompt or transcript inside this surface.
         editor_card = tk.Frame(
             main, bg=c["editor"], highlightthickness=1,
             highlightbackground=c["line"], bd=0,
@@ -1658,12 +1658,16 @@ class MySQLIDLE:
         families = set(tkfont.families(self.root))
         mono = next((name for name in ("Cascadia Code", "Consolas", "Menlo", "DejaVu Sans Mono") if name in families), "Courier New")
         self.font = tkfont.Font(family=mono, size=10)
+        self.line_numbers = tk.Canvas(
+            text_frame, width=38, bg=c["editor"], highlightthickness=0, bd=0,
+        )
+        self.line_numbers.pack(side=tk.LEFT, fill=tk.Y)
         self.text = tk.Text(
             text_frame, wrap=tk.NONE, font=self.font, bg=c["editor"], fg=c["text"],
-            insertbackground=c["accent"], relief=tk.FLAT, undo=False,
-            padx=14, pady=12, selectbackground="#21436E",
+            insertbackground=c["accent"], relief=tk.FLAT, undo=True,
+            padx=10, pady=12, selectbackground="#21436E",
             selectforeground="#FFFFFF", highlightthickness=0, borderwidth=0,
-            spacing1=2, spacing3=2,
+            spacing1=2, spacing3=2, tabs=(self.font.measure("    "),),
         )
         ys = tk.Scrollbar(
             text_frame, orient=tk.VERTICAL, command=self.text.yview,
@@ -1675,10 +1679,17 @@ class MySQLIDLE:
             bg=c["surface_alt"], activebackground=c["accent"],
             troughcolor=c["editor"], relief=tk.FLAT, bd=0, width=12,
         )
-        self.text.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        self.text.configure(
+            yscrollcommand=lambda first, last: (ys.set(first, last), self.refresh_line_numbers()),
+            xscrollcommand=xs.set,
+        )
         xs.pack(side=tk.BOTTOM, fill=tk.X)
         ys.pack(side=tk.RIGHT, fill=tk.Y)
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text.bind("<Configure>", lambda _event: self.refresh_line_numbers())
+        self.text.insert("1.0", "SELECT VERSION();")
+        self.text.mark_set("input_start", "1.0")
+        self.refresh_line_numbers()
         self.text.tag_configure("kw", foreground="#62A4FF")
         self.text.tag_configure("str", foreground="#3DD194")
         self.text.tag_configure("comment", foreground="#9CB0CC")
@@ -1771,6 +1782,57 @@ class MySQLIDLE:
             highlightthickness=1, highlightbackground=c["line"],
         ).pack(side=tk.LEFT)
 
+        # Live query-result preview from actual server responses.
+        style.configure(
+            "Dark.Treeview",
+            background=c["editor"], fieldbackground=c["editor"],
+            foreground=c["text"], bordercolor=c["line"],
+            rowheight=26, font=("Consolas", 9),
+        )
+        style.configure(
+            "Dark.Treeview.Heading",
+            background=c["surface_alt"], foreground=c["text"],
+            bordercolor=c["line"], relief=tk.FLAT,
+            font=("Segoe UI", 9, "bold"),
+        )
+        style.map(
+            "Dark.Treeview",
+            background=[("selected", "#21436E")],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        results_frame = tk.Frame(
+            result_card, bg=c["surface"], highlightthickness=1,
+            highlightbackground=c["line"], bd=0,
+        )
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        self.result_tree = ttk.Treeview(
+            results_frame, columns=("status",), show="headings",
+            height=4, style="Dark.Treeview",
+        )
+        self.result_tree.heading("status", text="Query output")
+        self.result_tree.column("status", width=760, anchor="w", stretch=True)
+        result_y = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.result_tree.yview)
+        result_x = ttk.Scrollbar(results_frame, orient=tk.HORIZONTAL, command=self.result_tree.xview)
+        self.result_tree.configure(yscrollcommand=result_y.set, xscrollcommand=result_x.set)
+        self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        result_y.pack(side=tk.RIGHT, fill=tk.Y)
+        result_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.result_tree.insert("", tk.END, values=("Run a query to preview its actual results here.",))
+
+        activity_label = tk.Label(
+            result_card, text="Activity", bg=c["surface"], fg=c["muted"],
+            font=("Segoe UI", 8, "bold"), anchor="w",
+        )
+        activity_label.pack(fill=tk.X, pady=(8, 2))
+        self.output_text = tk.Text(
+            result_card, height=2, wrap=tk.WORD, bg=c["editor"],
+            fg=c["muted"], insertbackground=c["accent"],
+            font=("Segoe UI", 8), relief=tk.FLAT, bd=0,
+            padx=8, pady=5, state=tk.DISABLED,
+            highlightthickness=1, highlightbackground=c["line"],
+        )
+        self.output_text.pack(fill=tk.X)
+
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.context_menu.add_command(label="Cut", command=self.do_cut)
         self.context_menu.add_command(label="Copy", command=self.do_copy)
@@ -1779,7 +1841,7 @@ class MySQLIDLE:
         self.context_menu.add_command(label="Format Current SQL", command=self.format_current_sql)
         self.context_menu.add_command(label="Explain Current SELECT", command=self.explain_current_sql)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Clear Shell", command=self.clear_shell)
+        self.context_menu.add_command(label="Clear SQL editor", command=self.clear_shell)
 
     def refresh_connection_visuals(self):
         """Reflect the live connection without placeholder or demo data."""
@@ -1893,41 +1955,61 @@ class MySQLIDLE:
         self.status_var.set(f"Inserted SQL snippet: {name}. Review it before execution.")
 
     def run_current_sql(self):
+        """Execute the selected SQL or the complete editor buffer using the guarded worker."""
         selected = ""
         try:
             selected = self.text.get("sel.first", "sel.last").strip()
         except tk.TclError:
             pass
-        current = self._current_sql()
-        sql = selected or current
-        if not sql:
+        sql = selected or self._current_sql()
+        if not sql.strip():
             self.status_var.set("Enter a SQL statement before running it.")
             self.text.focus_set()
             return
-        if selected and selected != current:
-            self.set_input(selected)
+        if not self.connected:
+            self.status_var.set("Connect to MySQL before running a query.")
+            self.connect_dialog()
+            return
+
+        statements, remainder = split_sql(sql)
+        if remainder.strip():
+            statements.append(remainder.strip())
+        statements = [statement.strip() for statement in statements if not is_blank_sql(statement)]
+        if not statements:
+            self.status_var.set("No executable SQL statements were found.")
+            return
+
+        approved_statements = self._preflight_statements(statements, source="SQL editor")
+        if approved_statements is None:
+            return
+
+        history_entry = sql.strip()
+        if history_entry and (not self.history or self.history[-1] != history_entry):
+            self.history.append(history_entry)
+            if len(self.history) > MAX_HISTORY:
+                del self.history[:len(self.history) - MAX_HISTORY]
+        self.hist_idx = len(self.history)
+        self.draft = ""
+        self.pending = ""
+        self.status_var.set(f"Running {len(statements)} SQL statement(s)…")
+        self.result_meta_var.set("Query running. Results will appear here.")
+        self._queue_job("query", {
+            "statements": statements, "stop_on_error": False,
+            "echo": False, "script_name": None,
+            "approved_statements": approved_statements,
+        })
         self.text.focus_set()
-        self.submit()
 
     def bind_keys(self):
+        """Bind SQL-editor shortcuts while retaining normal multiline text editing."""
         t = self.text
-        t.bind("<Return>", self.on_return)
-        t.bind("<KP_Enter>", self.on_return)
-        t.bind("<BackSpace>", self.on_backspace)
-        t.bind("<Left>", self.on_left)
-        t.bind("<Home>", self.on_home)
-        t.bind("<Up>", self.on_up)
-        t.bind("<Down>", self.on_down)
-        t.bind("<Alt-p>", self.on_up)
-        t.bind("<Alt-n>", self.on_down)
-        t.bind("<Tab>", self.on_tab)
-        t.bind("<Escape>", self.on_escape)
-        t.bind("<KeyPress>", self.on_keypress)
         t.bind("<KeyRelease>", self.on_keyrelease)
+        t.bind("<Tab>", self.on_tab)
         t.bind("<<Paste>>", self.on_paste)
         t.bind("<Button-3>", self.on_context_menu)
-
         shortcuts = {
+            "<Control-Return>": self.run_current_sql,
+            "<Control-KP_Enter>": self.run_current_sql,
             "<Control-n>": self.connect_dialog,
             "<Control-s>": self.save_log,
             "<Control-q>": self.on_close,
@@ -1944,108 +2026,128 @@ class MySQLIDLE:
             "<Control-0>": self.reset_zoom,
         }
         for seq, fn in shortcuts.items():
-            t.bind(seq, lambda e, fn=fn: (fn(), "break")[1])
+            t.bind(seq, lambda _event, fn=fn: (fn(), "break")[1])
+        self.refresh_line_numbers()
         t.focus_set()
 
     # ------------------------------------------------------- text plumbing --
 
     def write(self, text, tag=None):
-        self.text.insert("end-1c", text, (tag,) if tag else ())
-        # Keep the widget bounded; long sessions must not grow the Text buffer forever.
+        """Append status/diagnostic output without ever inserting it into the SQL editor."""
+        target = getattr(self, "output_text", None)
+        if target is None:
+            if hasattr(self, "status_var"):
+                self.status_var.set(str(text).strip())
+            return
         try:
-            line_count = int(self.text.index("end-1c").split(".", 1)[0])
-            if line_count > MAX_SHELL_LINES:
-                self.text.delete("1.0", f"{line_count - MAX_SHELL_LINES + 1}.0")
+            target.configure(state=tk.NORMAL)
+            target.insert(tk.END, text, (tag,) if tag else ())
+            line_count = int(target.index("end-1c").split(".", 1)[0])
+            if line_count > 80:
+                target.delete("1.0", f"{line_count - 80 + 1}.0")
+            target.see(tk.END)
         except (tk.TclError, ValueError):
             pass
-        self.text.see("end")
+        finally:
+            try:
+                target.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+        if tag == "error" and hasattr(self, "status_var"):
+            self.status_var.set(str(text).strip().splitlines()[-1][:240])
 
     def new_prompt(self, continuation=False):
-        self.write(PS2 if continuation else PS1, "prompt")
-        t = self.text
-        t.mark_set("input_start", "end-1c")
-        t.mark_gravity("input_start", tk.LEFT)
-        t.mark_set("insert", "end-1c")
-        t.see("end")
+        """Maintain the legacy editable-range mark, but do not render a terminal prompt."""
+        if not hasattr(self, "text"):
+            return
+        self.text.mark_set("input_start", "1.0")
+        self.text.mark_gravity("input_start", tk.LEFT)
+        if not continuation:
+            self.pending = ""
 
     def set_input(self, text):
+        """Replace the SQL editor buffer, not an IDLE-style prompt line."""
         t = self.text
-        t.delete("input_start", "end-1c")
-        t.insert("end-1c", text)
-        t.mark_set("insert", "end-1c")
-        t.see("end")
+        t.delete("1.0", tk.END)
+        t.insert("1.0", text)
+        t.mark_set("input_start", "1.0")
+        t.mark_gravity("input_start", tk.LEFT)
+        t.mark_set("insert", tk.END + "-1c")
+        t.see("1.0")
         self.highlight_input()
+        self.refresh_line_numbers()
 
     def with_output(self, func):
-        """Write asynchronous output without losing the editable input or caret."""
-        t = self.text
-        typed = t.get("input_start", "end-1c")
-        cursor_offset = None
-        selection_offsets = None
-        try:
-            if t.compare("insert", ">=", "input_start"):
-                counted = t.count("input_start", "insert", "chars")
-                cursor_offset = counted[0] if counted else len(typed)
-            ranges = t.tag_ranges("sel")
-            if len(ranges) >= 2 and t.compare(ranges[0], ">=", "input_start"):
-                if t.compare(ranges[1], "<=", "end-1c"):
-                    first = t.count("input_start", ranges[0], "chars")
-                    last = t.count("input_start", ranges[1], "chars")
-                    if first and last:
-                        selection_offsets = (first[0], last[0])
-        except tk.TclError:
-            pass
-        continuation = bool(self.pending)
-        t.delete("input_start linestart", "end-1c")
-        try:
-            func()
-        finally:
-            self.new_prompt(continuation)
-            if typed:
-                self.set_input(typed)
-                if cursor_offset is not None:
-                    offset = max(0, min(cursor_offset, len(typed)))
-                    t.mark_set("insert", f"input_start+{offset}c")
-                if selection_offsets:
-                    first, last = selection_offsets
-                    t.tag_add(
-                        "sel", f"input_start+{first}c",
-                        f"input_start+{min(last, len(typed))}c",
-                    )
+        """Render asynchronous output to the Activity panel, preserving editor content/caret."""
+        func()
 
     def fix_selection(self):
-        """Keep edits inside the editable input area."""
-        t = self.text
-        if t.tag_ranges("sel") and t.compare("sel.first", "<", "input_start"):
-            t.tag_remove("sel", "1.0", "end")
-        if t.compare("insert", "<", "input_start"):
-            t.mark_set("insert", "end-1c")
+        """Compatibility shim: every character in the SQL editor is editable."""
+        return None
 
     def highlight_input(self):
         t = self.text
-        for tag in ("kw", "str", "comment"):
-            t.tag_remove(tag, "input_start", "end")
-        s = t.get("input_start", "end-1c")
-        if not s:
+        try:
+            for tag in ("kw", "str", "comment"):
+                t.tag_remove(tag, "1.0", tk.END)
+            sql = t.get("1.0", "end-1c")
+            for tag, regex in (("kw", KW_RE), ("str", STR_RE), ("comment", COMMENT_RE)):
+                for match in regex.finditer(sql):
+                    t.tag_add(tag, f"1.0+{match.start()}c", f"1.0+{match.end()}c")
+        except tk.TclError:
             return
-        for tag, regex in (("kw", KW_RE), ("str", STR_RE), ("comment", COMMENT_RE)):
-            for m in regex.finditer(s):
-                t.tag_add(tag, f"input_start+{m.start()}c", f"input_start+{m.end()}c")
+        self.refresh_line_numbers()
+
+    def refresh_line_numbers(self):
+        """Redraw visible SQL source line numbers alongside the text surface."""
+        gutter = getattr(self, "line_numbers", None)
+        editor = getattr(self, "text", None)
+        if gutter is None or editor is None:
+            return
+        try:
+            gutter.delete("all")
+            current = int(editor.index("@0,0").split(".", 1)[0])
+            last = int(editor.index("end-1c").split(".", 1)[0])
+            height = max(1, gutter.winfo_height())
+            while current <= last:
+                info = editor.dlineinfo(f"{current}.0")
+                if info is not None:
+                    y = info[1]
+                    if y > height:
+                        break
+                    gutter.create_text(
+                        31, y, text=f"{current:02d}", anchor="ne",
+                        fill="#7187A3", font=("Segoe UI", 9),
+                    )
+                current += 1
+        except tk.TclError:
+            return
 
     def show_banner(self):
         version = getattr(pymysql, "__version__", "?")
         self.write(f"{APP_NAME} {APP_VERSION}  (PyMySQL {version})\n", "info")
-        self.write("Type 'help' for commands. End SQL statements with ';'.  "
-                   "Tab = autocomplete, Up/Down = history.\n\n", "info")
+        self.write("SQL editor ready. Press Ctrl+Enter to run the selected SQL or complete buffer.\n", "info")
 
     def show_help(self):
         self.write(HELP_TEXT + "\n", "info")
 
     def clear_shell(self):
-        self.text.delete("1.0", "end")
+        """Clear SQL text and activity output, never insert a shell prompt."""
+        self.text.delete("1.0", tk.END)
+        self.text.mark_set("input_start", "1.0")
+        self.text.mark_gravity("input_start", tk.LEFT)
+        if hasattr(self, "output_text"):
+            self.output_text.configure(state=tk.NORMAL)
+            self.output_text.delete("1.0", tk.END)
+            self.output_text.configure(state=tk.DISABLED)
         self.pending = ""
-        self.show_banner()
-        self.new_prompt()
+        self.result_meta_var.set("Editor cleared. Run a query to see results.")
+        self.status_var.set("SQL editor cleared.")
+        if hasattr(self, "result_tree"):
+            for item in self.result_tree.get_children(""):
+                self.result_tree.delete(item)
+        self.refresh_line_numbers()
+        self.text.focus_set()
 
     # ------------------------------------------------------------ key events --
 
@@ -2125,7 +2227,7 @@ class MySQLIDLE:
     def on_tab(self, event):
         t = self.text
         self.fix_selection()
-        before = t.get("input_start", "insert")
+        before = t.get("1.0", "insert").split("\n")[-1]
         m = re.search(r"[\w$]*$", before)
         prefix = m.group(0) if m else ""
         if not prefix:
@@ -2180,8 +2282,8 @@ class MySQLIDLE:
         self.text.tag_add("sel", "1.0", "end-1c")
 
     def _current_sql(self):
-        """Return only the editable statement, not the terminal transcript."""
-        return self.text.get("input_start", "end-1c").strip()
+        """Return all SQL text in the editor."""
+        return self.text.get("1.0", "end-1c").strip()
 
     def format_current_sql(self):
         sql = self._current_sql()
@@ -2299,13 +2401,8 @@ class MySQLIDLE:
     # ------------------------------------------------------ run statements --
 
     def submit(self):
-        t = self.text
-        line = t.get("input_start", "end-1c")
-        t.mark_set("insert", "end-1c")
-        t.insert("end-1c", "\n")
-        t.see("end")
-        self.hint_var.set("")
-        self.process(line)
+        """Backward-compatible entry point; run the current SQL editor selection."""
+        self.run_current_sql()
 
     def process(self, line):
         stripped = line.strip()
@@ -2386,20 +2483,49 @@ class MySQLIDLE:
         return approvals
 
     def show_result(self, columns, rows, row_count, elapsed):
-        if hasattr(self, "result_meta_var"):
-            self.result_meta_var.set(
-                f"Empty set · {elapsed:.2f} s" if row_count == 0
-                else f"{row_count:,} rows · {elapsed:.3f} s · {len(columns)} columns"
-            )
-        if row_count == 0:
-            self.write(f"Empty set ({elapsed:.2f} sec)\n", "info")
+        """Render real result rows in the workspace grid and keep the export path intact."""
+        tree = getattr(self, "result_tree", None)
+        if tree is not None:
+            for item in tree.get_children(""):
+                tree.delete(item)
+            ids = [f"c{index}" for index in range(len(columns))]
+            if columns:
+                tree.configure(columns=ids, show="headings")
+                for cid, name in zip(ids, columns):
+                    tree.heading(cid, text=str(name))
+                    tree.column(
+                        cid, width=max(100, min(320, 10 * len(str(name)) + 36)),
+                        anchor="w", stretch=True,
+                    )
+                for row in rows[:MAX_DISPLAY_ROWS]:
+                    values = ["" if value is None else str(value) for value in row]
+                    tree.insert("", tk.END, values=values)
+            else:
+                tree.configure(columns=("status",), show="headings")
+                tree.heading("status", text="Status")
+                tree.column("status", width=760, anchor="w", stretch=True)
+                tree.insert("", tk.END, values=(f"Statement executed in {elapsed:.3f} s; no row set was returned.",))
+
+        if row_count == 0 and columns:
+            self.result_meta_var.set(f"0 rows · {elapsed:.3f} s · {len(columns)} columns")
+            self.write(f"Query completed: empty result set ({elapsed:.3f} s).\n", "info")
             return
-        self.write(format_table(columns, rows[:MAX_DISPLAY_ROWS]) + "\n")
-        self.write(f"{row_count} row{'s' if row_count != 1 else ''} in set ({elapsed:.2f} sec)\n", "ok")
+        if not columns:
+            self.result_meta_var.set(f"Statement completed · {elapsed:.3f} s")
+            self.write(f"Statement completed ({elapsed:.3f} s); no result rows were returned.\n", "ok")
+            return
+
+        self.result_meta_var.set(
+            f"{row_count:,} rows · {elapsed:.3f} s · {len(columns)} columns"
+        )
+        self.write(
+            f"Query completed: {row_count:,} row(s), {len(columns)} column(s), {elapsed:.3f} s.\n",
+            "ok",
+        )
         if row_count > MAX_DISPLAY_ROWS:
             self.write(
-                f"(showing the first {MAX_DISPLAY_ROWS} rows; full result streamed to a temporary file "
-                "for CSV export)\n", "info"
+                f"Preview shows the first {MAX_DISPLAY_ROWS:,} rows. The complete result is available for CSV export.\n",
+                "info",
             )
 
     def _queue_job(self, kind, payload=None):
