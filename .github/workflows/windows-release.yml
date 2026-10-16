@@ -1,0 +1,75 @@
+name: MySQL Editor Windows packages
+
+on:
+  push:
+    branches: [desktop-rebuild]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install runtime and build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pyinstaller
+      - name: Create branded Windows icon
+        run: python tools/build_brand_assets.py
+      - name: Build application folder
+        run: python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
+      - name: Build portable executable
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build setup installer
+        run: iscc installer/MySQLEditor.iss
+      - name: Verify expected output files
+        shell: pwsh
+        run: |
+          $expected = @(
+            "dist/MySQLEditor/MySQLEditor.exe",
+            "dist/MySQLEditor-Portable.exe",
+            "dist/installer/MySQLEditor-Setup.exe"
+          )
+          foreach ($path in $expected) {
+            if (!(Test-Path $path)) { throw "Expected package was not created: $path" }
+            $item = Get-Item $path
+            if ($item.Length -lt 100000) { throw "Package looks incomplete: $path ($($item.Length) bytes)" }
+          }
+          Get-Item $expected | Format-Table Name,Length
+      - name: Create folder archive and SHA-256 manifest
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/MySQLEditor/*" -DestinationPath "dist/MySQLEditor-Folder.zip" -CompressionLevel Optimal
+          $items = @("dist/MySQLEditor-Portable.exe","dist/installer/MySQLEditor-Setup.exe","dist/MySQLEditor-Folder.zip")
+          foreach ($item in $items) {
+            $hash = (Get-FileHash $item -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path $item -Leaf)" | Add-Content "dist/SHA256SUMS"
+          }
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: MySQLEditor-Windows
+          path: |
+            dist/MySQLEditor/
+            dist/MySQLEditor-Portable.exe
+            dist/installer/MySQLEditor-Setup.exe
+            dist/MySQLEditor-Folder.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish tagged GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" dist/MySQLEditor-Portable.exe dist/installer/MySQLEditor-Setup.exe dist/MySQLEditor-Folder.zip dist/SHA256SUMS --title "MySQL Editor $env:GITHUB_REF_NAME" --notes "Windows desktop-only build. Verify signing status and manually test the package before broad distribution."

@@ -5,6 +5,13 @@ venv/
 build/
 dist/
 *.spec.bak
-.mysql_idle.json
-settings.json
-application.log*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.coverage
