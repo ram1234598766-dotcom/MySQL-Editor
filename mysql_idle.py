@@ -1385,7 +1385,7 @@ class MySQLIDLE:
         file_m.add_separator()
         file_m.add_command(label="Run SQL Script...", accelerator="F5", command=self.run_script)
         file_m.add_command(label="Cancel Running Query", accelerator="Ctrl+Break", command=self.cancel_query)
-        file_m.add_command(label="Save Shell Log...", accelerator="Ctrl+S", command=self.save_log)
+        file_m.add_command(label="Save SQL File...", accelerator="Ctrl+S", command=self.save_log)
         file_m.add_command(label="Save Last Result as CSV...", command=self.save_csv)
         file_m.add_separator()
         file_m.add_command(label="Exit", accelerator="Ctrl+Q", command=self.on_close)
@@ -1500,11 +1500,12 @@ class MySQLIDLE:
         ).pack(anchor="w", pady=(2, 0))
 
         self.connection_badge_var = tk.StringVar(value="●  Not connected")
-        tk.Label(
+        self.connection_badge_label = tk.Label(
             header, textvariable=self.connection_badge_var, bg=c["surface_alt"],
             fg=c["muted"], font=("Segoe UI", 9, "bold"), padx=12, pady=8,
             bd=0, highlightthickness=1, highlightbackground=c["line"],
-        ).pack(side=tk.RIGHT, padx=(10, 0))
+        )
+        self.connection_badge_label.pack(side=tk.RIGHT, padx=(10, 0))
         tk.Button(
             header, text="Help", command=self.menu_help, bg=c["surface_alt"],
             fg=c["text"], activebackground=c["line"], activeforeground=c["text"],
@@ -1852,6 +1853,7 @@ class MySQLIDLE:
             host = str(info.get("host") or "MySQL server")
             database = self.current_db or info.get("database") or ""
             self.connection_badge_var.set("●  Connected")
+            self.connection_badge_label.configure(fg="#3DD194")
             self.connection_host_var.set(host)
             self.connection_database_var.set("database: " + (str(database) if database else "no schema selected"))
             self.connection_tls_var.set(
@@ -1860,6 +1862,7 @@ class MySQLIDLE:
             )
         else:
             self.connection_badge_var.set("●  Not connected")
+            self.connection_badge_label.configure(fg="#9CB0CC")
             self.connection_host_var.set("Not connected")
             self.connection_database_var.set("Open Connect to MySQL")
             self.connection_tls_var.set("Certificate optional · advanced")
@@ -3000,8 +3003,8 @@ class MySQLIDLE:
 
     def save_log(self):
         path = filedialog.asksaveasfilename(
-            title="Save Shell Log", parent=self.root, defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            title="Save SQL File", parent=self.root, defaultextension=".sql",
+            filetypes=[("SQL files", "*.sql"), ("Text files", "*.txt"), ("All files", "*.*")],
         )
         if path:
             try:
