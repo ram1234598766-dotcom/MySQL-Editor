@@ -13,6 +13,7 @@ MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and ru
 
 ## Contents
 
+- [Product identity and compatibility](#product-identity-and-compatibility)
 - [Features](#features)
 - [Latest downloads](#latest-downloads)
 - [System requirements](#system-requirements)
@@ -32,6 +33,17 @@ MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and ru
 - [Known limitations](#known-limitations)
 - [Contributing and security reports](#contributing-and-security-reports)
 - [License](#license)
+
+## Product identity and compatibility
+
+- **Repository:** [`ram1234598766-dotcom/MySQL-Editor`](https://github.com/ram1234598766-dotcom/MySQL-Editor)
+- **Displayed product name:** MySQL Editor (Windows desktop, installer, Android launcher and mobile workspace).
+- **Desktop and Android implementation:** Python/Tkinter Windows client plus an Android app paired with the desktop-hosted HTTPS companion.
+- **Original application identity:** the Android package remains `com.mysqlidle.mobile`. Keep this application ID and the existing Android signing key stable for users to receive in-place updates.
+- **Upgrade compatibility:** the Windows installer uses the previous product's installer ID and retains the existing `MySQL IDLE` install/data directory paths. These are intentional compatibility paths, not the displayed product name.
+- **New download names:** the current build workflow uses `MySQLEditor-Setup.exe`, `MySQLEditor_Portable.exe`, `MySQLEditor-Folder.zip`, and `MySQLEditor-Mobile-release.apk/.aab` for its intended distribution packages.
+
+Use the repository's [Build workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml) for the current build result. A workflow artifact is a temporary CI output; only a published asset on the [Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases) is a GitHub release download. The Android workflow intentionally does not publish a debug APK as a public release.
 
 ## Features
 
