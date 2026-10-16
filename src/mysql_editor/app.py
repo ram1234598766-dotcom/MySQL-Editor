@@ -116,8 +116,7 @@ def main() -> int:
                 credentials.save(profile["id"], config.get("password", ""))
                 repository.set_setting("last_profile_id", profile["id"])
             except Exception as exc:
-                if repository.get_setting("last_profile_id") == profile["id"]:
-                    repository.set_setting("last_profile_id", "")
+                repository.set_setting("last_profile_id", "")
                 QMessageBox.warning(
                     None, "Connection not remembered",
                     "Connected successfully, but this connection could not be saved securely. "
