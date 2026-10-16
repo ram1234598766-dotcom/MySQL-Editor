@@ -134,7 +134,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertRegex(self.server.certificate_fingerprint, r"^([0-9A-F]{2}:){31}[0-9A-F]{2}$")
             self.assertIn("Android companion", body)
             self.assertIn("viewport", body)
-            self.assertIn('src="/brand/mysqlidle-logo.png"', body)
+            self.assertIn('src="/brand/mysql-editor-logo.jpg"', body)
             self.assertIn('alt="MySQL Editor logo"', body)
             self.assertIn('id="masterPassword"', body)
             self.assertIn('id="masterPasswordToggle"', body)
@@ -156,7 +156,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
 
     def test_mobile_page_serves_original_logo_asset(self):
         with urlopen(
-            self.base + "/brand/mysqlidle-logo.png",
+            self.base + "/brand/mysql-editor-logo.jpg",
             timeout=5,
             context=self.ssl_context,
         ) as response:
@@ -165,7 +165,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertTrue(response.headers.get("Content-Type", "").startswith("image/png"))
             self.assertEqual(response.headers.get("Cache-Control"), "no-store, max-age=0")
 
-        expected = (Path(__file__).resolve().parent / "assets" / "mysqlidle-logo.png").read_bytes()
+        expected = (Path(__file__).resolve().parent / "assets" / "mysql-editor-logo.jpg").read_bytes()
         self.assertEqual(data, expected, "Mobile companion must serve the exact shared logo asset.")
 
     def test_companion_refuses_to_start_without_master_password_verifier(self):
