@@ -34,7 +34,7 @@ python -m pytest
 python -m pip_audit -r requirements.txt
 ```
 
-The GitHub Actions workflow runs the test matrix on Python 3.12–3.14, plus a real MySQL 8.4 integration service. The Windows release workflow is the source of truth for importing the application in its packaging environment, building PyInstaller and Inno Setup packages, launching packaged executables, and testing installer/uninstaller behavior. A Linux failure to load platform GUI libraries is not evidence that the Windows build is broken; do not remove the Windows startup gate to hide an import failure.
+The GitHub Actions workflow runs the test matrix on Python 3.12–3.14, plus a real MySQL 8.4 integration service. The Windows release workflow is the source of truth for importing the application in its packaging environment, running `tools/smoke_test_ui.py`, building PyInstaller and Inno Setup packages, launching packaged executables, and testing installer/uninstaller behavior. A Linux failure to load platform GUI libraries is not evidence that the Windows build is broken; do not remove the Windows startup gate to hide an import failure.
 
 ## Change workflow
 
