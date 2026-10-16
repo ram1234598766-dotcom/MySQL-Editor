@@ -4,7 +4,7 @@
 
 MySQL Editor provides a dark, Figma-inspired desktop SQL workspace with a multiline editor, line numbers, syntax highlighting, guarded execution, saved snippets, and an in-window result grid. It runs `.sql` scripts and exports full result sets. Its optional Android companion lets a paired device use a responsive SQL workspace through an HTTPS service hosted by the Windows desktop.
 
-![MySQL Editor logo](assets/mysqlidle-logo.png)
+![MySQL Editor logo](assets/mysql-editor-logo.jpg)
 
 [![Build Windows EXE and Android APK](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml)
 [![Security checks](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml)
