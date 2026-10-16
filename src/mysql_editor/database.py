@@ -2,6 +2,7 @@
 from __future__ import annotations
 import csv
 import json
+import os
 import queue
 import sqlite3
 import tempfile
@@ -344,14 +345,25 @@ class DatabaseWorker(QThread):
             return {"ok": False, "error": "This query result has expired. Run the query again."}
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(json.loads(meta[0]))
-            cursor = self._spool.execute(
-                "SELECT values_json FROM result_rows WHERE result_id=? ORDER BY row_idx", (result_id,)
-            )
-            count = 0
-            for (value_json,) in cursor:
-                writer.writerow(json.loads(value_json))
-                count += 1
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        count = 0
+        try:
+            with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(json.loads(meta[0]))
+                cursor = self._spool.execute(
+                    "SELECT values_json FROM result_rows WHERE result_id=? ORDER BY row_idx", (result_id,)
+                )
+                for (value_json,) in cursor:
+                    writer.writerow(json.loads(value_json))
+                    count += 1
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         return {"ok": True, "path": str(destination), "row_count": count}

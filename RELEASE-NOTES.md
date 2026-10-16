@@ -11,6 +11,13 @@
 - PyInstaller application-folder and portable packages, Inno Setup installer, and SHA-256 checksums.
 - CI checks for Python 3.12–3.14, unit tests, a disposable MySQL 8.4 integration service, dependency audit, a CycloneDX SBOM, a third-party license inventory, and Windows startup/install/uninstall smoke checks.
 
+## Quality improvements in the latest Windows preview
+
+- Fixed the SQL editor's Qt import so `QTextEdit` is imported from `PySide6.QtWidgets`; Windows CI now imports the full application module before packaging.
+- Added local persistence for window geometry, split-pane sizing, inspector selection, and SQL-editor font size.
+- SQL file read/write failures now show recoverable dialogs and preserve the current editor buffer.
+- CSV exports are written to a temporary sibling file and atomically moved into place after a complete successful write; a failed export no longer truncates an existing destination.
+
 ## Known limitations
 
 - MySQL DELIMITER directives and compound stored-program parsing are not implemented.

@@ -16,6 +16,8 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 - Result switching between statements, sortable result grid, copy selected cells, bounded preview and CSV export of the fetched result set.
 - Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
 - Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
+- Remembers window geometry, split-pane sizes, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
+- Handles SQL-file open/save errors inside the app without discarding the current buffer, and writes CSV exports atomically so an interrupted export preserves any previous destination file.
 
 This is a development implementation, not yet a release-approved or manually QA-certified binary. Review the workflow results and test the installer on a clean Windows account before distributing it.
 
@@ -66,6 +68,12 @@ iscc installer/MySQLEditor.iss
 
 Expected outputs: dist/MySQLEditor/ (onedir package), dist/MySQLEditor-Portable.exe, dist/installer/MySQLEditor-Setup.exe, dist/MySQLEditor-Folder.zip, dist/SHA256SUMS, a CycloneDX SBOM, a third-party license inventory, release notes, and a Windows signing-status note. The setup wizard and desktop icon are derived from the tracked logo.
 
+## Repository agent skills and AI review
+
+Project-local skills live in `.agents/skills/` and cover surgical coding practices, Qt desktop UX/accessibility, MySQL security, CodeRabbit review, and Windows release verification. `AGENTS.md` contains always-on repository rules, while `.coderabbit.yaml` supplies repository-specific path instructions for automated pull-request review. These are development tools and documentation; they are not runtime app dependencies.
+
+Use the skill that matches the changed subsystem and verify the change with a regression test. Base44 web-app workflows and NVIDIA GPU tooling are not part of this native PySide6 Windows product.
+
 ## Security and local data
 
 - Database passwords are not stored in SQLite, SQL files, query history or ordinary logs.
@@ -87,7 +95,7 @@ python -m compileall -q src tests tools
 python -m pytest
 ~~~
 
-The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
+The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI runs an offscreen Qt UI smoke test for saved preferences and file-error recovery, builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
 
 ## Known v1 limitations
 

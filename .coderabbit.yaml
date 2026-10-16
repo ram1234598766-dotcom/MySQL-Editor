@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "src/mysql_editor/**/*.py"
+      instructions: |
+        Review this as a native Python/PySide6 Windows desktop application. Check for
+        UI-thread blocking, invalid Qt imports, unhandled file and dialog errors,
+        broken keyboard/focus behavior, high-DPI issues, unsafe signal/slot lifetimes,
+        state restoration mistakes, and regressions to the existing editor experience.
+        Keep changes surgical and require a targeted regression test for behavior fixes.
+    - path: "src/mysql_editor/database.py"
+      instructions: |
+        Treat all database inputs, credentials, SQL errors, result spools, and exported
+        data as sensitive. Check worker-thread ownership, cursor/connection cleanup,
+        cancellation semantics, identifier quoting, result-size behavior, transactional
+        behavior, and whether a failed export can damage an existing destination file.
+        TLS and SQL risk prompts must be accurately described; prompts are not security
+        boundaries.
+    - path: "src/mysql_editor/storage.py"
+      instructions: |
+        Ensure database passwords never enter SQLite or plaintext storage. Saved
+        passwords must use Windows Credential Manager only. Master-password material
+        must remain an Argon2id verifier and query history must remain opt-in and
+        appropriately redacted. Flag any credential or SQL-content disclosure.
+    - path: "tests/**/*.py"
+      instructions: |
+        Prefer deterministic regression tests with meaningful assertions. Do not weaken
+        tests to make a build green. Exercise failure paths and cleanup, not only the
+        happy path. Integration tests must use the disposable MySQL test service.
+    - path: ".github/workflows/**/*.yml"
+      instructions: |
+        Verify least-privilege workflow permissions, correct path/branch triggers,
+        dependable failure behavior, artifact integrity, startup/import validation, and
+        installer/uninstaller and executable launch smoke tests. Do not suggest silently
+        bypassing failing validation.
+    - path: "installer/**"
+      instructions: |
+        Review per-user safety, upgrade/uninstall behavior, shortcut creation and cleanup,
+        quoting of paths with spaces, and accurate publisher/signing metadata. Never
+        claim publisher trust unless a trusted certificate is used and verified.

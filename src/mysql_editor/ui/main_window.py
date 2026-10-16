@@ -6,7 +6,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
@@ -95,6 +95,12 @@ class MainWindow(QMainWindow):
         self._last_duration = 0
         self._last_sql = ""
         self._last_saved_paths: dict[int, str] = {}
+        self._settings = QSettings()
+        try:
+            font_size = int(self._settings.value("ui/editorFontSize", 10))
+        except (TypeError, ValueError):
+            font_size = 10
+        self._editor_font_size = max(8, min(font_size, 24))
         self.setWindowTitle("MySQL Editor")
         self.setMinimumSize(1120, 720)
         self.resize(1500, 940)
@@ -102,6 +108,7 @@ class MainWindow(QMainWindow):
         self.worker.completed.connect(self._on_worker_completed)
         self.worker.activity.connect(self._on_activity)
         self._build_ui()
+        self._restore_ui_preferences()
         self._build_menus()
         self.new_query_tab()
         self._update_connection_status()
@@ -156,7 +163,8 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(switch)
         outer.addWidget(top)
 
-        body = QSplitter(Qt.Orientation.Horizontal)
+        self.main_split = QSplitter(Qt.Orientation.Horizontal)
+        body = self.main_split
         body.setObjectName("mainSplit")
         nav = QWidget()
         nav.setObjectName("navigationPanel")
@@ -349,6 +357,11 @@ class MainWindow(QMainWindow):
         self._action(query_menu, "Format SQL", "Ctrl+Shift+F", self.format_current_sql)
         self._action(query_menu, "Explain SELECT", "", self.explain_query)
         self._action(query_menu, "Refresh schema", "F5", self.refresh_schema)
+        view_menu = self.menuBar().addMenu("&View")
+        self._action(view_menu, "Increase SQL editor font", "Ctrl+Plus", self.increase_editor_font)
+        self._action(view_menu, "Decrease SQL editor font", "Ctrl+Minus", self.decrease_editor_font)
+        self._action(view_menu, "Reset SQL editor font", "Ctrl+0", self.reset_editor_font)
+
         settings_menu = self.menuBar().addMenu("&Settings")
         history_action = QAction("Enable local query history", self)
         history_action.setCheckable(True)
@@ -367,6 +380,47 @@ class MainWindow(QMainWindow):
         action.triggered.connect(lambda _checked=False: callback())
         menu.addAction(action)
         return action
+
+    def _restore_ui_preferences(self):
+        geometry = self._settings.value("ui/windowGeometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        sizes = self._settings.value("ui/mainSplitterSizes", [])
+        if isinstance(sizes, (list, tuple)) and len(sizes) == 3:
+            try:
+                self.main_split.setSizes([max(1, int(value)) for value in sizes])
+            except (TypeError, ValueError):
+                pass
+
+        try:
+            inspector_tab = int(self._settings.value("ui/inspectorTab", 0))
+        except (TypeError, ValueError):
+            inspector_tab = 0
+        if 0 <= inspector_tab < self.inspector_tabs.count():
+            self.inspector_tabs.setCurrentIndex(inspector_tab)
+
+    def _set_editor_font_size(self, size: int):
+        size = max(8, min(int(size), 24))
+        self._editor_font_size = size
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                font = editor.font()
+                font.setPointSize(size)
+                editor.setFont(font)
+                editor.setTabStopDistance(editor.fontMetrics().horizontalAdvance(" ") * 4)
+        self._settings.setValue("ui/editorFontSize", size)
+        self.status.setText(f"SQL editor font size: {size} pt")
+
+    def increase_editor_font(self):
+        self._set_editor_font_size(self._editor_font_size + 1)
+
+    def decrease_editor_font(self):
+        self._set_editor_font_size(self._editor_font_size - 1)
+
+    def reset_editor_font(self):
+        self._set_editor_font_size(10)
 
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
         job_id = uuid.uuid4().hex
@@ -401,6 +455,10 @@ class MainWindow(QMainWindow):
 
     def new_query_tab(self, text: str = "", path: str | None = None):
         editor = SqlEditor()
+        font = editor.font()
+        font.setPointSize(self._editor_font_size)
+        editor.setFont(font)
+        editor.setTabStopDistance(editor.fontMetrics().horizontalAdvance(" ") * 4)
         if text:
             editor.setPlainText(text)
         index = self.editors.addTab(editor, Path(path).name if path else "untitled.sql")
@@ -739,37 +797,69 @@ class MainWindow(QMainWindow):
 
     def _refresh_saved_queries(self):
         self.saved_list.clear()
-        for path in sorted(self._saved_root().glob("*.sql"), key=lambda p: p.name.casefold()):
+        try:
+            paths = sorted(self._saved_root().glob("*.sql"), key=lambda p: p.name.casefold())
+        except OSError as exc:
+            self.saved_list.addItem("Saved queries are unavailable.")
+            self.saved_list.setToolTip(redact_secrets(str(exc)))
+            return
+        for path in paths:
             item = QListWidgetItem(path.name)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             self.saved_list.addItem(item)
         if self.saved_list.count() == 0:
             self.saved_list.addItem("Save a query snippet to see it here.")
 
+    def _open_sql_path(self, path: str | Path) -> bool:
+        source_path = Path(path)
+        try:
+            sql_text = source_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as exc:
+            QMessageBox.warning(
+                self, "Open SQL file",
+                f"Could not open {source_path.name}. The file may be missing, locked, or not valid text.\n\n"
+                + redact_secrets(str(exc)),
+            )
+            self.status.setText("Could not open SQL file.")
+            return False
+        self.new_query_tab(sql_text, str(source_path))
+        self.status.setText(f"Opened {source_path.name}")
+        return True
+
     def _saved_selected(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
-        if path and Path(path).is_file():
-            self.new_query_tab(Path(path).read_text(encoding="utf-8"), path)
+        if path:
+            self._open_sql_path(path)
 
     def open_sql_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open SQL file", "", "SQL files (*.sql);;Text files (*.txt);;All files (*)"
         )
         if path:
-            self.new_query_tab(Path(path).read_text(encoding="utf-8-sig"), path)
+            self._open_sql_path(path)
 
-    def _write_current_editor(self, path: str):
+    def _write_current_editor(self, path: str) -> bool:
         editor = self._current_editor()
         if not editor:
-            return
+            return False
         destination = Path(path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(editor.toPlainText(), encoding="utf-8")
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(editor.toPlainText(), encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            QMessageBox.warning(
+                self, "Save SQL file",
+                f"Could not save {destination.name}. Your query remains open and unchanged.\n\n"
+                + redact_secrets(str(exc)),
+            )
+            self.status.setText("Save failed; your query remains open.")
+            return False
         editor.document().setModified(False)
         self._last_saved_paths[id(editor)] = str(destination)
         self.editors.setTabText(self.editors.currentIndex(), destination.name)
         self._refresh_saved_queries()
         self.status.setText(f"Saved {destination.name}")
+        return True
 
     def save_sql_file(self, force_dialog: bool = False):
         editor = self._current_editor()
@@ -795,7 +885,15 @@ class MainWindow(QMainWindow):
         if not safe_name:
             QMessageBox.warning(self, "Save SQL snippet", "Enter a valid snippet name.")
             return
-        path = self._saved_root() / (safe_name if safe_name.lower().endswith(".sql") else safe_name + ".sql")
+        try:
+            root = self._saved_root()
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Save SQL snippet",
+                "The saved-queries folder could not be created.\n\n" + redact_secrets(str(exc)),
+            )
+            return
+        path = root / (safe_name if safe_name.lower().endswith(".sql") else safe_name + ".sql")
         if path.exists():
             answer = QMessageBox.question(
                 self, "Replace snippet", f"{path.name} already exists. Replace it?",
@@ -920,6 +1018,10 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 break
+        self._settings.setValue("ui/windowGeometry", self.saveGeometry())
+        self._settings.setValue("ui/mainSplitterSizes", self.main_split.sizes())
+        self._settings.setValue("ui/inspectorTab", self.inspector_tabs.currentIndex())
+        self._settings.sync()
         self.worker.submit("disconnect", {})
         self.worker.shutdown()
         self.worker.wait(5000)
