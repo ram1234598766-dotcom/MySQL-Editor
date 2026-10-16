@@ -69,10 +69,12 @@ QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; b
 """
 
 def main() -> int:
-    # A bounded, no-database startup path is used by Windows CI to verify that the
-    # packaged Qt app can initialize and show the branded first-run connection UI.
-    smoke_test = "--smoke-test" in sys.argv
-    app = QApplication(sys.argv)
+    # Keep the QA-only flag out of Qt's own command-line parser. The smoke path
+    # opens the same branded first-run UI, then exits without connecting to MySQL.
+    arguments = list(sys.argv)
+    smoke_test = "--smoke-test" in arguments
+    qt_arguments = [arg for arg in arguments if arg != "--smoke-test"]
+    app = QApplication(qt_arguments)
     app.setApplicationName("MySQL Editor")
     app.setOrganizationName("MySQL Editor")
     app.setStyle("Fusion")
@@ -108,7 +110,7 @@ def main() -> int:
     dialog.connected.connect(on_connected)
     dialog.show()
     if smoke_test:
-        QTimer.singleShot(1800, app.quit)
+        QTimer.singleShot(1800, lambda: app.exit(0 if dialog.isVisible() else 3))
     exit_code = app.exec()
     if worker.isRunning():
         worker.shutdown()
