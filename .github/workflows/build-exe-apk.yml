@@ -415,6 +415,8 @@ jobs:
         if: env.ANDROID_SIGNING_ENABLED == 'true' && steps.find-signing-backup.outputs.run_id == ''
         continue-on-error: true
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -430,6 +432,7 @@ jobs:
               "Accept": "application/vnd.github+json",
               "X-GitHub-Api-Version": "2022-11-28",
               "User-Agent": "MySQL-Editor-signing-backup-recovery",
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
           }
 
           def get_json(url):
@@ -475,8 +478,10 @@ jobs:
                           raise ValueError("Encrypted key backup exceeded the expected size limit.")
                       (backup_dir / "MySQLIDLE-SigningKey.jks.enc").write_bytes(archive.read(member))
                   print("Encrypted legacy signing-key backup located; no private-key plaintext was exported.")
-          except Exception:
-              print("::warning::Could not retrieve the public MySQL-IDLE encrypted signing-key backup; signing will remain blocked unless the supplied keystore validates.")
+          except Exception as error:
+              status = getattr(error, "code", None)
+              reason = "HTTP " + str(status) if status is not None else type(error).__name__
+              print("::warning::Could not retrieve the MySQL-IDLE encrypted signing-key backup (" + reason + "); signing will remain blocked unless the supplied keystore validates.")
           PY
       - name: Restore Android release keystore
         if: env.ANDROID_SIGNING_ENABLED == 'true'
