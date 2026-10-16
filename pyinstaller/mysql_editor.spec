@@ -5,6 +5,7 @@ ROOT = Path(SPECPATH).parent
 ASSETS = ROOT / "assets"
 datas = [
     (str(ASSETS / "mysql-editor-logo.webp"), "assets"),
+    (str(ASSETS / "mysql-editor-logo-transparent.png"), "assets"),
     (str(ASSETS / "mysql-editor.ico"), "assets"),
 ]
 a = Analysis(
