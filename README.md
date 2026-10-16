@@ -1,49 +1,237 @@
-# MySQL Editor — Windows Desktop
+# MySQL Editor
 
-MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. The independent product lives under src/mysql_editor and does not import or use components from the legacy MySQL IDLE application.
+**A native Windows desktop SQL workspace for MySQL.**
 
-**This rebuild targets Windows desktop only. Android APK/AAB, the mobile companion, cloud relay, and cross-device account/password synchronization are out of scope for this phase.**
+MySQL Editor is a local-first desktop application for connecting to a MySQL server, writing and running SQL, exploring schemas, inspecting results, and exporting data. It is built with Python and PySide6/Qt. Its independent runtime lives under **src/mysql_editor/** and does not import components from the legacy MySQL IDLE application.
 
-## Implemented in this branch
+> **Project status: pre-release.** Automated tests and packaging checks do not replace testing on the Windows PC, MySQL version, authentication method, and network/TLS configuration you intend to use. Preview Windows packages are unsigned unless their release notes explicitly state otherwise.
 
-- Native PySide6/Qt shell with horizontal workspace navigation, resizable editor/results and schema inspector, SQL tabs, syntax highlighting, line numbers, Ctrl+Space/inline completion for MySQL keywords/functions and safe schema/result identifiers, plus a case-insensitive quick filter over visible result rows.
-- Animated guided tour available from the workspace header, the connection dialog, and Help (F1); the tour can insert a real sample SELECT into the editor.
-- First launch creates a local master password. Later launches request only that master password, then auto-reconnect to the last remembered MySQL profile using Windows Credential Manager when the saved password is available; missing/stale credentials fall back to the connection form.
-- Argon2id master-password verifier, local settings database and Windows Credential Manager-only saved-password adapter.
-- mysql-connector-python direct server access, configurable TLS choices and finite connection/read/write timeouts.
-- Dedicated database worker thread so SQL execution and schema navigation do not run on the Qt UI event loop.
-- Multi-statement query execution, statement/selection/script run actions, SQL formatter and Explain SELECT.
-- Schema navigation for databases, tables and views; double-click tables for a capped preview.
-- Result switching between statements, type-aware sortable result grid, case-insensitive row filtering, copy selected cells, bounded preview and CSV export of the full fetched result set; quick filtering never truncates exports.
-- Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
-- Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
-- Remembers window geometry, horizontal workspace pane sizes, vertical editor/results split, the active inspector tab, and SQL-editor font size for the current Windows user; editor font size can be changed from the View menu.
-- Handles SQL-file open/save errors inside the app without discarding the current buffer, and writes CSV exports atomically so an interrupted export preserves any previous destination file.
+## Contents
 
-This is a development implementation, not yet a release-approved or manually QA-certified binary. Review the workflow results and test the installer on a clean Windows account before distributing it.
+- [Highlights](#highlights)
+- [Platform and scope](#platform-and-scope)
+- [Download a Windows build](#download-a-windows-build)
+- [Quick start](#quick-start)
+- [Connect to MySQL](#connect-to-mysql)
+- [Work with SQL](#work-with-sql)
+- [Results and CSV export](#results-and-csv-export)
+- [Schema, history, and snippets](#schema-history-and-snippets)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Security and privacy](#security-and-privacy)
+- [Run from source](#run-from-source)
+- [Build Windows packages](#build-windows-packages)
+- [Testing and CI](#testing-and-ci)
+- [Architecture](#architecture)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [Contributing](#contributing)
+- [Project links](#project-links)
 
-## Architecture
+## Highlights
 
-- src/mysql_editor/core.py — SQL boundaries, risk advisories, formatting and redaction.
-- src/mysql_editor/storage.py — local versioned SQLite metadata, history, Argon2id verifier and Credential Manager.
-- src/mysql_editor/database.py — background thread, MySQL operations, result spool and CSV export.
-- src/mysql_editor/ui/editor.py — editor widget, multiline comment-aware syntax highlighter and MySQL/schema-aware completion.
-- src/mysql_editor/ui/connection_dialog.py — connection and first-run lock dialog.
-- src/mysql_editor/ui/main_window.py — query tabs, result picker, schema/history/snippets and transaction controls.
-- src/mysql_editor/app.py — startup and shared product theme.
+### Editing and navigation
+- Horizontal workspace navigation for SQL Editor, Connections, Schema Explorer, Query History, and Saved Queries.
+- Multiple SQL tabs with unsaved-change markers and a confirmation before discarding modified tabs.
+- SQL syntax highlighting, line numbers, current-line highlighting, indentation, and a monospace font.
+- MySQL keyword/function completion plus suitable identifiers learned from the current schema and result-column names. Use **Ctrl+Space** to open completion on demand.
+- SQL formatting, find and replace, SQL-file open/save, and saved query snippets.
+- Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, and editor font size are stored locally.
+- Animated five-step guided tour that can insert a sample SELECT into the editor.
 
-The application connects directly from the user's computer to the configured MySQL server. It does not require a web account, cloud relay or companion service.
+### Database work
+- Execute the statement under the cursor, highlighted SQL, or the whole script.
+- Dedicated database worker thread keeps SQL execution and schema reads off the Qt UI event loop.
+- Configurable connection TLS policy and finite connection/read/write timeouts.
+- Explain SELECT runs an EXPLAIN version of the current SELECT statement.
+- Schema tree for databases, tables, and views; double-click a table for a limited preview.
+- Commit and Rollback controls, query history that is opt-in, and high-impact SQL confirmation prompts.
 
-## Requirements
+### Results and release engineering
+- Switch between results returned by different statements in a script.
+- Sortable result grid, numeric-aware sorting, NULL display, and copy-selected-cells support.
+- Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
+- Up to 2,000 rows per result are shown in the grid. Fetched result rows are also stored in a temporary local SQLite spool for CSV export.
+- Atomic CSV export to help preserve an existing destination when a write fails.
+- Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
+- CI includes lint, compile checks, unit/integration tests, a Windows UI smoke test, launch tests, installer/uninstaller tests, and dependency auditing.
+- Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
 
-- Windows 10/11 x64 for packaged use.
-- A reachable MySQL server and credentials with only the permissions needed for the user's work.
-- Python 3.12–3.14 for running from source.
-- Windows Credential Manager to persist database passwords.
+## Platform and scope
+
+| Item | Current scope |
+|---|---|
+| Packaged desktop app | Windows 10/11 x64 |
+| Source development | Python 3.12–3.14 |
+| Database | MySQL server reachable from this PC |
+| UI framework | Python / PySide6 / Qt |
+| Saved database passwords | Windows Credential Manager |
+| Android APK/AAB | Not part of this desktop phase |
+| Cloud account, relay, or cross-device password sync | Not implemented |
+| Analytics, ads, or telemetry | Not included |
+
+Python 3.15 is not listed as supported in this release line. A new Python release does not automatically make the complete driver, Qt, and packaging dependency chain compatible. The supported range should expand only after the connector, integration tests, and Windows packaging matrix pass.
+
+## Download a Windows build
+
+Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases), select the specific release you intend to install, and read its release notes.
+
+| File | Purpose |
+|---|---|
+| **MySQLEditor-Setup.exe** | Standard installer with Windows shortcuts and an uninstaller |
+| **MySQLEditor-Portable.exe** | Single-file portable executable |
+| **MySQLEditor-Folder.zip** | Application-folder package for advanced users or diagnostics |
+| **SHA256SUMS** | SHA-256 hashes for the release files, when published |
+| **sbom.cdx.json** | Software dependency inventory in CycloneDX format, when published |
+| **THIRD_PARTY_LICENSES.md** | Third-party license inventory, when published |
+| **WINDOWS_SIGNING.md** | Explicit signing status for that release |
+
+### About Windows warnings
+
+Unsigned preview builds can show an unknown-publisher or SmartScreen warning. Do not assume an artifact is trustworthy only because it is hosted on GitHub. Confirm the repository and release, review its notes, and check a published SHA-256 hash when available. A matching hash detects a file mismatch; it does not prove that software is safe.
+
+A successful CI build does not mean the executable has been Authenticode signed. Publisher identity can only be established after signing with a trusted code-signing certificate and verifying the final file signature.
+
+## Quick start
+
+1. Download a Windows package from the Releases page and install or launch it.
+2. At first launch, create a local master password and type it a second time to confirm. This is separate from the MySQL password.
+3. Enter a profile name, host, port, MySQL username, password, and optional default schema.
+4. Choose a TLS policy. Read the explanatory hint before connecting.
+5. Select whether to remember the connection and save the database password to Windows Credential Manager.
+6. Optionally use **Test connection** before connecting.
+7. Connect, confirm the active server/schema, then start with a read-only SELECT until you have verified the context.
+
+On later launches, MySQL Editor asks for the local master password. If a saved profile and Windows Credential Manager entry are available, it tries to reconnect. If the server is unreachable, the password is missing, or MySQL rejects it, use the connection dialog to correct the profile or enter the password again.
+
+The master password unlocks this installation only. It is not an online account, it does not synchronize to another device, and it is not the encryption key for Windows Credential Manager.
+
+## Connect to MySQL
+
+The connection form supports a profile selector, profile name, host, port, username, password, default schema, TLS policy, optional CA certificate path, and read/write timeouts.
+
+### Host and port
+- Use **127.0.0.1** or **localhost** when a MySQL server is running on the same computer and accepts that connection.
+- Use a DNS name or IP address reachable from this PC for a remote server.
+- **3306** is the typical MySQL port, but use the port your server actually listens on.
+- MySQL Editor is a client; it does not install or automatically start a database server.
+
+### TLS policies
+
+TLS affects transport confidentiality and server identity verification. These are different guarantees.
+
+| Policy | Behavior | When to use it |
+|---|---|---|
+| **Automatic TLS** | Allows TLS negotiation where supported, but does not verify certificate and hostname identity in this mode. | Compatible development environments where you understand the trust model. |
+| **Verify server identity** | Enables certificate and hostname verification. You can supply a CA file for a private certificate authority. | Preferred for remote servers and untrusted networks. |
+| **Disabled** | Explicitly disables TLS. Traffic is not encrypted by this connection policy. | Only when you understand and accept the risk in a suitably trusted local/test environment. |
+
+Do not disable certificate validation globally to hide an error. When strict verification fails, check the host name, certificate validity, trust chain, and CA file. A self-signed server certificate needs deliberate trust configuration when strict validation is required.
+
+### Common connection causes
+A server that is stopped, incorrect host/port, firewall rules, denied remote access, wrong credentials, missing permissions, an invalid default schema, or mismatched TLS settings can all prevent connection. MySQL Editor can display an error, but it cannot change server configuration or grant privileges.
+
+Prefer a dedicated database account with only the permissions the work requires. Avoid using a root account for routine SQL work.
+
+## Work with SQL
+
+### Edit and organize queries
+Use **New query** to create a tab. Open existing SQL files and save your current buffer as a file. Modified tabs show an unsaved marker and prompt before closing with unsaved changes.
+
+Completion covers common MySQL keywords/functions and suitable identifiers discovered in the selected schema and result headers. Completion is an editing aid, not a semantic validator: the server remains authoritative on SQL syntax, objects, data types, and permissions.
+
+### Run the right scope
+- **Run statement** executes the statement associated with the editor cursor.
+- **Run selection** executes the highlighted SQL.
+- **Run script** executes the full editor buffer in order.
+- **Format SQL** formats the selection when one exists, otherwise the whole buffer.
+- **Explain SELECT** executes EXPLAIN for the SELECT under the cursor.
+
+Before running a mutation, verify the active server and schema. High-impact statements may trigger a confirmation prompt. That prompt cannot guarantee that a query is safe: even a syntactically ordinary statement can lock a table, consume significant resources, expose sensitive data, or affect many rows.
+
+### Transactions and cancellation
+Commit and Rollback act on the active connection. Some MySQL statements, particularly many DDL operations, implicitly commit regardless of the application's transaction controls. Do not assume every operation can be undone with Rollback. Use backups and server-side privileges for important safety controls.
+
+**Stop** sends a best-effort KILL QUERY request through a separate control connection. Permissions, network conditions, and server state affect whether it succeeds promptly. A request to cancel is not proof that the server stopped immediately; check the final state before retrying a mutation.
+
+## Results and CSV export
+
+A multi-statement script can create several result entries. Use the result picker to switch among them. The grid displays column headers and rows along with row-count and duration information where available.
+
+- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison.
+- **Quick filter** searches visible row cells case-insensitively. Clear the filter to show all rows in the current preview.
+- **Copy selected cells** puts the selected values on the clipboard as tab-separated text.
+- **CSV export** uses rows fetched into the current session result spool, not just the visible grid. The 2,000-row display preview and active quick filter do not limit the exported fetched result set.
+- **NULL** appears as **(NULL)** in the display. Review it carefully if downstream tools distinguish NULL from an empty string.
+
+The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
+
+## Schema, history, and snippets
+
+### Schema Explorer
+Refresh the schema tree to read database names and table/view objects visible to the MySQL account. Double-click a schema to select it as the default schema for this workspace. Double-click a table to request a preview capped at 1,000 rows. The visible objects depend on the privileges of the connected user.
+
+### Query History
+Query history is **off by default**. It can be enabled in Settings. When enabled, SQL text, profile label, result status, duration, and timestamp are stored locally after heuristic redaction of common credential-like syntax. Redaction cannot guarantee that every possible secret or sensitive literal is detected. Avoid putting passwords, tokens, or confidential data directly in SQL text.
+
+Disabling history clears saved query history. Do not enable it on a shared computer unless you are comfortable with the SQL that might remain in the Windows user's local data directory.
+
+### Saved Queries
+Save a useful statement as a SQL snippet and reopen it from Saved Queries. Snippets are ordinary local SQL files, not encrypted secret storage. Never put passwords, access tokens, or production secrets inside snippets.
+
+## Keyboard shortcuts
+
+Shortcuts can depend on which widget has focus.
+
+| Shortcut | Action |
+|---|---|
+| **Ctrl+N** | New query tab |
+| **Ctrl+O** | Open SQL file |
+| **Ctrl+S** | Save current SQL file |
+| **Ctrl+Shift+S** | Save SQL snippet |
+| **Ctrl+F** | Find text |
+| **Ctrl+H** | Replace text |
+| **Ctrl+Enter** | Run current statement |
+| **Ctrl+Shift+Enter** | Run selected SQL |
+| **Ctrl+Alt+Enter** | Run complete script |
+| **Ctrl+Shift+F** | Format SQL |
+| **Ctrl+Plus** | Increase editor font size |
+| **Ctrl+Minus** | Decrease editor font size |
+| **Ctrl+0** | Reset editor font size |
+| **F5** | Refresh schema |
+| **F1** | Open the guided tour |
+| **Alt+F4** | Exit the application |
+
+## Security and privacy
+
+### Local data
+- Connection profile metadata—including host, port, username, default schema, TLS policy, CA path, and timeouts—is stored in the local settings database.
+- The original master passphrase is not stored; only an Argon2id verifier is saved.
+- Saved database passwords are sent through **Windows Credential Manager** when saving is enabled. They are not stored in SQLite, ordinary log files, query history, or saved snippets.
+- If the Windows credential backend is unavailable, the application does not fall back to a plaintext password file.
+- Opt-in query history stores SQL text and execution metadata after heuristic redaction.
+- Saved snippets are ordinary local files.
+- During query execution, a temporary SQLite spool stores fetched result rows so the app can display a bounded preview and export the fetched set.
+
+### Master password versus database password
+The master password is an application-session gate local to this PC. It is not a MySQL password, cloud identity, cross-device key, or encryption key for a Windows Credential Manager entry. Windows protects saved credentials under the Windows user account and operating system. Protect your Windows login and use appropriate device-lock and disk-encryption policies for sensitive databases.
+
+### Network and telemetry
+The app connects directly from this computer to the MySQL host and port selected by the user. This desktop implementation has no hosted account system, mandatory relay service, analytics endpoint, advertisements, or usage telemetry. SQL and credentials are sent to the database server subject to the selected protocol and TLS policy.
+
+See **SECURITY.md** and **PRIVACY_POLICY.md** for policy details.
 
 ## Run from source
 
-From PowerShell at the repository root:
+### Requirements
+- Windows 10/11 x64 is the main development and packaging target.
+- Python 3.12, 3.13, or 3.14.
+- A reachable MySQL server for integration testing.
+- Windows Credential Manager for persistent database-password saving.
+- PowerShell for the commands below.
+
+### Create a virtual environment
+
+Run from the repository root:
 
 ~~~powershell
 py -3.14 -m venv .venv
@@ -54,62 +242,147 @@ python tools/build_brand_assets.py
 python -m mysql_editor
 ~~~
 
-The app begins in the Connect to MySQL dialog. On first launch, create the local master password and enter it again to confirm. This is a local app lock, not a MySQL credential and not a password shared with Android or another device.
+The branding script generates a transparent PNG logo and multi-size Windows icon from the tracked source asset. It leaves the original source image unchanged. Run it before launching from source or packaging if the generated assets are not present.
+
+If PowerShell blocks activation, follow your organization's script policy or use the virtual environment's Python executable directly rather than changing machine-wide execution policy.
+
+### Launch and local data
+The module entry point is **python -m mysql_editor**. The installed console entry point is **mysql-editor**. Local settings and snippets live under the per-user data directory resolved by platformdirs. Query-result spools are created in the system temporary directory while the database worker runs.
 
 ## Build Windows packages
 
-Build on Windows x64 with Inno Setup installed. Run the branding step before launching from source to generate the transparent logo PNG and the multi-size Windows icon:
+Build on Windows x64. Install Inno Setup separately and ensure its compiler, **iscc**, is available to the shell. Use Python 3.14 for the CI-aligned release build.
 
 ~~~powershell
-python -m pip install -e ".[dev]" pyinstaller
+python -m pip install -e ".[dev]" pyinstaller pip-licenses
 python tools/build_brand_assets.py
+
+# Windowed application-folder package
 python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
+
+# Single-file portable executable
 python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor-logo-transparent.png;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
+
+# Setup installer; Inno Setup must already be installed
 iscc installer/MySQLEditor.iss
 ~~~
 
-Expected outputs: dist/MySQLEditor/ (onedir package), dist/MySQLEditor-Portable.exe, dist/installer/MySQLEditor-Setup.exe, dist/MySQLEditor-Folder.zip, dist/SHA256SUMS, a CycloneDX SBOM, a third-party license inventory, release notes, and a Windows signing-status note. The setup wizard and desktop icon are derived from the tracked logo.
+Expected outputs include:
 
-## Repository agent skills and AI review
+- **dist/MySQLEditor/** — application-folder build.
+- **dist/MySQLEditor-Portable.exe** — portable single-file executable.
+- **dist/installer/MySQLEditor-Setup.exe** — installer.
+- **dist/MySQLEditor-Folder.zip** — compressed folder package created by the release workflow.
+- **dist/SHA256SUMS**, **dist/sbom.cdx.json**, license inventory, release notes, and signing-status note when generated by the release workflow.
 
-Project-local skills live in `.agents/skills/` and cover surgical coding practices, Qt desktop UX/accessibility, MySQL security, CodeRabbit review, and Windows release verification. `AGENTS.md` contains always-on repository rules, while `.coderabbit.yaml` supplies repository-specific path instructions for automated pull-request review. These are development tools and documentation; they are not runtime app dependencies.
+A local package build is not proof that the artifact is ready for distribution. Use the Windows packaging workflow to validate startup, installation/uninstallation, file existence, and checksums. Windows binaries are unsigned unless a trusted Authenticode certificate is configured and the final signature is checked.
 
-Use the skill that matches the changed subsystem and verify the change with a regression test. Base44 web-app workflows and NVIDIA GPU tooling are not part of this native PySide6 Windows product.
+## Testing and CI
 
-## Security and local data
+Install the development dependencies:
 
-- Database passwords are not stored in SQLite, SQL files, query history or ordinary logs.
-- Saved passwords are only written through Windows Credential Manager. If that backend is unavailable, the app has no plaintext fallback.
-- The master password is stored as an Argon2id verifier. It unlocks this installation only and does not synchronize.
-- Query history is off by default. If enabled, SQL text, profile label, result status, duration and timestamp are stored locally; disabling history clears it.
-- Automatic TLS negotiates encryption when supported but does not verify server identity. Strict mode verifies certificate and hostname; Disabled is an explicit option for trusted local networks only.
-- SQL danger prompts are advisory and cannot replace server-side grants, least-privilege accounts or backups.
-- Result previews are capped, while fetched result rows are session-spooled for CSV export. Treat local result data and exported CSVs as sensitive.
-- No telemetry is included.
+~~~powershell
+python -m pip install -e ".[dev]"
+~~~
 
-See SECURITY.md and PRIVACY_POLICY.md.
-
-## Quality checks
+Run the repository checks:
 
 ~~~powershell
 python -m ruff check src tests tools
 python -m compileall -q src tests tools
 python -m pytest
+python -m pip_audit -r requirements.txt
 ~~~
 
-The CI workflow runs lint, compilation and unit tests on Python 3.12–3.14, and checks for legacy application imports. Regression tests cover SQL risk advisories for mutations wrapped in common CTEs, comments and string literals, and nested subqueries. A separate integration job runs query execution, schema inspection, transaction rollback and CSV export against a disposable MySQL 8.4 container. Windows CI runs an offscreen Qt UI smoke test for saved preferences and file-error recovery, builds the onedir package, portable executable and installer, smoke-launches the apps, and exercises a silent install/uninstall cycle. Release packages include a CycloneDX SBOM, third-party license inventory, release notes, signing-status note and SHA-256 manifest. Manual testing remains necessary for high-DPI layout, upgrade behavior and Windows Credential Manager.
+GitHub Actions runs lint, compilation, and unit tests across Python 3.12–3.14. A separate integration job starts a disposable MySQL 8.4 service and exercises query execution, schema inspection, transaction rollback, and CSV export. Windows CI checks Qt imports/UI behavior, builds the application-folder and portable packages plus installer, launches the packaged apps, and exercises silent install/uninstall behavior. Consult the Actions page for the exact commit you intend to use.
 
-## Known v1 limitations
+A successful automated run is evidence only for the checks that actually ran. It does not prove all display scales, upgrade paths, credential-vault states, external server configurations, or end-user PCs were manually tested.
 
-- MySQL DELIMITER directives and compound stored-program bodies are not supported by the initial statement splitter.
-- Table preview is limited to 1,000 rows. The result grid previews up to 2,000 rows per result, while CSV export includes all rows fetched into the current session spool.
-- Query cancellation is best-effort and does not guarantee immediate server-side cancellation.
-- Some DDL implicitly commits on MySQL, regardless of application transaction controls.
-- The repository's tracked logo image is the asset source. The build creates an alpha-bearing PNG by making edge-connected near-white background pixels transparent while preserving enclosed white artwork; the original source remains unchanged. Icon resizing cannot add information missing from the source image.
+## Architecture
 
-## References
+| Path | Responsibility |
+|---|---|
+| **src/mysql_editor/app.py** | Startup, local master-password unlock/reconnect flow, and shared theme |
+| **src/mysql_editor/core.py** | SQL boundaries, risk advisories, formatting integration, and secret-redaction helpers |
+| **src/mysql_editor/database.py** | Background MySQL worker, query execution, schema inspection, result spool, cancellation request, CSV export |
+| **src/mysql_editor/storage.py** | Local SQLite metadata, history/preferences, Argon2id verifier, Credential Manager adapter |
+| **src/mysql_editor/ui/editor.py** | SQL editor, highlighting, line numbers, indentation, and completion |
+| **src/mysql_editor/ui/connection_dialog.py** | Connection form, profile selection, test/connect actions, first-run lock setup |
+| **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, result grid, schema/history/snippets, transaction controls and export |
+| **src/mysql_editor/ui/tutorial.py** | Animated guided tour |
+| **src/mysql_editor/ui/unlock_dialog.py** | Local master-password unlock dialog |
+| **tests/** | Unit, integration, and startup/regression tests |
+| **tools/** | Brand-asset generator and Windows UI smoke tests |
+| **pyinstaller/** | PyInstaller application-folder specification |
+| **installer/** | Inno Setup installer definition |
+| **.github/workflows/** | Desktop CI, security audit, and Windows packaging workflows |
 
-- Repository: https://github.com/ram1234598766-dotcom/MySQL-Editor
-- Clean-room plan: DESKTOP_REBUILD_PLAN.md
-- Qt for Python: https://doc.qt.io/qtforpython-6/
-- MySQL Connector/Python: https://dev.mysql.com/doc/connector-python/en/
+Database operations are sent to a worker thread through queued tasks and Qt signals. The UI does not synchronously wait for SQL execution in its event loop. MySQL Editor connects directly to the chosen MySQL server; it does not require a cloud proxy or hosted account.
+
+## Troubleshooting
+
+### The application cannot connect
+Confirm that the server is running, the host/port are reachable, and the account is allowed to connect from this computer. Verify the username/password and default schema. Try Test connection to separate network/authentication issues from SQL execution errors.
+
+### Certificate verification fails
+If **Verify server identity** is selected, check the hostname, certificate validity, trust chain, and CA configuration. Supply the correct CA file for a private certificate authority. Do not disable TLS on an untrusted network just to hide the error. Automatic TLS does not verify server identity.
+
+### The app does not remember the database password
+Confirm that Remember this connection was selected and Windows Credential Manager is available for the current Windows user. If the credential is missing or rejected by MySQL, open the connection form and enter it again. The app intentionally has no plaintext fallback.
+
+### Query results look incomplete
+The grid previews up to 2,000 rows per result; table preview is capped at 1,000 rows. CSV export is intended to contain all rows fetched into the current result spool and is not reduced by the quick filter. Ensure the query completed and the correct result entry is selected.
+
+### A procedure script does not run as expected
+The statement splitter does not implement MySQL client DELIMITER directives or full compound stored-program parsing. Scripts relying on those directives may need a MySQL client that supports them until this feature is implemented.
+
+### Windows flags the installer or executable
+Unsigned preview packages can display unknown-publisher warnings. Verify the repository, release notes, and SHA-256 hash when available before deciding whether to run a downloaded artifact. Do not treat a successful build as proof that a file is signed.
+
+### Layout differs on another display
+The automated UI check uses Qt's offscreen platform and cannot prove that every Windows scaling factor is visually correct. Record the app version, display resolution/scaling, and steps to reproduce. Do not include passwords, query results, or customer data in a public issue.
+
+## Known limitations
+
+- MySQL DELIMITER directives and compound stored-program parsing are not implemented in the initial statement splitter.
+- Table preview is limited to 1,000 rows; the result grid displays up to 2,000 rows per result.
+- Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
+- Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.
+- SQL risk classification is heuristic. It can miss destructive or expensive queries and is not an authorization boundary.
+- Query-history redaction is heuristic and cannot guarantee detection of every secret or sensitive literal.
+- Automatic TLS does not verify server identity; Disabled TLS does not encrypt the connection.
+- Windows Credential Manager behavior, high-DPI appearance, upgrade-in-place, and varied external-server TLS configurations still require real-environment testing.
+- Resizing a logo derivative cannot restore detail that is absent from a low-resolution source image.
+- This is a pre-release Windows desktop client. Android, cloud synchronization, collaboration, and cross-device account features are not included.
+
+## Contributing
+
+Issues and pull requests are welcome. Keep changes aligned with the Windows desktop scope.
+
+1. Read **AGENTS.md** and the relevant guide under **.agents/skills/** before changing a subsystem.
+2. Reproduce the issue and add or update a regression test.
+3. Keep database operations off the UI thread; never add plaintext database-password storage.
+4. Run Ruff, compileall, pytest, and the dependency audit where the environment supports them.
+5. Check Actions for the exact pull-request commit. Do not call a workflow successful while it is still running or has failed.
+6. Update this README and, when appropriate, RELEASE-NOTES.md, SECURITY.md, or PRIVACY_POLICY.md for user-visible behavior changes.
+7. Do not claim signing or manual QA unless the relevant evidence exists.
+
+SQL snippets, query results, credentials, production connection strings, and screenshots containing database information may be sensitive. Do not put them in public issues or pull requests.
+
+## Project links
+
+- [Repository](https://github.com/ram1234598766-dotcom/MySQL-Editor)
+- [Releases](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases)
+- [GitHub Actions](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions)
+- [Security policy](SECURITY.md)
+- [Privacy policy](PRIVACY_POLICY.md)
+- [Windows signing guide](WINDOWS_SIGNING.md)
+- [Desktop implementation plan](DESKTOP_REBUILD_PLAN.md)
+- [Qt for Python / PySide6](https://doc.qt.io/qtforpython-6/)
+- [PySide6 deployment with PyInstaller](https://doc.qt.io/qtforpython-6/deployment/deployment-pyinstaller.html)
+- [MySQL Connector/Python documentation](https://dev.mysql.com/doc/connector-python/en/)
+- [Connector/Python compatibility reference](https://dev.mysql.com/doc/connector-python/en/connector-python-versions.html)
+
+---
+
+**Use a least-privilege MySQL account, verify the active server and schema before running mutations, and keep appropriate backups for important data.**
