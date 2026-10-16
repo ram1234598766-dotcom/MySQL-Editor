@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from argon2 import PasswordHasher
@@ -73,7 +73,7 @@ class LocalRepository:
 
     @staticmethod
     def now() -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return datetime.now(UTC).isoformat(timespec="seconds")
 
     def get_setting(self, key: str, default: str | None = None) -> str | None:
         row = self._db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()

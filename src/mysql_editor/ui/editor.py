@@ -44,7 +44,7 @@ class SqlHighlighter(QSyntaxHighlighter):
                 self.setFormat(match.start(), match.end() - match.start(), style)
 
 class LineNumberArea(QWidget):
-    def __init__(self, editor: "SqlEditor"):
+    def __init__(self, editor: SqlEditor):
         super().__init__(editor)
         self.editor = editor
 

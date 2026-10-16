@@ -2,7 +2,7 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from typing import Iterator
+from collections.abc import Iterator
 
 try:
     from sqlglot import format as format_sqlglot
