@@ -113,25 +113,30 @@ class PackagingBrandingTests(unittest.TestCase):
         generator = (ROOT / "tools" / "generate_brand_assets.py").read_text(encoding="utf-8")
         source = (ROOT / "assets" / "mysqlidle-logo.png").read_bytes()
 
+        # The desktop shell uses a Figma-inspired dark workspace with a scaled
+        # header rendering backed by the exact, unmodified original logo source.
         self.assertIn("self.brand_header = header", desktop)
         self.assertIn("window.iconbitmap(default=str(icon_path))", desktop)
         self.assertIn("if not icon_set and logo_path.is_file()", desktop)
         self.assertIn("_apply_window_icon(self)", desktop)
-        self.assertIn('header = tk.Frame(self, bg="#0B182A", padx=12, pady=10)', desktop)
-        self.assertIn('text="MySQL Editor desktop workspace"', desktop)
+        self.assertIn('header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=10, bd=0)', desktop)
+        self.assertIn('text="MySQL / MariaDB workspace"', desktop)
         self.assertIn('self.brand_logo_source = tk.PhotoImage(file=str(logo_path))', desktop)
         self.assertIn("self.brand_logo_image = self.brand_logo_source", desktop)
+        self.assertIn("self.brand_logo_display_image = source.subsample(sx, sy)", desktop)
         self.assertIn('text="MySQL Editor"', desktop)
-        self.assertIn('root.geometry("1080x720")', desktop)
-        self.assertIn('root.minsize(760, 500)', desktop)
+        self.assertIn('root.geometry("1360x860")', desktop)
+        self.assertIn('root.minsize(1000, 640)', desktop)
         self.assertIn("def _configure_ttk_style(root)", desktop)
         self.assertIn('style.configure("TButton", padding=(12, 7)', desktop)
         self.assertIn("icon_set = False", desktop)
         self.assertIn("if not icon_set and logo_path.is_file()", desktop)
         self.assertIn("self.logo_image = self.logo_source_image", desktop)
-        self.assertNotIn(".subsample(", desktop)
+        self.assertIn('"canvas": "#090E17"', desktop)
+        self.assertIn('text="SQL Console"', desktop)
+        self.assertIn('text="Latest result"', desktop)
 
-        # Main workspace and connection page resolve the same unmodified PNG source.
+        # The bundled artwork remains the exact 96x96 source PNG.
         with Image.open(ROOT / "assets" / "mysqlidle-logo.png") as image:
             self.assertEqual(image.size, (96, 96))
             self.assertEqual(image.format, "PNG")
@@ -188,7 +193,11 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn("Create master password", desktop)
         self.assertIn("MySQL account password", desktop)
         self.assertIn("self.logo_image = self.logo_source_image", desktop)
-        self.assertNotIn(".subsample(", desktop)
+        # The connection/password dialog continues to use the unscaled source
+        # artwork. Only the compact Figma-style desktop header uses a preview.
+        dialog_start = desktop.index("class ConnectDialog")
+        dialog_end = desktop.index("# Main application", dialog_start)
+        self.assertNotIn(".subsample(", desktop[dialog_start:dialog_end])
         self.assertIn("root.after_idle(app.connect_dialog)", desktop)
         self.assertNotIn("root.after(250, self.connect_dialog)", desktop)
         self.assertIn("self.startup_connect_pending = False", desktop)
