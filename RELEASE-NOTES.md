@@ -9,7 +9,7 @@
 - SQL formatting, Explain SELECT, result selection, sortable previews, CSV export, commit/rollback controls and saved SQL snippets.
 - Local Argon2id master-password verifier, opt-in local query history, and Windows Credential Manager-only persistent database password saving.
 - PyInstaller application-folder and portable packages, Inno Setup installer, and SHA-256 checksums.
-- CI checks for Python 3.12–3.14, unit tests, a disposable MySQL 8.4 integration service, dependency audit, and Windows startup/install/uninstall smoke checks.
+- CI checks for Python 3.12–3.14, unit tests, a disposable MySQL 8.4 integration service, dependency audit, a CycloneDX SBOM, a third-party license inventory, and Windows startup/install/uninstall smoke checks.
 
 ## Known limitations
 

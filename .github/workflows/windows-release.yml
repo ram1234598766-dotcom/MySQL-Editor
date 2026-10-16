@@ -21,7 +21,7 @@ jobs:
       - name: Install runtime and build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" pyinstaller
+          python -m pip install -e ".[dev]" pyinstaller pip-licenses
       - name: Create branded Windows icon
         run: python tools/build_brand_assets.py
       - name: Build application folder
@@ -81,6 +81,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip_audit -r requirements.txt --format cyclonedx-json --output dist/sbom.cdx.json
+          pip-licenses --format=markdown --output-file="dist/THIRD_PARTY_LICENSES.md"
           Copy-Item "RELEASE-NOTES.md" "dist/RELEASE-NOTES.md"
           Copy-Item "WINDOWS_SIGNING.md" "dist/WINDOWS_SIGNING.md"
       - name: Create folder archive and SHA-256 manifest
@@ -93,7 +94,8 @@ jobs:
             "dist/MySQLEditor-Folder.zip",
             "dist/sbom.cdx.json",
             "dist/RELEASE-NOTES.md",
-            "dist/WINDOWS_SIGNING.md"
+            "dist/WINDOWS_SIGNING.md",
+            "dist/THIRD_PARTY_LICENSES.md"
           )
           foreach ($item in $items) {
             $hash = (Get-FileHash $item -Algorithm SHA256).Hash.ToLower()
@@ -125,6 +127,7 @@ jobs:
             "dist/sbom.cdx.json",
             "dist/RELEASE-NOTES.md",
             "dist/WINDOWS_SIGNING.md",
+            "dist/THIRD_PARTY_LICENSES.md",
             "--title", "MySQL Editor $env:GITHUB_REF_NAME",
             "--notes-file", "dist/RELEASE-NOTES.md"
           )
