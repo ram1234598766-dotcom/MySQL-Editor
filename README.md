@@ -15,7 +15,7 @@ MySQL Editor is a clean-room, native Windows desktop SQL workspace for MySQL. Th
 - Schema navigation for databases, tables and views; double-click tables for a capped preview.
 - Result switching between statements, sortable result grid, copy selected cells, bounded preview and CSV export of the fetched result set.
 - Commit and rollback controls, high-impact SQL warnings, opt-in local query history, saved SQL snippets, open/save SQL files.
-- Product-specific PyInstaller onedir spec, portable executable build, original-logo ICO conversion, Inno Setup installer, unit tests, CI and release pipeline.
+- Product-specific PyInstaller onedir spec, portable executable build, original-logo multi-size ICO plus setup-wizard artwork, and Inno Setup installer with the desktop shortcut enabled by default. The CI pipeline exercises unit/integration tests and installer install/uninstall.
 
 This is a development implementation, not yet a release-approved or manually QA-certified binary. Review the workflow results and test the installer on a clean Windows account before distributing it.
 
@@ -64,7 +64,7 @@ python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEdito
 iscc installer/MySQLEditor.iss
 ~~~
 
-Expected outputs: dist/MySQLEditor/ (onedir package), dist/MySQLEditor-Portable.exe, dist/installer/MySQLEditor-Setup.exe, and SHA256SUMS from CI.
+Expected outputs: dist/MySQLEditor/ (onedir package), dist/MySQLEditor-Portable.exe, dist/installer/MySQLEditor-Setup.exe, dist/MySQLEditor-Folder.zip, dist/SHA256SUMS, a CycloneDX SBOM, a third-party license inventory, release notes, and a Windows signing-status note. The setup wizard and desktop icon are derived from the tracked logo.
 
 ## Security and local data
 

@@ -44,9 +44,12 @@ jobs:
           $uninstaller = Join-Path $installDir "unins000.exe"
           if (!(Test-Path $installedExe)) { throw "Installer did not install MySQLEditor.exe" }
           if (!(Test-Path $uninstaller)) { throw "Inno Setup uninstaller was not created" }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "MySQL Editor.lnk"
+          if (!(Test-Path $desktopShortcut)) { throw "Installer did not create the default desktop shortcut" }
           $uninstallArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
           $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList $uninstallArgs -Wait -PassThru
           if ($uninstallProcess.ExitCode -ne 0) { throw "Uninstall failed with exit code $($uninstallProcess.ExitCode)" }
+          if (Test-Path $desktopShortcut) { throw "Uninstaller left the desktop shortcut behind" }
       - name: Smoke launch packaged applications
         shell: pwsh
         run: |

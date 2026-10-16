@@ -1,9 +1,24 @@
 # MySQL Editor — Clean-Room Desktop Rebuild Plan
 
-**Status:** Implementation plan only. The existing application has not been deleted or rewritten by this change.  
+**Status:** Clean-room implementation is committed on `desktop-rebuild` and reviewed via [draft PR #3](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/3). The branch contains the new Windows desktop application, source tests, disposable-MySQL integration tests, installer and release pipelines, and rewritten product documentation.  
 **Target:** Windows desktop application first. Android is explicitly deferred to a later, separate project phase.  
 **Design reference:** [MySQL Editor Figma workspace](https://www.figma.com/design/EFFQpRTE8pKybt1lQR0eQH)  
 **Rule:** No application code, UI component, business-logic module, or test implementation may be copied, imported, renamed, or ported from MySQL IDLE. The existing repository is a source of requirements and lessons learned only. The user-supplied MySQL Editor logo is a brand asset, not reusable application code.
+
+---
+
+## Current implementation and cutover status
+
+The clean-room application is implemented under `src/mysql_editor/`. The branch has previously passed:
+
+- Lint, compile and unit-test jobs on Python 3.12, 3.13 and 3.14.
+- End-to-end tests against a disposable MySQL 8.4 service covering login, multi-statement execution, schema inspection, Unicode/NULL rows, CSV export, transaction rollback and rejected credentials.
+- A dependency audit.
+- A Windows workflow that built the onedir package, portable executable and Inno Setup installer; it completed install/uninstall, EXE-launch, manifest and artifact-upload steps successfully on the previous code commit.
+
+The current branch additionally uses a bounded `--smoke-test` startup path and packages the supplied logo in the setup wizard artwork, with the desktop shortcut checked by default. These latest packaging edits must pass their own current-head workflow before merging. Manual QA is still needed for high-DPI rendering, upgrade-in-place behavior, real Windows Credential Manager interactions, and connections to external MySQL server/TLS configurations. The executable is unsigned until a trusted code-signing certificate is configured; do not claim publisher verification or promise no SmartScreen warning.
+
+The Windows build workflow uploads an artifact named `MySQLEditor-Windows` containing the application folder, portable EXE, setup installer, folder archive, SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes and signing-status note. It can publish a GitHub pre-release on a version tag after the full job passes. The default branch remains protected from the clean-room cutover until PR #3 is merged.
 
 ---
 
@@ -26,7 +41,7 @@ The initial release is a local desktop application that connects directly to MyS
 
 The current `main` tree is mixed: a large `mysql_idle.py` desktop entry point, `mobile_companion.py`, an Android Gradle/Kotlin project, shared helpers and tests, Windows PyInstaller specs, and a combined Windows/Android workflow. This structure does not satisfy the clean-room or desktop-only target.
 
-The redesign is not another refactor of that application. The new implementation should be developed in a clean branch and then become the desktop product after it passes the cutover gate. This avoids removing the currently buildable baseline before the replacement exists.
+The redesign is not another refactor of that application. The clean-room implementation exists on `desktop-rebuild`; the legacy baseline on `main` is preserved until the exact replacement commit passes the cutover gate. Merge PR #3 only after current-head unit, integration, security, Windows packaging, app-startup and install/uninstall checks complete successfully.
 
 ### Destination for current files
 

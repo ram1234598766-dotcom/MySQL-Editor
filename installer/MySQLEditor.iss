@@ -23,6 +23,8 @@ UninstallDisplayIcon={app}\MySQLEditor.exe
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+WizardImageFile=..\assets\wizard-image.bmp
+WizardSmallImageFile=..\assets\wizard-small.bmp
 ArchitecturesInstallIn64BitMode=x64
 CloseApplications=yes
 RestartApplications=no
@@ -32,7 +34,7 @@ Uninstallable=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Files]
 Source: "..\dist\MySQLEditor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
