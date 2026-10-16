@@ -27,7 +27,7 @@ def _config(password: str | None = None) -> dict:
         "username": os.environ["MYSQL_EDITOR_TEST_USER"],
         "password": password if password is not None else os.environ["MYSQL_EDITOR_TEST_PASSWORD"],
         "default_schema": os.environ.get("MYSQL_EDITOR_TEST_DATABASE", "mysql_editor_test"),
-        "tls_mode": "Disabled",
+        "tls_mode": "Automatic TLS",
         "ca_file": "",
         "read_timeout": 15,
         "write_timeout": 15,
