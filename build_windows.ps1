@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-Write-Host '== MySQL IDLE release builder ==' -ForegroundColor Cyan
+Write-Host '== MySQL Editor release builder ==' -ForegroundColor Cyan
 $Python = Get-Command py -ErrorAction SilentlyContinue
 if (-not $Python) {
     throw 'Python Launcher (py.exe) is required on the BUILD machine. End users do not need Python after packaging.'
@@ -24,10 +24,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Automated tests failed; packaging was stopped.
 
 if (Test-Path .\build) { Remove-Item .\build -Recurse -Force }
 if (Test-Path .\dist\mysql_idle) { Remove-Item .\dist\mysql_idle -Recurse -Force }
-if (Test-Path .\dist\MySQLIDLE_Portable.exe) { Remove-Item .\dist\MySQLIDLE_Portable.exe -Force }
+if (Test-Path .\dist\MySQLEditor_Portable.exe) { Remove-Item .\dist\MySQLEditor_Portable.exe -Force }
 # Do not accidentally ship an installer left behind by an older local build.
-if (Test-Path .\dist\installer\MySQLIDLE-Setup.exe) {
-    Remove-Item .\dist\installer\MySQLIDLE-Setup.exe -Force
+if (Test-Path .\dist\installer\MySQLEditor-Setup.exe) {
+    Remove-Item .\dist\installer\MySQLEditor-Setup.exe -Force
 }
 
 py -3.15 -m PyInstaller --clean --noconfirm mysql_idle.spec
@@ -38,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Portable one-file build failed.' }
 if (-not (Test-Path .\dist\mysql_idle\mysql_idle.exe)) {
     throw 'Expected one-folder executable was not produced.'
 }
-if (-not (Test-Path .\dist\MySQLIDLE_Portable.exe)) {
+if (-not (Test-Path .\dist\MySQLEditor_Portable.exe)) {
     throw 'Expected portable executable was not produced.'
 }
 
@@ -46,9 +46,9 @@ $Iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 if ($Iscc) {
     & $Iscc.Source '.\MySQLIDLE.iss'
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installer compilation failed.' }
-    Write-Host 'Installer: dist\installer\MySQLIDLE-Setup.exe' -ForegroundColor Green
+    Write-Host 'Installer: dist\installer\MySQLEditor-Setup.exe' -ForegroundColor Green
 } else {
     Write-Warning 'Inno Setup is not installed. The portable EXE and application folder were built, but no setup installer was created. Install Inno Setup and run: ISCC.exe MySQLIDLE.iss'
 }
-Write-Host 'Portable executable: dist\MySQLIDLE_Portable.exe' -ForegroundColor Green
+Write-Host 'Portable executable: dist\MySQLEditor_Portable.exe' -ForegroundColor Green
 Write-Host 'Folder build: dist\mysql_idle\mysql_idle.exe (keep the whole folder together)' -ForegroundColor Green

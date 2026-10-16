@@ -24,7 +24,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MySQLIDLE_Portable',
+    name='MySQLEditor_Portable',
     icon='assets/mysqlidle.ico',
     debug=False,
     bootloader_ignore_signals=False,

@@ -1,10 +1,10 @@
-# MySQL IDLE 3.0
+# MySQL Editor 3.0
 
 **A desktop SQL workspace for MySQL and MariaDB, with an optional authenticated Android companion.**
 
-MySQL IDLE provides a lightweight, IDLE-style desktop shell for writing and running SQL, inspecting query results, running `.sql` scripts, and exporting result sets. Its optional mobile companion lets a paired Android device use a responsive SQL workspace through an HTTPS service hosted by the Windows desktop.
+MySQL Editor provides a lightweight, IDLE-style desktop shell for writing and running SQL, inspecting query results, running `.sql` scripts, and exporting result sets. Its optional mobile companion lets a paired Android device use a responsive SQL workspace through an HTTPS service hosted by the Windows desktop.
 
-![MySQL IDLE logo](assets/mysqlidle-logo.png)
+![MySQL Editor logo](assets/mysqlidle-logo.png)
 
 [![Build Windows EXE and Android APK](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml)
 [![Security checks](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/security.yml)
@@ -74,26 +74,20 @@ These controls reduce risk but do not replace least-privilege database accounts,
 
 ## Latest downloads
 
-Published packages appear on the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases). A successful build does not automatically mean a public release exists: the workflow only publishes Android release packages after all required Android signing secrets are present and the signing checks pass.
+Check the [latest GitHub Actions runs](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/workflows/build-exe-apk.yml) for build artifacts and the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases) for publish-ready downloads. A green CI build does not necessarily mean a public release has been published.
 
-**Current repository status (checked October 16, 2026):** the latest checked build run completed successfully for the Windows EXE/installer and Android build, including Windows installed-launch/uninstall smoke tests and an Android emulator install/launch smoke test. Android release signing was skipped because the release-signing secrets were not configured, so the release-publication steps were skipped too. **There is not yet a public release from that run.**
+Android release APK/AAB publication requires all four Android signing secrets to be configured and validated. Windows packages are built when the Windows job succeeds; without trusted Windows code-signing secrets they may be unsigned and Windows can show an unknown-publisher warning. Use debug Android packages only for testing, not public distribution. See [SIGNING.md](SIGNING.md) for signing setup and key continuity.
 
-You can inspect the successful [GitHub Actions build run](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/38873075729). It has two temporary CI artifacts: `MySQLIDLE-Windows` (portable EXE, installer and folder ZIP) and `MySQLIDLE-Android` (debug build for CI testing). Download them from the run's **Artifacts** section. They are temporary workflow artifacts, not public releases; retention/expiry applies. The Android debug package is for testing and is not a substitute for a release-signed package.
-
-After configuring signing, the following are the expected public-release assets:
+Expected public-release filenames:
 
 | Package | Asset filename | Intended use |
 | --- | --- | --- |
-| Windows installer | `MySQLIDLE-Setup.exe` | Standard Windows installation |
-| Windows portable executable | `MySQLIDLE_Portable.exe` | Run without installing |
-| Windows application folder | `MySQLIDLE-Folder.zip` | Extract the entire folder and keep its files together |
-| Android APK | `MySQLIDLE-Mobile-release.apk` | Direct Android installation/testing |
-| Android App Bundle | `MySQLIDLE-Mobile-release.aab` | Upload to Google Play Console; not directly installable |
+| Windows installer | `MySQLEditor-Setup.exe` | Standard Windows installation |
+| Windows portable executable | `MySQLEditor_Portable.exe` | Run without installing |
+| Windows application folder | `MySQLEditor-Folder.zip` | Extract the entire folder and keep its files together |
+| Android APK | `MySQLEditor-Mobile-release.apk` | Direct Android installation/testing |
+| Android App Bundle | `MySQLEditor-Mobile-release.aab` | Upload to Google Play Console; not directly installable |
 | SHA-256 manifest | `SHA256SUMS` | Verify downloaded assets |
-
-To enable Android release publication, add the four Android repository Actions secrets listed in [SIGNING.md](SIGNING.md). Windows signing secrets are optional for creating Windows build artifacts, but a public Windows release without them will be unsigned and may trigger Windows SmartScreen's unknown-publisher warning. See [SIGNING.md](SIGNING.md) for complete setup and signing-key continuity instructions.
-
-### Installation warning note
 
 A valid signature and passing CI checks do **not** guarantee that Google Play Protect will classify an app as safe. If Android explicitly says an app is harmful, cancel installation rather than overriding the warning. Do not disable Play Protect or repackage the app to evade it. If a released build appears to be misclassified, use Google's [official app-verification appeal process](https://support.google.com/googleplay/android-developer/answer/2992033).
 
@@ -121,18 +115,18 @@ A valid signature and passing CI checks do **not** guarantee that Google Play Pr
 
 ## Install on Windows
 
-1. Download `MySQLIDLE-Setup.exe` from the [latest successful GitHub release](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
+1. Download `MySQLEditor-Setup.exe` from the [latest successful GitHub release](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
 2. Run the installer. The default installation is under your Windows user's local application-data programs directory and is designed for per-user installation.
-3. Use the Start Menu or desktop shortcut to launch **MySQL IDLE**. The branded **Connect to MySQL** page opens automatically.
+3. Use the Start Menu or desktop shortcut to launch **MySQL Editor**. The branded **Connect to MySQL** page opens automatically.
 4. On first launch, create a master password and re-enter the same password in the confirmation field immediately below it. Then fill in the MySQL/MariaDB connection fields and select **Connect**.
 5. On later launches, only the compact **Connect to MySQL** dialog appears initially. Enter the master password there and select **Connect**; the large SQL workspace stays hidden until the database server accepts the connection. If the connection fails, the compact dialog reopens with the connection details so you can correct them without exposing the workspace. There is no separate unlock window.
 
 Alternative packages:
 
-- **Portable EXE:** download `MySQLIDLE_Portable.exe` and run it directly.
+- **Portable EXE:** download `MySQLEditor_Portable.exe` and run it directly.
 - **Folder ZIP:** extract the archive completely and run `mysql_idle.exe` from the extracted folder. Do not move the executable away from its accompanying `_internal` files.
 
-The installer creates desktop and Start Menu shortcuts. Uninstall uses Inno Setup's native file-and-shortcut cleanup and preserves per-user settings and logs so it cannot accidentally delete your local master-password verifier or connection preferences. To remove those files manually after uninstalling, close MySQL IDLE and delete `%LOCALAPPDATA%\MySQL IDLE`. Uninstalling MySQL IDLE never deletes MySQL databases.
+The installer creates desktop and Start Menu shortcuts. For upgrades from earlier builds, the installed program folder and per-user settings directory intentionally retain the legacy `MySQL IDLE` folder name, and the Android application ID remains `com.mysqlidle.mobile`; the displayed product name and new package filenames are MySQL Editor. Uninstall uses Inno Setup's native file-and-shortcut cleanup and preserves per-user settings and logs so it cannot accidentally delete your local master-password verifier or connection preferences. To remove those files manually after uninstalling, close MySQL Editor and delete `%LOCALAPPDATA%\MySQL IDLE`. Uninstalling MySQL Editor never deletes MySQL databases.
 
 ## Run from source
 
@@ -167,20 +161,20 @@ Tkinter normally comes with the standard Windows Python installer. If your Pytho
 
 ## First launch and master password
 
-MySQL IDLE opens the **Connect to MySQL** window first. The master-password controls are inside this same window, so there is no separate startup sign-in dialog.
+MySQL Editor opens the **Connect to MySQL** window first. The master-password controls are inside this same window, so there is no separate startup sign-in dialog.
 
 - **First launch:** create a master password of at least 10 characters, then enter the same password again in the confirmation field directly below it.
 - **Later launches:** the compact **Connect to MySQL** dialog is the only window shown at startup. Enter the saved master password; the main SQL workspace remains hidden until the database connection succeeds.
 - **Connection failure:** the compact dialog returns with the connection fields prefilled so you can fix the host, account password, port, or optional TLS settings and retry.
-- The master password is used to unlock MySQL IDLE and to authenticate Android pairing. Only a salted PBKDF2-HMAC-SHA256 verifier is stored, not the password itself.
+- The master password is used to unlock MySQL Editor and to authenticate Android pairing. Only a salted PBKDF2-HMAC-SHA256 verifier is stored, not the password itself.
 - The **MySQL account password** field is separate: it must contain the password configured for the MySQL/MariaDB user. The master password is not sent to MySQL as a database credential.
 
 Keep both passwords safe. There is no plaintext master password to recover from the application's settings files.
 
 ## Connect to MySQL or MariaDB
 
-1. Start MySQL IDLE. The **Connect to MySQL** window opens automatically.
-2. Enter the **MySQL IDLE master password** at the top of that window. On first launch, create and confirm it there; on later launches, enter the existing master password.
+1. Start MySQL Editor. The **Connect to MySQL** window opens automatically.
+2. Enter the **MySQL Editor master password** at the top of that window. On first launch, create and confirm it there; on later launches, enter the existing master password.
 3. Enter the MySQL server host, port (usually `3306`), username, the **MySQL account password**, and optional default database.
 4. Select **Connect**. The app checks the master password locally, then uses the MySQL account credentials to connect to the database. No separate unlock window is shown.
 5. To connect to a different database later, use **File → Connect** or press `Ctrl+N`.
@@ -227,7 +221,7 @@ SQL statements normally end with a semicolon. Multi-line statements are supporte
 | `Ctrl+Break` | Request cancellation of the active MySQL query; server permissions apply |
 | `help` | Show built-in help |
 | `clear` / `cls` | Clear the shell |
-| `exit` / `quit` | Close MySQL IDLE |
+| `exit` / `quit` | Close MySQL Editor |
 | `\\c` | Cancel the statement currently being typed |
 
 ### Query results and export
@@ -283,7 +277,7 @@ The Android app is a companion interface; **the MySQL connection is made by the 
 
 ### On Windows
 
-1. Launch and unlock MySQL IDLE.
+1. Launch and unlock MySQL Editor.
 2. Open **Tools → Android / Mobile Companion**.
 3. Explicitly start the companion service and select the appropriate private IPv4 network interface if prompted.
 4. Copy the HTTPS address, temporary pairing code and complete SHA-256 certificate fingerprint shown by the desktop.
@@ -291,12 +285,12 @@ The Android app is a companion interface; **the MySQL connection is made by the 
 
 ### On Android
 
-1. Install the signed `MySQLIDLE-Mobile-release.apk` from the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
-2. Open MySQL IDLE Mobile.
+1. Install the signed `MySQLEditor-Mobile-release.apk` from the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases).
+2. Open MySQL Editor Mobile.
 3. Enter the HTTPS address shown on Windows (for example, `https://192.168.1.20:8765`).
 4. Type the full SHA-256 certificate fingerprint shown on the desktop. Compare it carefully; do not accept a mismatch.
 5. Tap **Verify and connect**.
-6. On the pairing screen, enter the same MySQL IDLE master password and the temporary code from the Windows desktop.
+6. On the pairing screen, enter the same MySQL Editor master password and the temporary code from the Windows desktop.
 7. After pairing succeeds, enter the MySQL server host, port, username, and password. The host is resolved from the desktop computer's perspective; for a database running on that same PC, `localhost` may be appropriate.
 
 ### Mobile connection and session behavior
@@ -376,8 +370,8 @@ The build script installs required Python packages, generates the branded assets
 Outputs:
 
 - `dist\mysql_idle\mysql_idle.exe` — folder-based application (keep the entire folder).
-- `dist\MySQLIDLE_Portable.exe` — single-file portable build.
-- `dist\installer\MySQLIDLE-Setup.exe` — installer, if Inno Setup is available to the script.
+- `dist\MySQLEditor_Portable.exe` — single-file portable build.
+- `dist\installer\MySQLEditor-Setup.exe` — installer, if Inno Setup is available to the script.
 
 ### Build the Android debug app
 
@@ -491,7 +485,7 @@ MySQL-Editor/
 
 ## Known limitations
 
-- MySQL IDLE is a SQL client, not a MySQL/MariaDB server or a database backup/restore system.
+- MySQL Editor is a SQL client, not a MySQL/MariaDB server or a database backup/restore system.
 - SQL is executed using the connected database account's server-side privileges.
 - The desktop TLS compatibility default does not verify server identity unless certificate verification is enabled.
 - The Feature Governance classifier and SQL formatter are conservative lexical tools, not full MySQL SQL parsers; review formatted or safety-checked SQL before execution.
