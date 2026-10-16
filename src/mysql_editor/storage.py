@@ -28,6 +28,32 @@ class ConnectionProfile:
     read_timeout: int = 60
     write_timeout: int = 30
 
+
+def profile_to_dict(profile: ConnectionProfile) -> dict[str, Any]:
+    """Return non-secret profile metadata for the UI."""
+    return {
+        "id": profile.id, "name": profile.name, "host": profile.host,
+        "port": profile.port, "username": profile.username,
+        "default_schema": profile.default_schema, "tls_mode": profile.tls_mode,
+        "ca_file": profile.ca_file, "read_timeout": profile.read_timeout,
+        "write_timeout": profile.write_timeout,
+    }
+
+
+def connection_config_from_profile(
+    profile: ConnectionProfile, password: str,
+) -> dict[str, Any]:
+    """Build a one-session connect config; callers must obtain the password securely."""
+    return {
+        "profile_name": profile.name, "profile_id": profile.id,
+        "host": profile.host, "port": profile.port, "username": profile.username,
+        "password": password, "default_schema": profile.default_schema,
+        "tls_mode": profile.tls_mode, "ca_file": profile.ca_file,
+        "read_timeout": profile.read_timeout, "write_timeout": profile.write_timeout,
+        "save_profile": True,
+    }
+
+
 class LocalRepository:
     """SQLite metadata store with migrations and no password-bearing columns."""
     def __init__(self, path: Path | None = None) -> None:
