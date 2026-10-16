@@ -142,6 +142,6 @@ def test_mysql_query_schema_transaction_and_csv_round_trip(worker, tmp_path):
 
 
 def test_mysql_rejects_wrong_password(worker):
-    bad = _config(password="intentionally-wrong-password")
+    bad = _config(password=os.urandom(32).hex())
     with pytest.raises(mysql.connector.Error):
         worker._dispatch("test", {"config": bad})
