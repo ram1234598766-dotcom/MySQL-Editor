@@ -83,7 +83,7 @@ class SqlHighlighter(QSyntaxHighlighter):
 
         string = QTextCharFormat()
         string.setForeground(QColor("#f6c56f"))
-        self.rules.append((re.compile(r"'(?:''|\\.|[^'])*'|"" + r'"(?:""|\\.|[^"])*"'), string))
+        self.rules.append((re.compile(r"'(?:''|\\.|[^'])*'|\"(?:\"\"|\\.|[^\"])*\""), string))
 
         number = QTextCharFormat()
         number.setForeground(QColor("#bd9cff"))
