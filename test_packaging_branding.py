@@ -21,7 +21,7 @@ class PackagingBrandingTests(unittest.TestCase):
     def test_windows_ico_sizes_are_direct_nearest_neighbor_resizes_of_the_original(self):
         source_path = ROOT / "assets" / "mysql-editor-logo.jpg"
         icon_path = ROOT / "assets" / "mysqlidle.ico"
-        sizes = {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (128, 128), (256, 256)}
+        sizes = {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (96, 96), (128, 128), (256, 256)}
         with Image.open(source_path) as source_image:
             source = source_image.convert("RGBA")
         with Image.open(icon_path) as icon:
@@ -142,7 +142,8 @@ class PackagingBrandingTests(unittest.TestCase):
             self.assertEqual(image.format, "JPEG")
         self.assertGreater(len(source), 0)
         self.assertIn('LOGO_SOURCE = ASSETS / "mysql-editor-logo.jpg"', generator)
-        self.assertIn("Use the generated multi-size ICO where supported, avoiding DPI-induced blur.", desktop)
+        self.assertIn("Image.Resampling.LANCZOS", desktop)
+        self.assertIn("def _apply_window_icon(window):", desktop)
 
     def test_compact_connect_dialog_confirms_password_below_and_hides_advanced_tls(self):
         desktop = (ROOT / "mysql_idle.py").read_text(encoding="utf-8")
@@ -192,7 +193,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn("verify_password(master_password, self.password_record)", desktop)
         self.assertIn("Create master password", desktop)
         self.assertIn("MySQL account password", desktop)
-        self.assertIn("self.logo_image = self.logo_source_image", desktop)
+        self.assertIn("self.logo_image = ImageTk.PhotoImage(display_image, master=self)", desktop)
         # The connection/password dialog continues to use the unscaled source
         # artwork. Only the compact Figma-style desktop header uses a preview.
         dialog_start = desktop.index("class ConnectDialog")
