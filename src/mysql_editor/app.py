@@ -2,7 +2,6 @@
 from __future__ import annotations
 import sys
 from pathlib import Path
-from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from mysql_editor.database import DatabaseWorker
@@ -69,12 +68,7 @@ QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; b
 """
 
 def main() -> int:
-    # Keep the QA-only flag out of Qt's own command-line parser. The smoke path
-    # opens the same branded first-run UI, then exits without connecting to MySQL.
-    arguments = list(sys.argv)
-    smoke_test = "--smoke-test" in arguments
-    qt_arguments = [arg for arg in arguments if arg != "--smoke-test"]
-    app = QApplication(qt_arguments)
+    app = QApplication(sys.argv)
     app.setApplicationName("MySQL Editor")
     app.setOrganizationName("MySQL Editor")
     app.setStyle("Fusion")
@@ -109,8 +103,6 @@ def main() -> int:
     dialog = ConnectionDialog(worker, repository, credentials)
     dialog.connected.connect(on_connected)
     dialog.show()
-    if smoke_test:
-        QTimer.singleShot(1800, lambda: app.exit(0 if dialog.isVisible() else 3))
     exit_code = app.exec()
     if worker.isRunning():
         worker.shutdown()
