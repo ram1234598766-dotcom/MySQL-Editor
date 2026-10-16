@@ -512,25 +512,21 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "replaced=true" >> "$GITHUB_OUTPUT"
           echo "New Android release signing key generated and validated."
-      - name: Build release-signed APK and Android App Bundle
+      - name: Build release-signed APK
         if: env.ANDROID_SIGNING_ENABLED == 'true'
         working-directory: android-app
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/mysqlidle-release.jks
-        run: gradle --no-daemon assembleRelease bundleRelease
-      - name: Verify and stage signed APK and App Bundle
+        run: gradle --no-daemon assembleRelease
+      - name: Verify and stage signed APK
         if: env.ANDROID_SIGNING_ENABLED == 'true'
         run: |
           set -euo pipefail
           apk="android-app/app/build/outputs/apk/release/app-release.apk"
-          bundle="android-app/app/build/outputs/bundle/release/app-release.aab"
           test -s "$apk"
-          test -s "$bundle"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
-          jarsigner -verify "$bundle"
           mkdir -p dist
           cp "$apk" dist/MySQLEditor-Mobile-release.apk
-          cp "$bundle" dist/MySQLEditor-Mobile-release.aab
           echo "APK_SMOKE_PATH=dist/MySQLEditor-Mobile-release.apk" >> "$GITHUB_ENV"
           if [[ "${ANDROID_KEYSTORE_WAS_REPLACED:-false}" == "true" ]]; then
             openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -md sha256 \
@@ -539,10 +535,10 @@ jobs:
               -pass env:ANDROID_KEYSTORE_PASSWORD
             echo "Encrypted replacement-key backup staged for the CI artifact only."
           fi
-      - name: Build debug APK and App Bundle when release signing is not configured
+      - name: Build debug APK when release signing is not configured
         if: env.ANDROID_SIGNING_ENABLED != 'true'
         working-directory: android-app
-        run: gradle --no-daemon assembleDebug bundleDebug
+        run: gradle --no-daemon assembleDebug
       - name: Stage debug APK for CI only
         if: env.ANDROID_SIGNING_ENABLED != 'true'
         run: |
@@ -688,7 +684,6 @@ jobs:
           name: MySQLEditor-Android
           path: |
             dist/MySQLEditor-Mobile-*.apk
-            dist/MySQLEditor-Mobile-*.aab
           if-no-files-found: error
           retention-days: 90
       - name: Upload encrypted Android signing-key backup
@@ -740,7 +735,7 @@ jobs:
           if [[ "$ANDROID_SIGNING_ENABLED" == "true" ]]; then
             {
               echo "## Release signing"
-              echo "- Android release APK and App Bundle are configured for signing and will be verified."
+              echo "- Android release APK is configured for signing and will be verified."
               if [[ "$WINDOWS_BUILD_SUCCESS" == "true" && "$WINDOWS_SIGNING_ENABLED" == "true" ]]; then
                 echo "- Windows EXE, installer, and folder archive will be included; Authenticode signing is configured and verified."
               elif [[ "$WINDOWS_BUILD_SUCCESS" == "true" ]]; then
@@ -753,7 +748,7 @@ jobs:
             echo "::notice::Release publication skipped. Configure all four Android keystore secrets first."
             {
               echo "## Release not published"
-              echo "A signed Android APK and App Bundle are required for release publication."
+              echo "A signed Android APK is required for release publication."
               if [[ ${#missing[@]} -gt 0 ]]; then
                 echo "Missing Actions secret names (values are never displayed): ${missing[*]}"
               fi
@@ -801,7 +796,6 @@ jobs:
         run: |
           set -euo pipefail
           test -s "release-assets/MySQLEditor-Mobile-release.apk"
-          test -s "release-assets/MySQLEditor-Mobile-release.aab"
           cd release-assets
           if [[ "$WINDOWS_BUILD_READY" == "true" ]]; then
             test -s "MySQLEditor_Portable.exe"
@@ -809,7 +803,7 @@ jobs:
             test -s "MySQLEditor-Setup.exe"
             test -s "WINDOWS-SIGNING-STATUS.txt"
           fi
-          assets=(MySQLEditor-Mobile-release.apk MySQLEditor-Mobile-release.aab MySQLEditor_Portable.exe MySQLEditor-Folder.zip MySQLEditor-Setup.exe WINDOWS-SIGNING-STATUS.txt)
+          assets=(MySQLEditor-Mobile-release.apk MySQLEditor_Portable.exe MySQLEditor-Folder.zip MySQLEditor-Setup.exe WINDOWS-SIGNING-STATUS.txt)
           included=()
           for asset in "${assets[@]}"; do
             [[ -s "$asset" ]] && included+=("$asset")
@@ -827,7 +821,6 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/MySQLEditor-Mobile-release.apk
-            release-assets/MySQLEditor-Mobile-release.aab
             release-assets/SHA256SUMS
       - name: Publish Android and Windows release assets
         if: steps.signing.outputs.ready == 'true' && steps.signing.outputs.windows_ready == 'true'
@@ -840,7 +833,6 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/MySQLEditor-Mobile-release.apk
-            release-assets/MySQLEditor-Mobile-release.aab
             release-assets/MySQLEditor_Portable.exe
             release-assets/MySQLEditor-Folder.zip
             release-assets/MySQLEditor-Setup.exe
