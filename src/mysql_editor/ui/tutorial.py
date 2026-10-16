@@ -94,7 +94,7 @@ class ProductTourDialog(QDialog):
         self.pages = QStackedWidget()
         self.pages.setObjectName("tourPages")
         self.pages.setMinimumHeight(280)
-        for page_index, (title, intro, items) in enumerate(self._pages):
+        for page_index, (_title, _intro, items) in enumerate(self._pages):
             page = QWidget()
             page.setObjectName("tourPage")
             layout = QVBoxLayout(page)
@@ -135,7 +135,7 @@ class ProductTourDialog(QDialog):
         self.progress = QHBoxLayout()
         self.progress.setSpacing(6)
         self.progress_labels = []
-        for i in range(len(self._pages)):
+        for _i in range(len(self._pages)):
             dot = QLabel("●")
             dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot.setObjectName("tourProgress")
