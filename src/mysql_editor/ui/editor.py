@@ -2,8 +2,8 @@
 from __future__ import annotations
 import re
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat, QTextFormat, QTextEdit
-from PySide6.QtWidgets import QPlainTextEdit, QWidget
+from PySide6.QtGui import QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat, QTextFormat
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
 class SqlHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
