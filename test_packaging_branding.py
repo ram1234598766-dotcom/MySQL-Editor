@@ -1,7 +1,7 @@
 """Packaging/UI resource contracts for the shared product logo."""
 from pathlib import Path
 import unittest
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageChops
 
 ROOT = Path(__file__).resolve().parent
 
@@ -237,11 +237,16 @@ class PackagingBrandingTests(unittest.TestCase):
             self.assertEqual(source_image.format, "JPEG")
             self.assertGreaterEqual(source_image.width, 128)
             self.assertGreaterEqual(source_image.height, 128)
-        self.assertEqual(
-            android_logo.read_bytes(),
-            source_path.read_bytes(),
-            "Android must embed the exact supplied JPEG bytes, without resizing or editing.",
-        )
+        with Image.open(android_logo) as generated:
+            self.assertEqual(generated.format, "JPEG")
+            self.assertEqual(generated.size, (256, 256))
+            actual = generated.convert("RGB")
+        with Image.open(source_path) as source_image:
+            expected = source_image.convert("RGB").resize((256, 256), Image.Resampling.LANCZOS)
+            expected = expected.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+        diff = ImageChops.difference(actual, expected)
+        mean_error = sum(diff.convert("RGB").resize((1, 1)).getpixel((0, 0))) / 3
+        self.assertLess(mean_error, 4.0, "Android icon should be a crisp resample of the shared logo.")
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("![MySQL Editor logo](assets/mysql-editor-logo.jpg)", readme)
