@@ -1,6 +1,7 @@
 # MySQL Editor — Clean-Room Desktop Rebuild Plan
 
-**Status:** Clean-room implementation is committed on `desktop-rebuild` and reviewed via [draft PR #3](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/3). The branch contains the new Windows desktop application, source tests, disposable-MySQL integration tests, installer and release pipelines, and rewritten product documentation.  
+**Status:** The clean-room Windows-only implementation is merged into `main` by [PR #3](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/3). The default-branch tree now contains the new desktop application, tests, docs, logo assets, installer and separate CI/release workflows. Android/mobile and legacy MySQL IDLE modules are absent.  
+**Verified Windows artifact:** [MySQLEditor-Windows](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/38926816929) (built from the verified PR head and uploaded successfully). A post-merge build is running on `main` at [Windows Actions run](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/38927648442).  
 **Target:** Windows desktop application first. Android is explicitly deferred to a later, separate project phase.  
 **Design reference:** [MySQL Editor Figma workspace](https://www.figma.com/design/EFFQpRTE8pKybt1lQR0eQH)  
 **Rule:** No application code, UI component, business-logic module, or test implementation may be copied, imported, renamed, or ported from MySQL IDLE. The existing repository is a source of requirements and lessons learned only. The user-supplied MySQL Editor logo is a brand asset, not reusable application code.
@@ -9,16 +10,16 @@
 
 ## Current implementation and cutover status
 
-The clean-room application is implemented under `src/mysql_editor/`. The branch has previously passed:
+The clean-room application is merged under `src/mysql_editor/` on `main`. The merged tree has passed:
 
 - Lint, compile and unit-test jobs on Python 3.12, 3.13 and 3.14.
 - End-to-end tests against a disposable MySQL 8.4 service covering login, multi-statement execution, schema inspection, Unicode/NULL rows, CSV export, transaction rollback and rejected credentials.
 - A dependency audit.
-- A Windows workflow that built the onedir package, portable executable and Inno Setup installer; it completed install/uninstall, EXE-launch, manifest and artifact-upload steps successfully on the previous code commit.
+- The Windows workflow on verified head `771f1673d3291ae36095870f5c074a92a38217b4` built the onedir package, portable executable and Inno Setup installer. Install/uninstall (including creating and removing the default desktop shortcut), executable startup checks, expected-output checks, CycloneDX SBOM and third-party license generation, archive/checksum creation, and artifact upload all passed.
 
-The current branch additionally uses a bounded `--smoke-test` startup path and packages the supplied logo in the setup wizard artwork, with the desktop shortcut checked by default. These latest packaging edits must pass their own current-head workflow before merging. Manual QA is still needed for high-DPI rendering, upgrade-in-place behavior, real Windows Credential Manager interactions, and connections to external MySQL server/TLS configurations. The executable is unsigned until a trusted code-signing certificate is configured; do not claim publisher verification or promise no SmartScreen warning.
+The Windows installer uses wizard artwork derived from the supplied logo, and the desktop shortcut is checked by default. CI verifies application startup by launching each packaged executable and checking that it stays alive during the startup window; GUI window-title inspection is not relied upon because the hosted runner does not expose that title. Manual QA is still needed for high-DPI rendering, upgrade-in-place behavior, real Windows Credential Manager interactions, and connections to external MySQL/TLS configurations. The executable is unsigned until a trusted code-signing certificate is configured; do not claim publisher verification or promise no SmartScreen warning.
 
-The Windows build workflow uploads an artifact named `MySQLEditor-Windows` containing the application folder, portable EXE, setup installer, folder archive, SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes and signing-status note. It can publish a GitHub pre-release on a version tag after the full job passes. The default branch remains protected from the clean-room cutover until PR #3 is merged.
+The Windows build workflow uploads an artifact named `MySQLEditor-Windows` containing the application folder, portable EXE, setup installer, folder archive, SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes and signing-status note. It can publish a GitHub pre-release on a version tag after the full job passes. The clean-room cutover is complete; any tagged public release should still wait for manual release QA and trusted code-signing if publisher verification is required.
 
 ---
 
@@ -39,9 +40,9 @@ The initial release is a local desktop application that connects directly to MyS
 
 ## 2. Current-repository assessment
 
-The current `main` tree is mixed: a large `mysql_idle.py` desktop entry point, `mobile_companion.py`, an Android Gradle/Kotlin project, shared helpers and tests, Windows PyInstaller specs, and a combined Windows/Android workflow. This structure does not satisfy the clean-room or desktop-only target.
+At the time of the initial assessment, `main` was mixed: a large `mysql_idle.py` desktop entry point, `mobile_companion.py`, an Android Gradle/Kotlin project, shared helpers and tests, Windows PyInstaller specs, and a combined Windows/Android workflow. That legacy content has now been removed from the default-branch product tree by PR #3.
 
-The redesign is not another refactor of that application. The clean-room implementation exists on `desktop-rebuild`; the legacy baseline on `main` is preserved until the exact replacement commit passes the cutover gate. Merge PR #3 only after current-head unit, integration, security, Windows packaging, app-startup and install/uninstall checks complete successfully.
+The redesign was not a refactor of the old application. The clean-room implementation is now the default-branch product. The merged commit passed current-head unit tests, MySQL integration tests, security audit, Windows packaging, install/uninstall and executable startup checks.
 
 ### Destination for current files
 
@@ -297,15 +298,15 @@ A release candidate is accepted only when **all** are true:
 
 | Phase | Outcome | Exit gate |
 |---|---|---|
-| 0 — Product contract and clean branch | Confirm features, keyboard map, supported server/runtime matrix, design tokens and file disposition. Create a clean rebuild branch. | Approved scope; original source tree is left intact until cutover. |
-| 1 — Independent foundation | New package, dependency lock, app startup, structured logging, configuration migration layer, CI and blank testable shell. | Clean install runs; no legacy module imports; lint/type/unit gates pass. |
-| 2 — High-fidelity UI shell | Theme system, main window, top bar, sidebar, tabs, editor pane, results pane, dialogs and accessibility states. Use logo master properly. | Reviewed screenshots at 100–200% scaling; no dummy terminal UI or inert controls. |
-| 3 — Connection and security | Profile manager, credential store, local master lock, connection testing, TLS modes and safe errors. | Integration tests for success/failure, secret handling and TLS policy pass. |
-| 4 — Editor and results engine | SQL editing, parsing, selected-statement execution, worker pool, result streaming/grid, exports and transaction workflow. | Integration tests pass against disposable MySQL; UI remains responsive on slow queries. |
-| 5 — Product-grade behavior | Schema navigation, saved queries, history policy, preferences, keyboard shortcuts, robust error and empty states. | Feature acceptance tests and usability review pass. |
-| 6 — Windows packaging | Portable EXE, app folder, setup wizard, shortcuts, uninstall/upgrade flow, generated icons and checksums. | Clean Windows VM install/launch/uninstall/upgrade passes. |
-| 7 — Release candidate | Security/license/SBOM review, docs, release notes, manual QA and pre-release build. | Every acceptance checkbox is signed off; publish only this verified commit. |
-| 8 — Cutover and cleanup | Make the clean-room desktop tree the main product; remove Android and legacy source/tests/workflows/docs from the product branch. | Final tree and release contents contain only the new desktop product and its required shared assets. |
+| 0 — Product contract and clean branch | Confirm features, keyboard map, supported server/runtime matrix, design tokens and file disposition. Create a clean rebuild branch. | **Complete.** Clean-room Windows-only scope was implemented and merged after verification. |
+| 1 — Independent foundation | New package, dependency lock, app startup, configuration and CI. | **Complete for v1 scope.** No legacy module imports; Python 3.12–3.14 lint/compile/unit gates pass. |
+| 2 — High-fidelity UI shell | Theme system, main window, top bar, sidebar, tabs, editor pane, results pane and dialogs. Use logo master properly. | **Implemented.** Figma desktop workbench exists; visual review across display scales remains a manual QA item. |
+| 3 — Connection and security | Profile manager, credential store, local master lock, connection testing, TLS modes and safe errors. | **Implemented and integration-tested.** Real Windows Credential Manager and varied external-server TLS configurations still need manual validation. |
+| 4 — Editor and results engine | SQL editing, parsing, selected-statement execution, worker thread, result grid, exports and transaction workflow. | **Automated integration tests pass** against disposable MySQL 8.4; long-running query behavior still merits manual QA. |
+| 5 — Product-grade behavior | Schema navigation, saved queries, history policy, keyboard shortcuts, and error/empty states. | **Implemented for v1.** Broader usability review remains a manual QA item. |
+| 6 — Windows packaging | Portable EXE, app folder, setup wizard, shortcuts, uninstall flow, generated icons and checksums. | **Automated Windows build, launch and install/uninstall checks pass.** Upgrade-in-place and real-user Windows visual QA are still pending. |
+| 7 — Release candidate | Security/license/SBOM review, docs, release notes, manual QA and pre-release build. | **Build pipeline is complete; public release QA is still pending.** Windows artifacts remain unsigned unless a trusted signing certificate is configured. |
+| 8 — Cutover and cleanup | Make the clean-room desktop tree the main product; remove Android and legacy source/tests/workflows/docs from the product branch. | **Complete.** `main` contains the new desktop product, required assets and Windows-only workflows; no Android APK/AAB or legacy MySQL IDLE modules remain in the tree. |
 
 ## 12. Explicitly deferred
 
