@@ -31,7 +31,7 @@ class PackagingBrandingTests(unittest.TestCase):
                 with self.subTest(size=size):
                     actual = icon.ico.getimage(size).convert("RGBA")
                     expected = source.resize(size, Image.Resampling.LANCZOS).filter(
-                        ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+                        ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2)
                     )
                     self.assertEqual(list(actual.getdata()), list(expected.getdata()),
                                      "Every Windows ICO frame must come directly from the original logo without blur.")
@@ -97,7 +97,7 @@ class PackagingBrandingTests(unittest.TestCase):
         with Image.open(ROOT / "assets" / "wizard-image.bmp") as actual_panel:
             self.assertEqual(actual_panel.size, (164, 314))
             mark = source.resize((128, 128), Image.Resampling.LANCZOS).filter(
-                ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+                ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2)
             )
             expected_panel = Image.new("RGB", (164, 314), (11, 24, 42))
             expected_panel.paste(mark, ((164 - mark.width) // 2, (314 - mark.height) // 2), mark)
@@ -108,7 +108,7 @@ class PackagingBrandingTests(unittest.TestCase):
         with Image.open(ROOT / "assets" / "wizard-small.bmp") as actual_small:
             self.assertEqual(actual_small.size, (55, 55))
             mark = source.resize((55, 55), Image.Resampling.LANCZOS).filter(
-                ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3)
+                ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2)
             )
             expected_small = Image.new("RGB", (55, 55), (11, 24, 42))
             expected_small.paste(mark, (0, 0), mark)
@@ -243,7 +243,7 @@ class PackagingBrandingTests(unittest.TestCase):
             actual = generated.convert("RGB")
         with Image.open(source_path) as source_image:
             expected = source_image.convert("RGB").resize((256, 256), Image.Resampling.LANCZOS)
-            expected = expected.filter(ImageFilter.UnsharpMask(radius=0.55, percent=125, threshold=3))
+            expected = expected.filter(ImageFilter.UnsharpMask(radius=0.65, percent=155, threshold=2))
         diff = ImageChops.difference(actual, expected)
         mean_error = sum(diff.convert("RGB").resize((1, 1)).getpixel((0, 0))) / 3
         self.assertLess(mean_error, 4.0, "Android icon should be a crisp resample of the shared logo.")
