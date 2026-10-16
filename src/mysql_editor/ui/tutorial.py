@@ -94,7 +94,6 @@ class ProductTourDialog(QDialog):
         self.pages = QStackedWidget()
         self.pages.setObjectName("tourPages")
         self.pages.setMinimumHeight(280)
-        self._page_action_buttons = []
         for page_index, (title, intro, items) in enumerate(self._pages):
             page = QWidget()
             page.setObjectName("tourPage")
