@@ -1474,12 +1474,13 @@ class MySQLIDLE:
                 source = self.brand_logo_source
                 sx = max(1, (source.width() + 33) // 34)
                 sy = max(1, (source.height() + 33) // 34)
-                self.brand_logo_image = source.subsample(sx, sy)
+                self.brand_logo_image = self.brand_logo_source
+                self.brand_logo_display_image = source.subsample(sx, sy)
                 logo_box = tk.Frame(header, bg=c["surface"], width=34, height=34)
                 logo_box.pack(side=tk.LEFT, padx=(0, 14))
                 logo_box.pack_propagate(False)
                 self.brand_logo_label = tk.Label(
-                    logo_box, image=self.brand_logo_image, bg=c["surface"],
+                    logo_box, image=self.brand_logo_display_image, bg=c["surface"],
                     bd=0, highlightthickness=0,
                 )
                 self.brand_logo_label.place(relx=0.5, rely=0.5, anchor="center")
