@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MySQL IDLE - an IDLE-style desktop shell for MySQL / MariaDB.
+MySQL Editor - an IDLE-style desktop shell for MySQL / MariaDB.
 
 Looks and behaves like Python's IDLE: one white window, a menu bar on top,
 and a live `mysql>` prompt where you type SQL. Results are printed as
@@ -69,7 +69,7 @@ except Exception as _pymysql_exc:  # Show a friendly first-run error for source 
     pymysql = None
     PYMYSQL_IMPORT_ERROR = _pymysql_exc
 
-APP_NAME = "MySQL IDLE"
+APP_NAME = "MySQL Editor"
 APP_VERSION = "3.0"
 
 
@@ -415,7 +415,7 @@ def save_config(cfg):
                 pass
         os.replace(tmp_path, CONFIG_PATH)
     except OSError:
-        logging.exception("Could not save MySQL IDLE settings")
+        logging.exception("Could not save MySQL Editor settings")
     finally:
         if tmp_path is not None:
             try:
@@ -561,7 +561,7 @@ class ConnectDialog(tk.Toplevel):
             try:
                 self.password_record = load_password_record(MASTER_PASSWORD_PATH)
             except (OSError, ValueError) as exc:
-                logging.exception("Could not load the MySQL IDLE master-password verifier")
+                logging.exception("Could not load the MySQL Editor master-password verifier")
                 self.master_auth_unavailable = True
                 messagebox.showerror(
                     "Master password unavailable",
@@ -597,7 +597,7 @@ class ConnectDialog(tk.Toplevel):
             font=("Segoe UI", 16, "bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
-            header_copy, text="MySQL IDLE desktop workspace", bg="#0B182A",
+            header_copy, text="MySQL Editor desktop workspace", bg="#0B182A",
             fg="#B9C8DD", font=("Segoe UI", 10), anchor="w",
         ).pack(anchor="w", pady=(5, 0))
         tk.Frame(self, bg="#DCE5F1", height=1, bd=0).grid(
@@ -610,7 +610,7 @@ class ConnectDialog(tk.Toplevel):
         self.first_master_setup = self.require_master_password and self.password_record is None
         if self.require_master_password:
             access = tk.LabelFrame(
-                self, text="MySQL IDLE access", bg="white", padx=10, pady=8
+                self, text="MySQL Editor access", bg="white", padx=10, pady=8
             )
             access.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 10))
             row += 1
@@ -845,10 +845,10 @@ class ConnectDialog(tk.Toplevel):
                         MASTER_PASSWORD_PATH, master_password
                     )
                 except (OSError, ValueError) as exc:
-                    logging.exception("Could not save the MySQL IDLE master-password verifier")
+                    logging.exception("Could not save the MySQL Editor master-password verifier")
                     messagebox.showerror(
                         "Could not save master password",
-                        "MySQL IDLE cannot connect without saving the master-password verifier.\n\n"
+                        "MySQL Editor cannot connect without saving the master-password verifier.\n\n"
                         + str(exc),
                         parent=self,
                     )
@@ -866,7 +866,7 @@ class ConnectDialog(tk.Toplevel):
                 else:
                     messagebox.showerror(
                         "Access denied",
-                        "MySQL IDLE will close after five incorrect master-password attempts.",
+                        "MySQL Editor will close after five incorrect master-password attempts.",
                         parent=self,
                     )
                     self.destroy()
@@ -1476,7 +1476,7 @@ class MySQLIDLE:
         brand_copy = tk.Frame(header, bg="#0B182A", bd=0, highlightthickness=0)
         brand_copy.pack(side=tk.LEFT, fill=tk.Y, expand=False, pady=(12, 0))
         tk.Label(
-            brand_copy, text="MySQL IDLE", bg="#0B182A", fg="#FFFFFF",
+            brand_copy, text="MySQL Editor", bg="#0B182A", fg="#FFFFFF",
             font=("Segoe UI", 18, "bold"), anchor="w",
         ).pack(anchor="w")
         tk.Label(
@@ -1998,7 +1998,7 @@ class MySQLIDLE:
             if policy["decision"] == "confirm":
                 approved = messagebox.askyesno(
                     "Confirm high-impact SQL",
-                    f"MySQL IDLE detected a high-impact statement in {source}.\n\n"
+                    f"MySQL Editor detected a high-impact statement in {source}.\n\n"
                     f"Risk category: {policy['category']}\nRisk level: {policy['risk']}\n"
                     f"Reason: {policy['reason']}\n\n"
                     f"Statement fingerprint: {digest}\n\n"
@@ -2250,7 +2250,7 @@ class MySQLIDLE:
     def show_feature_governance(self):
         """Expose runtime policy controls and a redacted, bounded audit view."""
         win = tk.Toplevel(self.root, bg="white", padx=16, pady=14)
-        win.title("MySQL IDLE Feature Governance")
+        win.title("MySQL Editor Feature Governance")
         win.geometry("720x560")
         win.minsize(580, 420)
         win.transient(self.root)
@@ -2346,7 +2346,7 @@ class MySQLIDLE:
         consent = messagebox.askyesno(
             "Enable Android / Mobile Companion",
             "This starts a temporary web interface on your local network so an Android phone can run SQL through this computer.\n\n"
-            "Security note: the phone must enter the same MySQL IDLE master password you set on this Windows computer, as well as the temporary pairing code. HTTPS uses certificate fingerprint verification. Enable it only on a trusted private Wi-Fi/LAN, never on public Wi-Fi, and never forward its port to the internet.\n\n"
+            "Security note: the phone must enter the same MySQL Editor master password you set on this Windows computer, as well as the temporary pairing code. HTTPS uses certificate fingerprint verification. Enable it only on a trusted private Wi-Fi/LAN, never on public Wi-Fi, and never forward its port to the internet.\n\n"
             "Start it now?",
             icon="warning", parent=self.root,
         )
@@ -2356,7 +2356,7 @@ class MySQLIDLE:
             from mobile_companion import MobileCompanionServer
             password_record = load_password_record(MASTER_PASSWORD_PATH)
             if password_record is None:
-                raise RuntimeError("Set a MySQL IDLE master password before enabling the Android / Mobile Companion.")
+                raise RuntimeError("Set a MySQL Editor master password before enabling the Android / Mobile Companion.")
             self.mobile_server = MobileCompanionServer(
                 governor=self.governor, password_record=password_record
             )
@@ -2383,7 +2383,7 @@ class MySQLIDLE:
         win.geometry("680x510")
         win.minsize(560, 450)
         win.transient(self.root)
-        tk.Label(win, text="Verify this desktop in the MySQL IDLE Android app", bg="white", anchor="w", font=("Segoe UI", 10, "bold")).pack(fill=tk.X, pady=(0, 5))
+        tk.Label(win, text="Verify this desktop in the MySQL Editor Android app", bg="white", anchor="w", font=("Segoe UI", 10, "bold")).pack(fill=tk.X, pady=(0, 5))
         tk.Label(win, text="Keep both devices on the same trusted private Wi-Fi network. Do not port-forward this service.", bg="white", fg="#555555", anchor="w", wraplength=640, justify=tk.LEFT).pack(fill=tk.X, pady=(0, 6))
         url_var = tk.StringVar(value=server.url)
         url_entry = ttk.Entry(win, textvariable=url_var, state="readonly")
@@ -2400,7 +2400,7 @@ class MySQLIDLE:
         code_entry = ttk.Entry(win, textvariable=code_var, state="readonly", font=("Consolas", 11))
         code_entry.pack(fill=tk.X, pady=(0, 6))
         ttk.Button(win, text="Copy pairing code", command=lambda: self._copy_text(server.pairing_code, win)).pack(anchor="e")
-        tk.Label(win, text="On Android: enter this HTTPS address, compare the certificate fingerprint, then enter the same MySQL IDLE master password set on this Windows computer plus the temporary pairing code. A mismatch is rejected. Verified TLS protects traffic to the companion. For MySQL connections, leave verified TLS enabled and supply your server CA certificate if needed. Allow Windows Firewall access on private networks only. Stop the companion when finished.", bg="white", fg="#8a3636", wraplength=640, justify=tk.LEFT, anchor="w").pack(fill=tk.X, pady=(12, 8))
+        tk.Label(win, text="On Android: enter this HTTPS address, compare the certificate fingerprint, then enter the same MySQL Editor master password set on this Windows computer plus the temporary pairing code. A mismatch is rejected. Verified TLS protects traffic to the companion. For MySQL connections, leave verified TLS enabled and supply your server CA certificate if needed. Allow Windows Firewall access on private networks only. Stop the companion when finished.", bg="white", fg="#8a3636", wraplength=640, justify=tk.LEFT, anchor="w").pack(fill=tk.X, pady=(12, 8))
         buttons = tk.Frame(win, bg="white")
         buttons.pack(fill=tk.X, side=tk.BOTTOM)
         ttk.Button(buttons, text="Stop Companion", command=lambda: (self.stop_mobile_companion(), win.destroy())).pack(side=tk.RIGHT)

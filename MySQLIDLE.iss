@@ -1,6 +1,6 @@
-#define MyAppName "MySQL IDLE"
+#define MyAppName "MySQL Editor"
 #define MyAppVersion "3.0.0"
-#define MyAppPublisher "MySQL IDLE"
+#define MyAppPublisher "MySQL Editor"
 #define MyAppExeName "mysql_idle.exe"
 #define MyDistDir "dist\mysql_idle"
 
@@ -14,11 +14,11 @@ AppPublisherURL=https://github.com/ram1234598766-dotcom/MySQL-Editor
 AppSupportURL=https://github.com/ram1234598766-dotcom/MySQL-Editor/issues
 AppUpdatesURL=https://github.com/ram1234598766-dotcom/MySQL-Editor/releases
 VersionInfoCompany={#MyAppPublisher}
-VersionInfoDescription=MySQL IDLE SQL Workspace
+VersionInfoDescription=MySQL Editor SQL Workspace
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\MySQL IDLE
-DefaultGroupName=MySQL IDLE
+DefaultGroupName=MySQL Editor
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist\installer
@@ -45,8 +45,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "{#MyDistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\MySQL IDLE"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\assets\mysqlidle.ico"; IconIndex: 0
-Name: "{autodesktop}\MySQL IDLE"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\assets\mysqlidle.ico"; IconIndex: 0
+Name: "{autoprograms}\MySQL Editor"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\assets\mysqlidle.ico"; IconIndex: 0
+Name: "{autodesktop}\MySQL Editor"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\assets\mysqlidle.ico"; IconIndex: 0
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch MySQL IDLE"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch MySQL Editor"; Flags: nowait postinstall skipifsilent

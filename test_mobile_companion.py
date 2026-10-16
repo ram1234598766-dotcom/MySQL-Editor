@@ -87,7 +87,7 @@ class FakeConnection:
 
 class MobileCompanionHTTPTests(unittest.TestCase):
     def setUp(self):
-        self.master_password = "MySQL IDLE test master password 42!"
+        self.master_password = "MySQL Editor test master password 42!"
         self.password_record = password_auth.create_password_record(self.master_password)
         self.server = mobile_companion.MobileCompanionServer(
             port=0, bind_host="127.0.0.1", password_record=self.password_record
@@ -133,7 +133,7 @@ class MobileCompanionHTTPTests(unittest.TestCase):
             self.assertRegex(self.server.certificate_fingerprint, r"^([0-9A-F]{2}:){31}[0-9A-F]{2}$")
             self.assertIn("Android companion", body)
             self.assertIn("viewport", body)
-            self.assertIn('aria-label="MySQL IDLE logo"', body)
+            self.assertIn('aria-label="MySQL Editor logo"', body)
             self.assertIn('id="masterPassword"', body)
             self.assertIn('id="masterPasswordToggle"', body)
             self.assertIn("master password you set on Windows", body)

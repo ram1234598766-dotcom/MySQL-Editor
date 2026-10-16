@@ -130,13 +130,13 @@ class MainActivity : Activity() {
         }
         brandHeader.addView(ImageView(this).apply {
             setImageResource(R.drawable.ic_mysqlidle_logo)
-            contentDescription = "MySQL IDLE logo"
+            contentDescription = "MySQL Editor logo"
         }, LinearLayout.LayoutParams(dp(64), dp(64)))
         val brandText = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), 0, 0, 0)
         }
-        brandText.addView(label("MySQL IDLE", 27f).apply {
+        brandText.addView(label("MySQL Editor", 27f).apply {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         brandText.addView(label("Mobile companion", 16f, blue).apply {
@@ -153,7 +153,7 @@ class MainActivity : Activity() {
             "On the Windows desktop, open Tools → Android / Mobile Companion. Enter the HTTPS " +
                 "address and the SHA-256 certificate fingerprint shown there. Compare every " +
                 "fingerprint pair before connecting; the certificate changes when the companion restarts. " +
-                "On the next screen, enter the same MySQL IDLE master password set on Windows plus the " +
+                "On the next screen, enter the same MySQL Editor master password set on Windows plus the " +
                 "temporary pairing code. A wrong password is rejected by the desktop.",
             14f, muted
         ).apply { setPadding(0, dp(8), 0, dp(18)) })
@@ -334,7 +334,7 @@ class MainActivity : Activity() {
         }
         toolbar.addView(ImageView(this).apply {
             setImageResource(R.drawable.ic_mysqlidle_logo)
-            contentDescription = "MySQL IDLE logo"
+            contentDescription = "MySQL Editor logo"
         }, LinearLayout.LayoutParams(dp(34), dp(34)).apply {
             marginEnd = dp(6)
         })
