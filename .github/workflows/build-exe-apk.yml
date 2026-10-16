@@ -456,7 +456,7 @@ jobs:
 
           # Prefer the publisher's exact existing signing key. Diagnose store/alias
           # mismatches without displaying passwords or private-key material.
-          if [[ "\${ANDROID_KEYSTORE_RESTORE_FAILED:-false}" != "true" && -s "$store" ]] &&
+          if [[ "${ANDROID_KEYSTORE_RESTORE_FAILED:-false}" != "true" && -s "$store" ]] &&
              keytool -list -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
             mapfile -t private_aliases < <(
               keytool -list -v -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" 2>/dev/null |
@@ -465,19 +465,19 @@ jobs:
             )
             selected_alias="$ANDROID_KEY_ALIAS"
             alias_found=false
-            for candidate in "\${private_aliases[@]}"; do
+            for candidate in "${private_aliases[@]}"; do
               if [[ "$candidate" == "$selected_alias" ]]; then
                 alias_found=true
                 break
               fi
             done
 
-            if [[ "$alias_found" != "true" && \${#private_aliases[@]} -eq 1 ]]; then
-              selected_alias="\${private_aliases[0]}"
+            if [[ "$alias_found" != "true" && ${#private_aliases[@]} -eq 1 ]]; then
+              selected_alias="${private_aliases[0]}"
               alias_found=true
               echo "::notice::The configured alias was not found; using the only private-key alias in the supplied keystore."
-            elif [[ "$alias_found" != "true" && \${#private_aliases[@]} -gt 1 ]]; then
-              echo "::warning::The configured alias does not match a private-key entry. Available private-key aliases: \${private_aliases[*]}"
+            elif [[ "$alias_found" != "true" && ${#private_aliases[@]} -gt 1 ]]; then
+              echo "::warning::The configured alias does not match a private-key entry. Available private-key aliases: ${private_aliases[*]}"
             fi
 
             selected_key_password=""
