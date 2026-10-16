@@ -119,14 +119,14 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn("window.iconbitmap(default=str(icon_path))", desktop)
         self.assertIn("if not icon_set and logo_path.is_file()", desktop)
         self.assertIn("_apply_window_icon(self)", desktop)
-        self.assertIn('header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=10, bd=0)', desktop)
+        self.assertIn('header = tk.Frame(self.root, bg=c["surface"], padx=22, pady=18, bd=0)', desktop)
         self.assertIn('text="MySQL / MariaDB workspace"', desktop)
         self.assertIn('self.brand_logo_source = tk.PhotoImage(file=str(logo_path))', desktop)
         self.assertIn("self.brand_logo_image = self.brand_logo_source", desktop)
         self.assertIn("self.brand_logo_display_image = source.subsample(sx, sy)", desktop)
         self.assertIn('text="MySQL Editor"', desktop)
         self.assertIn('root.geometry("1360x860")', desktop)
-        self.assertIn('root.minsize(1000, 640)', desktop)
+        self.assertIn('root.minsize(1080, 700)', desktop)
         self.assertIn("def _configure_ttk_style(root)", desktop)
         self.assertIn('style.configure("TButton", padding=(12, 7)', desktop)
         self.assertIn("icon_set = False", desktop)
@@ -134,7 +134,7 @@ class PackagingBrandingTests(unittest.TestCase):
         self.assertIn("self.logo_image = self.logo_source_image", desktop)
         self.assertIn('"canvas": "#090E17"', desktop)
         self.assertIn('text="SQL Console"', desktop)
-        self.assertIn('text="Latest result"', desktop)
+        self.assertIn('text="Results"', desktop)
 
         # The bundled artwork remains the exact 96x96 source PNG.
         with Image.open(ROOT / "assets" / "mysqlidle-logo.png") as image:
