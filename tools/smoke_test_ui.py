@@ -217,6 +217,10 @@ def main():
             first._switch_connection(next_profile, next_config, next_result)
         assert editor._mysql_editor_connection_context == original_context
         assert first._current_connection_context()["profile_id"] == "qa-reporting"
+        assert "Reporting" in first.connection_badge.text()
+        assert "db-other.example" in first.connection_badge.text()
+        assert first.connection_badge.property("connectionState") == "connected"
+        assert "TLS: Automatic TLS" in first.connection_details.toolTip()
 
         # A worker disconnect must surface a distinct, accessible connection-lost state.
         lost_job = "lost-connection-smoke"
