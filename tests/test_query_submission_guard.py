@@ -254,3 +254,37 @@ def test_multi_statement_high_impact_script_runs_only_after_explicit_confirmatio
         window.close()
         repository.close()
 
+
+
+
+def test_cell_detail_copy_button_copies_full_value_null_marker_and_empty_text(
+    tmp_path, monkeypatch
+):
+    window, repository, _worker = _make_window(tmp_path)
+
+    def click_copy_button(dialog):
+        button = dialog.findChild(main_window_module.QPushButton, "copyCellValueButton")
+        assert button is not None
+        assert button.accessibleName().startswith("Copy full cell value")
+        button.click()
+        return 0
+
+    monkeypatch.setattr(main_window_module.QDialog, "exec", click_copy_button)
+    clipboard = QApplication.clipboard()
+    try:
+        for value, expected in (
+            ("line one\nline two", "line one\nline two"),
+            (None, "NULL"),
+            ("", ""),
+        ):
+            window.result_model.update(["payload"], [[value]])
+            clipboard.clear()
+            index = window.result_proxy.index(0, 0)
+            assert index.isValid()
+            window.show_cell_details(index)
+            assert clipboard.text() == expected
+            assert "Copied full cell value" in window.status.text()
+            assert "SQL NULL is copied as NULL" in window.status.text()
+    finally:
+        window.close()
+        repository.close()

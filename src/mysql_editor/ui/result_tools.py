@@ -47,6 +47,11 @@ def cell_detail_text(value: Any) -> str:
     return "SQL NULL (no value)" if value is None else str(value)
 
 
+def cell_copy_text(value: Any) -> str:
+    """Return a scalar clipboard payload, using the existing explicit SQL NULL marker."""
+    return NULL_COPY_MARKER if value is None else str(value)
+
+
 def result_filter_message(
     query: str,
     visible_rows: int,

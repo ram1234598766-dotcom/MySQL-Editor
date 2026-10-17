@@ -3,6 +3,7 @@ import csv
 import io
 
 from mysql_editor.ui.result_tools import (
+    cell_copy_text,
     cell_detail_text,
     column_headers_tsv,
     rows_tsv,
@@ -175,3 +176,12 @@ def test_column_width_samples_clamp_extreme_settings_and_handle_empty_columns():
     assert len(column_width_samples(["a"], [[index] for index in range(100)], max_sample_rows=10000)[0]) == 65
     assert column_width_samples([], [[1, 2]], max_sample_rows=10) == []
     assert column_width_samples(["a"], [[1]], max_sample_rows="invalid") == [["a", "1"]]
+
+
+
+def test_cell_copy_text_preserves_scalar_values_and_marks_sql_null():
+    assert cell_copy_text(None) == "NULL"
+    assert cell_copy_text("") == ""
+    assert cell_copy_text(" ") == " "
+    assert cell_copy_text(0) == "0"
+    assert cell_copy_text("line\nnext") == "line\nnext"
