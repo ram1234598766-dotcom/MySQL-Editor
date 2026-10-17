@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import queue
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -142,11 +143,9 @@ class DatabaseWorker(QThread):
             except Exception:
                 pass
         try:
-            for item in self._spool_dir.iterdir():
-                if item.is_dir():
-                    continue
-                item.unlink(missing_ok=True)
-            self._spool_dir.rmdir()
+            # The directory is unique to this worker. Remove sidecars, orphaned files,
+            # and any nested cache artifacts instead of leaving partial sensitive data.
+            shutil.rmtree(self._spool_dir)
         except OSError:
             # A cache cleanup problem must not mask the original worker result.
             pass

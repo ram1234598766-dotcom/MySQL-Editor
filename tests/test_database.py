@@ -198,7 +198,7 @@ def test_partial_result_cache_initialization_closes_spool_and_fails_tasks(monkey
     assert worker._spool is None
     assert not spool_dir.exists()
 
-def test_worker_shutdown_closes_and_removes_result_cache(tmp_path):
+def test_worker_shutdown_closes_and_removes_result_cache():
     worker = DatabaseWorker()
     events = []
     spool_dir = worker._spool_dir
@@ -214,6 +214,21 @@ def test_worker_shutdown_closes_and_removes_result_cache(tmp_path):
     assert "Unknown worker action" in events[0][2]["error"]
     assert worker._spool is None
     assert not spool_dir.exists()
+
+
+def test_worker_shutdown_removes_nested_result_cache_files():
+    worker = DatabaseWorker()
+    spool_dir = worker._spool_dir
+    nested_file = spool_dir / "unexpected" / "orphaned-result.bin"
+    nested_file.parent.mkdir()
+    nested_file.write_bytes(b"temporary result data")
+
+    worker.shutdown()
+    worker.run()
+
+    assert not nested_file.exists()
+    assert not spool_dir.exists()
+
 
 
 def test_worker_recovers_from_task_exception_and_completes_following_tasks(monkeypatch):
