@@ -36,6 +36,9 @@ from mysql_editor.ui.result_tools import (
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
+from mysql_editor.recent_files import (
+    MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
+)
 
 
 class ResultsModel(QAbstractTableModel):
@@ -544,6 +547,11 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
         self._action(file_menu, "New query", "Ctrl+N", self.new_query_tab)
         self._action(file_menu, "Open SQL file…", "Ctrl+O", self.open_sql_file)
+        self.recent_sql_menu = file_menu.addMenu("Recent SQL files")
+        self.recent_sql_menu.setAccessibleName("Recent SQL files")
+        self.recent_sql_menu.setToolTip("Reopen one of the most recently opened or saved SQL files.")
+        self.recent_sql_menu.aboutToShow.connect(self._refresh_recent_sql_menu)
+        self._refresh_recent_sql_menu()
         self._action(file_menu, "Save SQL file", "Ctrl+S", self.save_sql_file)
         self._action(file_menu, "Save All", "", self.save_all_sql_files)
         self._action(file_menu, "Save SQL snippet", "Ctrl+Shift+S", self.save_query_snippet)
@@ -1825,6 +1833,7 @@ class MainWindow(QMainWindow):
             self.status.setText("Could not open SQL file.")
             return False
         self.new_query_tab(sql_text, str(source_path))
+        self._record_recent_sql_path(source_path)
         self.status.setText(f"Opened {source_path.name}")
         return True
 
@@ -1832,6 +1841,54 @@ class MainWindow(QMainWindow):
         path = item.data(Qt.ItemDataRole.UserRole)
         if path:
             self._open_sql_path(path)
+
+    def _recent_sql_paths(self) -> list[str]:
+        """Read the bounded, local list of recent SQL file paths (never SQL content)."""
+        stored = self._settings.value("ui/recentSqlFiles", [])
+        return normalize_recent_sql_paths(stored, limit=MAX_RECENT_SQL_FILES)
+
+    def _record_recent_sql_path(self, path: str | Path) -> None:
+        paths = record_recent_sql_path(self._recent_sql_paths(), path)
+        self._settings.setValue("ui/recentSqlFiles", paths)
+        self._settings.sync()
+        self._refresh_recent_sql_menu()
+
+    def _refresh_recent_sql_menu(self) -> None:
+        """Rebuild the menu from path-only settings and annotate missing files."""
+        menu = getattr(self, "recent_sql_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        paths = self._recent_sql_paths()
+        if not paths:
+            empty = menu.addAction("No recent SQL files")
+            empty.setEnabled(False)
+        else:
+            for raw_path in paths:
+                file_path = Path(raw_path)
+                exists = file_path.is_file()
+                parent_label = file_path.parent.name or str(file_path.parent)
+                label = f"{file_path.name} — {parent_label}"
+                if not exists:
+                    label += " · missing"
+                action = menu.addAction(label)
+                action.setToolTip(raw_path)
+                action.setStatusTip(raw_path)
+                action.setAccessibleDescription(f"Open SQL file: {raw_path}")
+                action.triggered.connect(
+                    lambda _checked=False, selected_path=raw_path: self._open_sql_path(selected_path)
+                )
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear recent list")
+        clear_action.setToolTip("Remove recent file paths from this menu. Does not delete files.")
+        clear_action.triggered.connect(self._clear_recent_sql_files)
+
+    def _clear_recent_sql_files(self) -> None:
+        """Clear only the saved path list; source SQL files are not modified or deleted."""
+        self._settings.setValue("ui/recentSqlFiles", [])
+        self._settings.sync()
+        self._refresh_recent_sql_menu()
+        self.status.setText("Cleared Recent SQL files list. No SQL files were deleted.")
 
     def open_sql_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1884,6 +1941,7 @@ class MainWindow(QMainWindow):
         if index >= 0:
             self.editors.setTabText(index, destination.name)
         self._refresh_saved_queries()
+        self._record_recent_sql_path(destination)
         self.status.setText(f"Saved {destination.name}")
         return True
 

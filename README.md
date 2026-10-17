@@ -227,6 +227,8 @@ Tab width and result row height are validated when settings load. Missing or mal
 
 ## Security and privacy
 
+The **File → Recent SQL files** menu keeps a bounded list of local file paths to speed up reopening work. It stores path metadata only—not SQL text or query results. **Clear recent list** removes the paths from the menu and does not delete the source files. Missing files are marked and can be retried after restoring them.
+
 ### Local data
 - Connection profile metadata—including host, port, username, default schema, TLS policy, CA path, and timeouts—is stored in the local settings database.
 - The original master passphrase is not stored; only an Argon2id verifier is saved.
