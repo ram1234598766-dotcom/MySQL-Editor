@@ -120,6 +120,11 @@ def main():
         editor.setTextCursor(cursor)
         app.processEvents()
         assert first.editor_position.text().startswith("Ln 1, Col ")
+        # Reset the caret so the first-match replacement assertion is deterministic.
+        cursor = editor.textCursor()
+        cursor.setPosition(0)
+        editor.setTextCursor(cursor)
+        app.processEvents()
         first.show_find_replace(replace=True)
         first.find_bar.search_input.setText("alpha")
         first._refresh_find_count()
