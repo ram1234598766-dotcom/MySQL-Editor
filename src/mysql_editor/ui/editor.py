@@ -15,6 +15,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QWidget
 
+from mysql_editor.ui.theme import EDITOR_PALETTES, resolve_theme
+
 
 SQL_KEYWORDS = frozenset("""
 ADD ALL ALTER ANALYZE AND AS ASC BEFORE BETWEEN BIGINT BINARY BOTH BY CALL CASCADE
@@ -249,31 +251,54 @@ def _matching_bracket_positions(text: str, cursor_position: int) -> tuple[int, i
 class SqlHighlighter(QSyntaxHighlighter):
     """Comment-aware SQL highlighting, including comments spanning multiple lines."""
 
-    def __init__(self, document):
+    def __init__(self, document, theme: str = "dark"):
         super().__init__(document)
+        alternatives = "|".join(
+            re.escape(word) for word in sorted(SQL_KEYWORDS, key=len, reverse=True)
+        )
+        self._keyword_pattern = re.compile(r"\b(?:" + alternatives + r")\b", re.I)
+        self._string_pattern = re.compile(
+            r"""'(?:''|\\.|[^'])*'|"(?:\"\"|\\.|[^"])*\""""
+        )
+        self._number_pattern = re.compile(r"\b\d+(?:\.\d+)?\b")
+        self._function_pattern = re.compile(r"\b[A-Za-z_$][\w$]*(?=\s*\()")
+        self._line_comment_pattern = re.compile(r"--(?=\s|$)[^\r\n]*|#[^\r\n]*")
+        self.theme_name = "dark"
+        self.rules = []
+        self._comment_format = QTextCharFormat()
+        self.set_theme(theme)
+
+    def set_theme(self, theme: str) -> None:
+        """Update syntax colors without changing the document or cursor."""
+        name = resolve_theme(theme)
+        palette = EDITOR_PALETTES[name]
+
         keyword = QTextCharFormat()
-        keyword.setForeground(QColor("#37d6e7"))
+        keyword.setForeground(QColor(palette["keyword"]))
         keyword.setFontWeight(QFont.Weight.DemiBold)
-        alternatives = "|".join(re.escape(word) for word in sorted(SQL_KEYWORDS, key=len, reverse=True))
-        self.rules = [(re.compile(r"\b(?:" + alternatives + r")\b", re.I), keyword)]
 
         string = QTextCharFormat()
-        string.setForeground(QColor("#f6c56f"))
-        self.rules.append((re.compile(r"'(?:''|\\.|[^'])*'|\"(?:\"\"|\\.|[^\"])*\""), string))
+        string.setForeground(QColor(palette["string"]))
 
         number = QTextCharFormat()
-        number.setForeground(QColor("#bd9cff"))
-        self.rules.append((re.compile(r"\b\d+(?:\.\d+)?\b"), number))
+        number.setForeground(QColor(palette["number"]))
 
         function = QTextCharFormat()
-        function.setForeground(QColor("#69b7ff"))
-        self.rules.append((re.compile(r"\b[A-Za-z_$][\w$]*(?=\s*\()"), function))
+        function.setForeground(QColor(palette["function"]))
 
         comment = QTextCharFormat()
-        comment.setForeground(QColor("#7f93ad"))
+        comment.setForeground(QColor(palette["comment"]))
         comment.setFontItalic(True)
         self._comment_format = comment
-        self.rules.append((re.compile(r"--(?=\s|$)[^\r\n]*|#[^\r\n]*"), comment))
+        self.rules = [
+            (self._keyword_pattern, keyword),
+            (self._string_pattern, string),
+            (self._number_pattern, number),
+            (self._function_pattern, function),
+            (self._line_comment_pattern, comment),
+        ]
+        self.theme_name = name
+        self.rehighlight()
 
     def highlightBlock(self, text: str) -> None:
         for pattern, style in self.rules:
@@ -322,6 +347,8 @@ class SqlEditor(QPlainTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._theme_name = "dark"
+        self._theme_palette = EDITOR_PALETTES["dark"]
         self.line_number_area = LineNumberArea(self)
         self.highlighter = SqlHighlighter(self.document())
         self.setObjectName("sqlEditor")
@@ -362,6 +389,23 @@ class SqlEditor(QPlainTextEdit):
         self.updateRequest.connect(self.update_line_number_area)
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.update_line_number_area_width(0)
+        self.highlight_current_line()
+
+    @property
+    def theme_name(self) -> str:
+        return self._theme_name
+
+    @property
+    def theme_palette(self) -> dict[str, str]:
+        return dict(self._theme_palette)
+
+    def set_editor_theme(self, theme: str) -> None:
+        """Apply theme colors to syntax formats and custom-painted editor surfaces."""
+        name = resolve_theme(theme)
+        self._theme_name = name
+        self._theme_palette = EDITOR_PALETTES[name]
+        self.highlighter.set_theme(name)
+        self.line_number_area.update()
         self.highlight_current_line()
 
     @staticmethod
@@ -673,14 +717,18 @@ class SqlEditor(QPlainTextEdit):
 
     def paint_line_numbers(self, event):
         painter = QPainter(self.line_number_area)
-        painter.fillRect(event.rect(), QColor("#0a111b"))
+        painter.fillRect(event.rect(), QColor(self._theme_palette["gutter_background"]))
         block = self.firstVisibleBlock()
         number = block.blockNumber()
         top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         bottom = top + int(self.blockBoundingRect(block).height())
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
-                color = "#d2deed" if number == self.textCursor().blockNumber() else "#71839d"
+                color = (
+                    self._theme_palette["gutter_active_text"]
+                    if number == self.textCursor().blockNumber()
+                    else self._theme_palette["gutter_text"]
+                )
                 painter.setPen(QColor(color))
                 painter.drawText(
                     0, top, self.line_number_area.width() - 8, self.fontMetrics().height(),
@@ -698,7 +746,7 @@ class SqlEditor(QPlainTextEdit):
 
         selections = []
         line_selection = QTextEdit.ExtraSelection()
-        line_selection.format.setBackground(QColor("#122136"))
+        line_selection.format.setBackground(QColor(self._theme_palette["current_line_background"]))
         line_selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
         line_selection.cursor = self.textCursor()
         line_selection.cursor.clearSelection()
@@ -710,8 +758,12 @@ class SqlEditor(QPlainTextEdit):
         if matched is not None:
             for position in matched:
                 bracket_selection = QTextEdit.ExtraSelection()
-                bracket_selection.format.setBackground(QColor("#2B526D"))
-                bracket_selection.format.setForeground(QColor("#F5FAFF"))
+                bracket_selection.format.setBackground(
+                    QColor(self._theme_palette["bracket_background"])
+                )
+                bracket_selection.format.setForeground(
+                    QColor(self._theme_palette["bracket_foreground"])
+                )
                 bracket_selection.format.setFontWeight(QFont.Weight.Bold)
                 bracket_selection.cursor = QTextCursor(self.document())
                 bracket_selection.cursor.setPosition(position)
