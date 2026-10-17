@@ -288,3 +288,32 @@ def test_cell_detail_copy_button_copies_full_value_null_marker_and_empty_text(
     finally:
         window.close()
         repository.close()
+
+
+
+def test_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkeypatch):
+    window, repository, worker = _make_window(tmp_path)
+    warnings = []
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args: warnings.append((title, message)),
+    )
+    script = (
+        "SELECT 1;\nDELIMITER $$\n"
+        "CREATE PROCEDURE p() BEGIN SELECT 2; END$$"
+    )
+    try:
+        before = len(worker.submissions)
+        window._execute_sql(script)
+
+        assert len(worker.submissions) == before
+        assert not any(action == "query" for action, _payload, _task_id in worker.submissions)
+        assert len(warnings) == 1
+        assert warnings[0][0] == "Unsupported MySQL client directive"
+        assert "line 2" in warnings[0][1]
+        assert "entire script was rejected" in warnings[0][1]
+        assert "not submitted" in window.status.text().lower()
+    finally:
+        window.close()
+        repository.close()

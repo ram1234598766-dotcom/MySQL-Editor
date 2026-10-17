@@ -179,6 +179,32 @@ def _mask_sql_literals_and_comments(source: str) -> str:
         i += 1
     return "".join(chars)
 
+_DELIMITER_DIRECTIVE = re.compile(r"(?im)^[ \t]*DELIMITER[ \t]+\S+")
+
+
+def unsupported_delimiter_directive_line(source: str) -> int | None:
+    """Find a MySQL-client DELIMITER command at an empty SQL-buffer boundary."""
+    masked = _mask_sql_literals_and_comments(source)
+    for match in _DELIMITER_DIRECTIVE.finditer(masked):
+        prior_buffer = masked[:match.start()].rsplit(";", 1)[-1]
+        if prior_buffer.strip():
+            continue
+        return masked.count("\n", 0, match.start()) + 1
+    return None
+
+
+def unsupported_delimiter_message(source: str) -> str | None:
+    """Explain why a submitted script with a DELIMITER client command is rejected."""
+    line = unsupported_delimiter_directive_line(source)
+    if line is None:
+        return None
+    return (
+        f"MySQL client DELIMITER directive detected on line {line}. MySQL Editor does not "
+        "parse DELIMITER commands or compound stored-program bodies. The entire script was "
+        "rejected; no part was submitted. Remove the directive and run ordinary SQL, or use "
+        "a MySQL client that supports DELIMITER for procedures, functions, and triggers."
+    )
+
 
 _TOP_LEVEL_COMMANDS = frozenset({
     "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP",

@@ -1,5 +1,6 @@
 from mysql_editor.core import (
     classify_statement, current_statement, redact_secrets, split_sql_statements,
+    unsupported_delimiter_directive_line, unsupported_delimiter_message,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -88,3 +89,41 @@ def test_risk_advisory_understands_cte_wrapped_mutations():
 def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
     assert classify_statement("UPDATE " + chr(96) + "where" + chr(96) + " SET value = 1")[0] == "high"
     assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
+
+
+def test_unsupported_delimiter_directive_is_detected_with_line_number():
+    source = (
+        "SELECT 1;\n"
+        "DELIMITER $$\n"
+        "CREATE PROCEDURE refresh_stats()\n"
+        "BEGIN\n"
+        "  SELECT 2;\n"
+        "END$$"
+    )
+    assert unsupported_delimiter_directive_line(source) == 2
+    message = unsupported_delimiter_message(source)
+    assert message is not None
+    assert "line 2" in message
+    assert "entire script was rejected" in message
+    assert "no part was submitted" in message
+
+
+def test_delimiter_like_text_in_comments_and_literals_is_not_a_directive():
+    source = (
+        "SELECT 'literal start\nDELIMITER $$';\n"
+        "-- DELIMITER //\n"
+        "/* comment line\nDELIMITER !\n*/\n"
+        "SELECT delimiter FROM example_table;"
+    )
+    assert unsupported_delimiter_directive_line(source) is None
+    assert unsupported_delimiter_message(source) is None
+
+
+def test_delimiter_word_inside_an_unfinished_sql_statement_is_not_a_client_command():
+    source = "SELECT\n  DELIMITER AS a_column\nFROM example_table;"
+    assert unsupported_delimiter_directive_line(source) is None
+
+
+def test_regular_sql_with_comments_before_delimiter_line_is_still_detected():
+    source = "SELECT 1;\n-- next client command\n  delimiter //\n"
+    assert unsupported_delimiter_directive_line(source) == 3

@@ -569,3 +569,8 @@ Contextual column completion now remains scoped to the relevant schema tables af
 ### Full-value clipboard action — 17 October 2026
 
 The cell-details dialog now offers an explicit **Copy full value** action for long or wide cells. The clipboard receives the original cell text rather than the dialog's explanatory NULL label; SQL NULL uses the app's established `NULL` clipboard marker and empty text remains an empty clipboard string. Tests cover the dialog action and scalar formatting.
+
+
+### Fail-closed handling for unsupported DELIMITER scripts — 17 October 2026
+
+Standalone MySQL client `DELIMITER` directives are detected after masking strings and comments. The SQL Editor warns before queueing the script, and the database worker repeats the guard for non-UI callers. Rejection returns no result entries, preserves the current transaction state, and occurs before opening a statement cursor. Regression tests cover comment/literal false positives and ensure a submitted script is rejected as a whole.
