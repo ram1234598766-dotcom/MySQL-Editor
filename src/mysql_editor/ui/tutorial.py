@@ -1,9 +1,10 @@
 """Animated, keyboard-friendly quick-start tour for MySQL Editor."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtCore import QSettings, QEasingCurve, QPropertyAnimation, Qt
+from mysql_editor.ui.animations import STANDARD_DURATION_MS, reduce_motion_enabled
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -11,9 +12,10 @@ from PySide6.QtWidgets import (
 class ProductTourDialog(QDialog):
     """A short, local tutorial with animated page changes and real editor actions."""
 
-    def __init__(self, parent=None, repository=None, on_insert_example=None):
+    def __init__(self, parent=None, repository=None, on_insert_example=None, settings=None):
         super().__init__(parent)
         self.repository = repository
+        self._settings = settings if settings is not None else QSettings()
         self.on_insert_example = on_insert_example
         self._index = 0
         self._pages = [
@@ -159,12 +161,13 @@ class ProductTourDialog(QDialog):
         footer.addWidget(self.next_button)
         root.addLayout(footer)
 
-        self._opacity = QGraphicsOpacityEffect(self.pages)
-        self._opacity.setOpacity(1.0)
-        self.pages.setGraphicsEffect(self._opacity)
-        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
-        self._fade.setDuration(210)
+        # The dialog is the animation target and owner. This avoids a separate
+        # widget-owned graphics effect and keeps interruption/teardown straightforward.
+        self._fade = QPropertyAnimation(self, b"windowOpacity")
+        self._fade.setDuration(STANDARD_DURATION_MS)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade.setStartValue(0.92)
+        self._fade.setEndValue(1.0)
         self._render_page()
 
     def _render_page(self):
@@ -189,10 +192,28 @@ class ProductTourDialog(QDialog):
         self.pages.setCurrentIndex(index)
         self._render_page()
         self._fade.stop()
-        self._opacity.setOpacity(0.22)
-        self._fade.setStartValue(0.22)
+        self.setWindowOpacity(1.0)
+        if reduce_motion_enabled(self._settings):
+            return
+        self._fade.setStartValue(0.92)
         self._fade.setEndValue(1.0)
         self._fade.start()
+
+    def _finish_animation(self):
+        """Stop page motion and restore full opacity before closing or reopening."""
+        self._fade.stop()
+        # Detach the animation target before the dialog can be destroyed. This avoids
+        # leaving a parentless Qt animation with a dangling widget target at shutdown.
+        self._fade.setTargetObject(None)
+        self.setWindowOpacity(1.0)
+
+    def done(self, result: int) -> None:
+        self._finish_animation()
+        super().done(result)
+
+    def closeEvent(self, event) -> None:
+        self._finish_animation()
+        super().closeEvent(event)
 
     def _next(self):
         if self._index == len(self._pages) - 1:
