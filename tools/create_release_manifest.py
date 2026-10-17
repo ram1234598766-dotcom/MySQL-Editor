@@ -15,7 +15,7 @@ import re
 import sys
 import tomllib
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -128,7 +128,7 @@ def build_release_manifest(
             "runner_architecture": os.environ.get("RUNNER_ARCH", platform.machine()),
             "python_version": platform.python_version(),
             "generated_at_utc": (
-                datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             ),
         },
         "signing": {
