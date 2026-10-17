@@ -665,3 +665,12 @@ Automated evidence for code commit `cc14e703fc815153a2add8f05f6dff7828df6125`:
 
 The automated Phase 7 exit gate is complete. Phase 8 remains a separate release-candidate/manual-Windows-acceptance phase; do not describe the product as publisher-verified or fully release-certified until those checks are recorded.
 
+
+
+### Phase 8 implementation — release provenance and fail-closed publication — 17 October 2026
+
+The Windows release workflow now runs a release-specific test matrix on Python 3.12, 3.13, and 3.14, plus disposable MySQL 8.4 integration, before building packages. These gates are in the same workflow dependency graph as publication, so a skipped or failed preflight prevents release assets from being published. The Windows workflow also runs for pull requests to validate candidate changes before merge.
+
+Added `tools/create_release_manifest.py` with regression tests. It requires the onedir executable, portable executable, installer, folder ZIP, CycloneDX SBOM, release notes, signing disclosure, and third-party license inventory. It records the exact source SHA, project version, platform/toolchain metadata, per-artifact byte sizes and SHA-256 digests, and the current unsigned state. It rejects missing/tiny executables, malformed source SHAs, invalid SBOM metadata, and invalid/incomplete folder archives. `SHA256SUMS` includes the manifest and all final executables. The manifest does not replace a trusted Authenticode signature.
+
+Automated status is determined by the release workflow run on the exact candidate commit. This record does not mark a release ready by itself. **Still pending outside CI:** hands-on Windows display-scale checks, keyboard-only coverage, a Narrator/screen-reader check, real Credential Manager behavior, and connection/TLS validation against the target MySQL environment. See [RELEASE-CANDIDATE-CHECKLIST.md](RELEASE-CANDIDATE-CHECKLIST.md) for the test record to complete before a stable release.
