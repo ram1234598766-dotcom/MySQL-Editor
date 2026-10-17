@@ -148,17 +148,12 @@ def test_export_progress_and_completion_do_not_overwrite_a_newer_query(
     tmp_path, monkeypatch
 ):
     window, repository, _worker = _make_window(tmp_path)
-    dialogs = []
-    monkeypatch.setattr(
-        main_window_module.QMessageBox,
-        "information",
-        lambda _parent, title, message: dialogs.append((title, message)),
-    )
-    monkeypatch.setattr(
-        main_window_module.QMessageBox,
-        "warning",
-        lambda _parent, title, message: dialogs.append((title, message)),
-    )
+
+    def unexpected_modal(*_args, **_kwargs):
+        raise AssertionError("CSV export feedback must not block the workspace")
+
+    monkeypatch.setattr(main_window_module.QMessageBox, "information", unexpected_modal)
+    monkeypatch.setattr(main_window_module.QMessageBox, "warning", unexpected_modal)
     try:
         export_job = window._dispatch(
             "export_csv", {"result_id": "result-1", "path": "results.csv"}
@@ -176,16 +171,18 @@ def test_export_progress_and_completion_do_not_overwrite_a_newer_query(
             "export_csv",
             {"ok": True, "row_count": 10, "path": "results.csv"},
         )
-        assert dialogs == []
         assert window.status.text() == "Query queued…"
         assert len(window._deferred_export_notifications) == 1
+        assert window.export_feedback.isHidden()
 
         window._on_worker_completed(
             query_job, "query", {"ok": True, "results": [], "duration_ms": 1}
         )
         assert window._query_running is False
-        assert len(dialogs) == 1
-        assert dialogs[0][0] == "CSV export complete"
+        assert window.export_feedback.isVisible()
+        assert "10 row(s)" in window.export_feedback.text()
+        assert "results.csv" in window.export_feedback.text()
+        assert window.export_feedback.objectName() == "statusSuccess"
         assert window.status.text().startswith("Statement complete")
         assert window._deferred_export_notifications == []
     finally:

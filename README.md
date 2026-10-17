@@ -54,7 +54,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Sortable result grid, numeric-aware sorting, NULL display, and clipboard actions for selected cells/rows, headers, and the full untruncated cell value.
 - Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
 - Up to 2,000 rows per result are shown in the grid. Fetched result rows are also stored in a temporary local SQLite spool for CSV export.
-- Atomic CSV export to help preserve an existing destination when a write fails.
+- Atomic CSV export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - CI includes lint, compile checks, unit/integration tests, a Windows UI smoke test, launch tests, installer/uninstaller tests, and dependency auditing.
 - Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
