@@ -177,6 +177,9 @@ class MainWindow(QMainWindow):
         self._set_icon()
         self.worker.completed.connect(self._on_worker_completed)
         self.worker.activity.connect(self._on_activity)
+        task_activity = getattr(self.worker, "task_activity", None)
+        if task_activity is not None:
+            task_activity.connect(self._on_task_activity)
         self._build_ui()
         self._restore_ui_preferences()
         self._build_menus()
@@ -1517,6 +1520,16 @@ class MainWindow(QMainWindow):
             # The query's final status is more recent; a modal can report the export
             # outcome without replacing that final status line.
             self._show_export_notification(notification, update_status=False)
+
+    def _on_task_activity(self, job_id: str, message: str) -> None:
+        """Ignore progress emitted after its job has completed or been superseded."""
+        pending = self._jobs.get(job_id)
+        if pending is None:
+            return
+        action, _context = pending
+        if action not in {"query", "export_csv"}:
+            return
+        self._on_activity(message)
 
     def _on_activity(self, message: str):
         if self._query_running and message.startswith(("Exporting CSV", "Exported ")):
