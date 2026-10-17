@@ -41,8 +41,8 @@ def read_png_dimensions(path: Path) -> tuple[int, int]:
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "capture_mode": "Windows GitHub Actions runner using Qt offscreen platform",
-        "scale_method": "QT_SCALE_FACTOR",
+        "capture_mode": "Windows GitHub Actions runner using the native Qt Windows platform",
+        "scale_method": "QT_SCALE_FACTOR on native Qt Windows platform",
         "note": (
             "Simulated Qt scale factors only. These screenshots are not physical-monitor "
             "captures and do not replace hands-on Windows DPI review. All grid rows are "
@@ -53,7 +53,7 @@ def main() -> None:
     for label, factor in SCALES:
         output = OUTPUT_DIR / f"mysql-editor-dark-{label}.png"
         env = os.environ.copy()
-        env["QT_QPA_PLATFORM"] = "offscreen"
+        env["QT_QPA_PLATFORM"] = "windows"
         env["QT_SCALE_FACTOR"] = factor
         env["QT_ENABLE_HIGHDPI_SCALING"] = "1"
         env["MYSQL_EDITOR_CAPTURE_PATH"] = str(output)
