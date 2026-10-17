@@ -77,20 +77,25 @@ class ResultsModel(QAbstractTableModel):
         return None
 
     def sort(self, column, order=Qt.SortOrder.AscendingOrder):
-        if column >= len(self.headers):
+        if not 0 <= column < len(self.headers):
             return
         self.layoutAboutToBeChanged.emit()
 
         def sort_key(row):
             value = row[column]
-            if value is None:
-                return (1, 0, "")
             try:
                 return (0, 0, Decimal(str(value)))
             except (InvalidOperation, ValueError):
                 return (0, 1, str(value).casefold())
 
-        self.rows.sort(key=sort_key, reverse=order == Qt.SortOrder.DescendingOrder)
+        # NULL is always appended after non-NULL values, regardless of direction.
+        non_null_rows = [row for row in self.rows if row[column] is not None]
+        null_rows = [row for row in self.rows if row[column] is None]
+        non_null_rows.sort(
+            key=sort_key,
+            reverse=order == Qt.SortOrder.DescendingOrder,
+        )
+        self.rows[:] = non_null_rows + null_rows
         self.layoutChanged.emit()
 
 
@@ -108,6 +113,13 @@ class ResultsFilterProxyModel(QSortFilterProxyModel):
             return (0, 1, str(value).casefold())
 
     def lessThan(self, left, right):
+        left_value = left.data(Qt.ItemDataRole.UserRole)
+        right_value = right.data(Qt.ItemDataRole.UserRole)
+        # Explicit comparisons keep SQL NULL after real values in both sort directions.
+        if left_value is None:
+            return False
+        if right_value is None:
+            return True
         return self._sort_key(left) < self._sort_key(right)
 
 

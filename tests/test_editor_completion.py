@@ -57,6 +57,33 @@ def test_result_proxy_keeps_numeric_sorting():
     assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == ["1", "2", "10"]
 
 
+def test_sql_null_values_sort_last_in_both_directions():
+    source = ResultsModel(headers=["id"], rows=[[None], [2], [10], [1], [None]])
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(source)
+
+    proxy.sort(0, Qt.SortOrder.AscendingOrder)
+    assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == [
+        "1", "2", "10", "(NULL)", "(NULL)"
+    ]
+
+    proxy.sort(0, Qt.SortOrder.DescendingOrder)
+    assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == [
+        "10", "2", "1", "(NULL)", "(NULL)"
+    ]
+
+
+def test_source_model_null_values_sort_last_in_both_directions():
+    source = ResultsModel(headers=["id"], rows=[[None], [2], [10], [1], [None]])
+
+    source.sort(0, Qt.SortOrder.AscendingOrder)
+    assert source.rows == [[1], [2], [10], [None], [None]]
+
+    source.update(["id"], [[None], [2], [10], [1], [None]])
+    source.sort(0, Qt.SortOrder.DescendingOrder)
+    assert source.rows == [[10], [2], [1], [None], [None]]
+
+
 
 def test_context_completion_suggests_tables_after_from_and_databases_after_use():
     editor = SqlEditor()
