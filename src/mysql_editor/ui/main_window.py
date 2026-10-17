@@ -42,7 +42,7 @@ from mysql_editor.recent_files import (
 
 
 CSV_EXPORT_NULL_SEMANTICS = (
-    r"SQL NULL is encoded as \\N; empty text stays blank. "
+    "SQL NULL is encoded as " + r"\N" + "; empty text stays blank. "
     "Text values beginning with a backslash are escaped by adding one leading backslash."
 )
 CSV_EXPORT_SEMANTICS = (
