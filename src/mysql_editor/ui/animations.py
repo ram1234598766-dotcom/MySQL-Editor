@@ -28,10 +28,7 @@ def _set_label_color(widget: QWidget, color: QColor) -> None:
 
 
 def _find_animation(widget: QWidget) -> QVariantAnimation | None:
-    animation = getattr(widget, "_mysql_editor_color_transition", None)
-    if animation is not None:
-        return animation
-    return widget.findChild(QVariantAnimation, _COLOR_ANIMATION_OBJECT_NAME)
+    return getattr(widget, "_mysql_editor_color_transition", None)
 
 
 def stop_color_animation(widget: QWidget) -> None:
@@ -41,6 +38,10 @@ def stop_color_animation(widget: QWidget) -> None:
     setattr(widget, _COLOR_ANIMATION_GENERATION_ATTR, None)
     if animation is not None:
         animation.stop()
+        # The wrapper is owned by the widget's Python attribute rather than by
+        # Qt's QObject parent tree, avoiding cross-owner destruction at shutdown.
+        if animation.parent() is widget:
+            animation.setParent(None)
 
 
 def _ensure_animation(widget: QWidget) -> QVariantAnimation:
@@ -50,7 +51,7 @@ def _ensure_animation(widget: QWidget) -> QVariantAnimation:
         return existing
 
     target_ref = weakref.ref(widget)
-    animation = QVariantAnimation(widget)
+    animation = QVariantAnimation()
     animation.setObjectName(_COLOR_ANIMATION_OBJECT_NAME)
 
     def update_color(value, ref=target_ref) -> None:
@@ -67,14 +68,17 @@ def _ensure_animation(widget: QWidget) -> QVariantAnimation:
             return
         final_color = QColor(getattr(target, "_mysql_editor_color_animation_end", "#50d9ee"))
         _set_label_color(target, final_color)
+        if animation := getattr(target, "_mysql_editor_color_transition", None):
+            if animation.parent() is target:
+                animation.setParent(None)
         setattr(target, _COLOR_ANIMATION_ATTR, None)
         setattr(target, _COLOR_ANIMATION_GENERATION_ATTR, None)
 
     animation.valueChanged.connect(update_color)
     animation.finished.connect(finish)
-    # Retain the wrapper for the full lifetime of the widget. Qt owns the
-    # underlying QObject as a child; dropping its only Python wrapper while the
-    # parent is still alive can crash PySide during interpreter shutdown.
+    # The widget's Python attribute owns the wrapper; callbacks keep only a weak
+    # widget reference. This avoids cross-owner QObject teardown between Qt and
+    # Python while still reusing one animation per progress label.
     widget._mysql_editor_color_transition = animation
     return animation
 
