@@ -4,7 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.editor import SqlEditor, _matching_bracket_positions
@@ -275,3 +275,108 @@ def test_bracket_matching_works_backwards_and_rejects_unmatched_or_malformed_pai
 
     malformed = "SELECT ([value)"
     assert _matching_bracket_positions(malformed, malformed.index("(")) is None
+
+
+def _send_text_key(editor, key, text, modifiers=Qt.KeyboardModifier.NoModifier):
+    event = QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text)
+    QApplication.sendEvent(editor, event)
+    _APP.processEvents()
+
+
+def test_bracket_auto_pairing_covers_parentheses_square_and_curly_brackets():
+    cases = [
+        (Qt.Key.Key_ParenLeft, "(", ")"),
+        (Qt.Key.Key_BracketLeft, "[", "]"),
+        (Qt.Key.Key_BraceLeft, "{", "}"),
+    ]
+    for key, opening, closing in cases:
+        editor = SqlEditor()
+        editor.setPlainText("SELECT ")
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+
+        modifiers = (
+            Qt.KeyboardModifier.ShiftModifier if opening == "{" else Qt.KeyboardModifier.NoModifier
+        )
+        _send_text_key(editor, key, opening, modifiers)
+
+        assert editor.toPlainText() == "SELECT " + opening + closing
+        assert editor.textCursor().position() == len("SELECT ") + 1
+
+        close_key = {
+            ")": Qt.Key.Key_ParenRight,
+            "]": Qt.Key.Key_BracketRight,
+            "}": Qt.Key.Key_BraceRight,
+        }[closing]
+        close_modifiers = (
+            Qt.KeyboardModifier.ShiftModifier if closing == "}" else Qt.KeyboardModifier.NoModifier
+        )
+        _send_text_key(editor, close_key, closing, close_modifiers)
+        assert editor.toPlainText() == "SELECT " + opening + closing
+        assert editor.textCursor().position() == len("SELECT ") + 2
+        editor.deleteLater()
+
+
+def test_bracket_auto_pairing_wraps_selection_and_preserves_multiline_content():
+    editor = SqlEditor()
+    source = "SELECT value FROM customers"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    start = source.index("value")
+    cursor.setPosition(start)
+    cursor.setPosition(start + len("value"), QTextCursor.MoveMode.KeepAnchor)
+    editor.setTextCursor(cursor)
+
+    _send_text_key(editor, Qt.Key.Key_ParenLeft, "(")
+
+    assert editor.toPlainText() == "SELECT (value) FROM customers"
+    assert editor.textCursor().position() == start + len("value") + 1
+
+    editor.setPlainText("SELECT value\nFROM customers")
+    pasted = "SELECT (\n  value\n)"
+    editor.clear()
+    editor.insertPlainText(pasted)
+    assert editor.toPlainText() == pasted
+    editor.deleteLater()
+
+
+def test_bracket_auto_pairing_does_not_run_inside_sql_strings_or_comments():
+    cases = [
+        ("SELECT 'value'", "value", Qt.Key.Key_ParenLeft, "("),
+        ('SELECT "value"', "value", Qt.Key.Key_ParenLeft, "("),
+        ("SELECT `value`", "value", Qt.Key.Key_ParenLeft, "("),
+        ("SELECT 1 -- comment", "comment", Qt.Key.Key_ParenLeft, "("),
+        ("SELECT /* comment */ 1", "comment", Qt.Key.Key_ParenLeft, "("),
+    ]
+    for source, token, key, typed in cases:
+        editor = SqlEditor()
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(source.index(token) + len(token) // 2)
+        editor.setTextCursor(cursor)
+
+        before = editor.toPlainText()
+        insertion_position = cursor.position()
+        _send_text_key(editor, key, typed)
+
+        assert editor.toPlainText() == (
+            before[:insertion_position] + typed + before[insertion_position:]
+        )
+        assert editor.toPlainText().count(typed) == before.count(typed) + 1
+        assert editor.toPlainText().count(")") == before.count(")")
+        editor.deleteLater()
+
+
+def test_bracket_auto_pairing_uses_qt_utf16_cursor_offsets_with_unicode():
+    editor = SqlEditor()
+    editor.setPlainText("SELECT '🧡'; SELECT ")
+    cursor = editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+
+    _send_text_key(editor, Qt.Key.Key_ParenLeft, "(")
+
+    assert editor.toPlainText() == "SELECT '🧡'; SELECT ()"
+    assert editor.textCursor().position() == editor.document().characterCount() - 2
+    editor.deleteLater()

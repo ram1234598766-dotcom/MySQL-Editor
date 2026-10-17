@@ -120,6 +120,67 @@ def _sql_code_mask(text: str) -> bytearray:
     return mask
 
 
+def _python_index_from_utf16(text: str, utf16_position: int) -> int:
+    """Translate a Qt cursor offset (UTF-16 code units) to a Python string index."""
+    units = 0
+    for index, char in enumerate(text):
+        if units >= utf16_position:
+            return index
+        units += 2 if ord(char) > 0xFFFF else 1
+    return len(text)
+
+
+def _cursor_is_in_sql_code(text: str, cursor_position: int) -> bool:
+    """Return whether the insertion point is outside SQL strings and comments."""
+    prefix = text[:max(0, min(cursor_position, len(text)))]
+    quote: str | None = None
+    line_comment = False
+    block_comment = False
+    index = 0
+    while index < len(prefix):
+        char = prefix[index]
+        if line_comment:
+            if char == "\n":
+                line_comment = False
+            index += 1
+            continue
+        if block_comment:
+            if prefix.startswith("*/", index):
+                block_comment = False
+                index += 2
+            else:
+                index += 1
+            continue
+        if quote is not None:
+            if char == "\\" and index + 1 < len(prefix):
+                index += 2
+                continue
+            if char == quote:
+                if index + 1 < len(prefix) and prefix[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"', chr(96)):
+            quote = char
+            index += 1
+            continue
+        if char == "#" or (
+            prefix.startswith("--", index)
+            and (index + 2 >= len(prefix) or prefix[index + 2].isspace())
+        ):
+            line_comment = True
+            index += 1
+            continue
+        if prefix.startswith("/*", index):
+            block_comment = True
+            index += 2
+            continue
+        index += 1
+    return quote is None and not line_comment and not block_comment
+
+
 def _matching_bracket_positions(text: str, cursor_position: int) -> tuple[int, int] | None:
     """Return the opening/closing bracket positions adjacent to the cursor, if paired."""
     left = cursor_position - 1
@@ -611,6 +672,60 @@ class SqlEditor(QPlainTextEdit):
 
         self.setExtraSelections(selections)
 
+    def _handle_bracket_typing(self, event) -> bool:
+        """Auto-pair SQL brackets in code, wrap selections, and skip existing closers."""
+        if self.isReadOnly():
+            return False
+        modifiers = event.modifiers()
+        forbidden = (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        )
+        if modifiers & forbidden:
+            return False
+
+        typed = event.text()
+        if typed not in _BRACKET_PAIRS and typed not in _CLOSING_BRACKETS:
+            return False
+
+        cursor = self.textCursor()
+        text = self.toPlainText()
+        qt_position = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+        position = _python_index_from_utf16(text, qt_position)
+        if not _cursor_is_in_sql_code(text, position):
+            return False
+
+        if typed in _BRACKET_PAIRS:
+            closing = _BRACKET_PAIRS[typed]
+            cursor.beginEditBlock()
+            if cursor.hasSelection():
+                start = cursor.selectionStart()
+                end = cursor.selectionEnd()
+                cursor.setPosition(end)
+                cursor.insertText(closing)
+                cursor.setPosition(start)
+                cursor.insertText(typed)
+                cursor.setPosition(end + 1)
+            else:
+                cursor.insertText(typed + closing)
+                cursor.setPosition(qt_position + 1)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
+            self.highlight_current_line()
+            return True
+
+        # Typing a closer already placed by pairing moves over it instead of duplicating it.
+        if position < len(text) and text[position] == typed:
+            code_mask = _sql_code_mask(text)
+            if code_mask[position]:
+                cursor.setPosition(qt_position + 1)
+                self.setTextCursor(cursor)
+                self.highlight_current_line()
+                return True
+        return False
+
     def keyPressEvent(self, event):
         key = event.key()
         popup = self._completer.popup()
@@ -631,6 +746,9 @@ class SqlEditor(QPlainTextEdit):
                 popup.hide()
                 event.accept()
                 return
+        if not popup.isVisible() and self._handle_bracket_typing(event):
+            event.accept()
+            return
         if (
             key in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
             and not self.textCursor().hasSelection()
