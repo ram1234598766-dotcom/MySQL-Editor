@@ -283,7 +283,7 @@ def test_lexical_code_position_handles_escaped_quotes_and_mysql_comments():
     assert _is_sql_code_position(escaped, len("SELECT 'abc" + chr(92) + "'")) is False
     assert _is_sql_code_position("SELECT 'abc' + ", len("SELECT 'abc' + ")) is True
     assert _is_sql_code_position("SELECT 1 -- comment\n", len("SELECT 1 -- comment\n")) is True
-    assert _is_sql_code_position("SELECT 1 -- comment\\n", len("SELECT 1 -- comment\\n")) is True
+    assert _is_sql_code_position("SELECT 1 -- comment", len("SELECT 1 --")) is False
     assert _is_sql_code_position("SELECT 1 /* comment */ + ", len("SELECT 1 /* comment */ + ")) is True
 
 
