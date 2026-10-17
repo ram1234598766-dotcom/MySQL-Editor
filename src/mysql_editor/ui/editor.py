@@ -388,10 +388,10 @@ class SqlEditor(QPlainTextEdit):
             "USE", "USING", "WHERE", "WINDOW",
         }
         table_pattern = re.compile(
-            r"\\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\\s+"
-            r"(?:`?([A-Za-z_$][A-Za-z0-9_$]*)`?\\s*\\.\\s*)?"
+            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+"
+            r"(?:`?([A-Za-z_$][A-Za-z0-9_$]*)`?\s*\.\s*)?"
             r"`?([A-Za-z_$][A-Za-z0-9_$]*)`?"
-            r"(?:\\s+(?:AS\\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
+            r"(?:\s+(?:AS\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
             re.IGNORECASE,
         )
         known_tables = {
