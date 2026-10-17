@@ -162,3 +162,25 @@ def test_schema_switch_is_blocked_while_query_is_running(tmp_path):
     finally:
         window.close()
         repository.close()
+
+def test_schema_switch_respects_disabled_profile_saving(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    try:
+        window.config["save_profile"] = False
+        window._use_schema("analytics")
+        request_id = _last_task_id(worker, "use_schema")
+
+        window._on_worker_completed(
+            request_id,
+            "use_schema",
+            {"ok": True, "schema": "analytics", "transaction_open": False},
+        )
+
+        # The current live session changes; the saved default does not.
+        assert window.connect_result["database"] == "analytics"
+        assert window.config["default_schema"] == "analytics"
+        assert repository.profiles()[0].default_schema == "old_schema"
+    finally:
+        window.close()
+        repository.close()
+
