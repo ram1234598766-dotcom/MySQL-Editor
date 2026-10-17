@@ -45,9 +45,12 @@ The Windows workflow also uploads the complete package folder and a simulated di
 
 ### Presentation, preferences and reliability
 - Shared semantic dark-theme styling, System/Light/Dark appearance selection, editor font and tab-width preferences, result-row sizing, and a persistent Reduce Motion option.
-- Contrast regression checks cover selected application states and SQL syntax colours; performance smoke budgets cover editing, result previews, schema metadata and spooled CSV export.
+- Contrast regression checks cover selected application states and SQL syntax colours; disabled primary actions use a contrast-tested disabled palette in both dark and light themes.
+- Accessibility names/descriptions cover the main SQL, results, schema/history/snippets, connection and unlock controls; keyboard traversal is regression-tested for the connection and unlock forms.
+- Theme-switch regression coverage verifies that query tabs, SQL buffer/cursor/selection, result filter/rows, connection context, and splitter state remain intact when changing appearance.
+- Windows-runner visual evidence includes dark and light themes at simulated 100%, 125%, 150%, and 200% display scales. Screenshots use synthetic data and explicitly show an offline preview; they are not physical-monitor certification.
 - Installer tests confirm the app executable and uninstaller are installed, the desktop shortcut is created, and uninstall removes the shortcut.
-- Packaging checks verify and launch both EXE variants before release publication.
+- Packaging checks build and launch the onedir and portable EXE variants, build the installer, verify expected files, and generate SHA-256, SBOM, and third-party license records before publication.
 
 ## Important limitations and safety notes
 
@@ -63,5 +66,5 @@ The Windows workflow also uploads the complete package folder and a simulated di
 
 ## Verification record
 
-The Windows release workflow builds the onedir application, portable EXE, and installer from one commit; checks their output paths and non-trivial size; launches the packaged EXEs; and runs silent install/uninstall smoke checks. The desktop CI and dependency-security workflows run independently for the same push. Review the linked GitHub Actions runs for the exact commit before using a preview build. Manual QA on a physical Windows machine remains **not verified by CI**.
+The Windows release workflow builds the onedir application, portable EXE, and installer from the exact release commit; checks their output paths and non-trivial size; launches the packaged EXEs; and runs silent install/uninstall smoke checks. The Phase 6 code commit `53218aed6b218925aec450bcb44796e462a9bcd6` passed [desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148985), the [dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148975), and the [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148964). The release-marker commit reruns package build and upload for the precise commit attached to the release. Review that final commit's Actions run before using the preview. Manual QA on a physical Windows machine remains **not verified by CI**.
 

@@ -543,7 +543,7 @@ The following editor/UX items have now been implemented on `main` with regressio
 - Inline Find/Replace with match counts, case-sensitive search, wrap-around previous/next navigation, Replace, Replace all, and keyboard dismissal.
 - Live editor line/column and selection-length status in the bottom status strip.
 
-The CI workflow for each commit is the evidence source for lint, compilation, automated tests, the MySQL integration job, and Windows UI smoke. Full Windows packaging is tracked separately. High-DPI/manual visual QA on a physical Windows machine is still required; no theme-switching/light-theme, complete semantic completion, or full release-candidate milestone is implied by this progress note.
+This was the initial implementation checkpoint, before the later Appearance preference, schema-scoped completion refinements, and Phase 6 accessibility work recorded below. CI results and package verification for a specific current commit must still be inspected before describing that commit as release-ready. High-DPI/manual visual QA on a physical Windows machine remains a separate requirement.
 
 
 ### Preference work — 17 October 2026
@@ -605,7 +605,7 @@ The Settings > Editor tab-width preference now affects actual Tab insertion and 
 
 ### Dependency audit scope — 17 October 2026
 
-Expanded the dependency security gate beyond `requirements.txt`: CI installs the declared project/test extras plus PyInstaller and the license inventory tool, audits the compatible runtime requirement set, then audits the actually installed test and packaging environment. The Windows packaging workflow now performs the same installed-environment audit before packaging begins. The release CycloneDX SBOM stays deliberately runtime-focused; the separate audit gates catch known advisories in test/build tooling too. CI results for this change are pending until the pull request checks complete.
+Expanded the dependency security gate beyond `requirements.txt`: CI installs the declared project/test extras plus PyInstaller and the license inventory tool, audits the compatible runtime requirement set, then audits the actually installed test and packaging environment. The Windows packaging workflow performs the same installed-environment audit before packaging begins. The release CycloneDX SBOM stays deliberately runtime-focused; the separate audit gates catch known advisories in test/build tooling too. The desktop CI and dependency-security workflows passed on code commit `53218aed6b218925aec450bcb44796e462a9bcd6`, and the Windows package workflow also completed successfully for that code commit. The release-marker commit documented below triggers a fresh set of checks and builds the distributables from the exact release commit.
 
 
 ### Active schema session correctness — 17 October 2026
@@ -618,3 +618,27 @@ The Phase 4 schema-selection flow now switches the live MySQL session via a work
 Added `tests/test_export_sort_filter_semantics.py` to exercise the actual numeric-aware result proxy and the SQLite-backed CSV export together. The test sorts the visible preview, applies the app's case-insensitive filter, confirms the source model remains in fetch order, and verifies that CSV still contains every fetched row in that original order. This closes the remaining combined regression gap in the Phase 5 exit criteria.
 
 Related existing coverage includes bounded result-preview rendering, 25,000-row spool export timing, atomic replacement and preservation of an existing destination on failure, temporary-file cleanup, SQL NULL versus empty text, result row counts, per-statement metadata, cancellation/interruption distinctions, partial-script failure, and persistent export feedback. This records automated regression coverage; it does not replace real Windows display-scale QA.
+
+
+
+### Phase 6 — Preferences, accessibility and visual QA — 17 October 2026
+
+**Implementation status:** automated gates passed for code commit `53218aed6b218925aec450bcb44796e462a9bcd6`. The release-marker commit repeats these gates and rebuilds the packages from the exact published commit.
+
+Implemented and regression-tested:
+- Explicit screen-reader names/descriptions and concise tooltips for the connection form, local master-password setup/unlock dialog, primary SQL actions, results controls, schema/history/snippet views, connection status, and guided-tour controls. The tour's final action changes its accessible name to “Finish guided tour”.
+- Predictable keyboard traversal in the connection and unlock forms; regression tests traverse the controls using Qt keyboard events.
+- Dark/light theme-switch regression coverage that preserves the active SQL tab, SQL buffer, cursor and selection, result filter and fetched rows, connection context, and splitter state.
+- Correct disabled-primary-button styling in both themes, including the disabled-hover state. The tested foreground/background contrast ratios are approximately 5.94:1 in dark mode and 5.78:1 in light mode.
+- The visual-QA fixture now resolves its synthetic initial schema refresh instead of leaving a stale loading message. The screenshot states it is an offline preview using synthetic rows and does not suggest an active MySQL connection.
+- The native Windows Qt runner generates eight screenshots: dark and light themes at simulated 100%, 125%, 150%, and 200% display scales. The manifest records theme, requested scale, image dimensions, and file size.
+
+Automated evidence for code commit `53218aed6b218925aec450bcb44796e462a9bcd6`:
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148985) — passed lint, Python compilation, unit tests, legacy-import guard on Python 3.12/3.13/3.14, MySQL 8.4 integration, and Windows Qt UI smoke.
+- [Dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148975) — passed.
+- [Windows package build](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148964) — passed application-folder build, portable EXE build, installer build, silent install/uninstall and shortcut cleanup, packaged-application startup smoke, output validation, SBOM/license generation, checksums, and artifact upload.
+- The generated visual-QA artifact contains the eight dark/light and scale captures. A sample was visually inspected; the disabled SQL primary action now uses a muted disabled state rather than the bright active accent.
+
+**Remaining manual gates (not verified by CI):** physical-monitor Windows DPI behavior across real monitors, full keyboard-only walkthrough of every popup/menu/tree/result operation, a screen-reader spot check (for example, Narrator), and the actual PC's Credential Manager and MySQL/TLS environment. The screenshots use simulated Qt scaling on a native Windows runner and synthetic data; they are not a substitute for a hands-on acceptance pass.
+
+This phase's implementation and automated checks are complete. The manual Windows acceptance items remain part of the release-candidate gate in Phase 8. Preview binaries remain unsigned unless the specific release states otherwise; no Authenticode signing is claimed.

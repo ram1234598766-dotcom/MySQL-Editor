@@ -61,11 +61,11 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 
 ## UX and upgrade roadmap
 
-The next planned quality phase is documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. It covers the visual design system, a restrained colour palette, reusable UI styling, smooth but purposeful animation, a Reduce Motion preference, deeper SQL-editor completion, clearer connection and schema workflows, improved result handling, accessibility, reliability, dependency compatibility, and staged Windows release verification.
+The implementation history and remaining phases are documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. Completed work includes the shared design system, Reduce Motion, Find/Replace, contextual SQL completion, persisted editor/result preferences, connection/schema recovery, CSV export semantics, and Phase 6 accessibility and visual-QA improvements.
 
-The intended visual direction is a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and short transitions that never block work. The plan proposes motion tokens and explicit checks for keyboard focus, interrupted animations, high-DPI layouts, and result-grid performance.
+The intended visual direction remains a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and transitions that never block work.
 
-**Roadmap status:** implementation is in progress. Shared dark/light theme tokens, Reduce Motion, contextual completion, the inline Find/Replace bar, editor position status, and persisted editor/result preferences have regression coverage. More accessibility and reliability work remains, and release verification is staged; automated checks do not replace hands-on Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
+**Roadmap status:** the Phase 6 code changes passed the automated desktop CI, dependency audit, and Windows package smoke checks recorded in the roadmap. The release-preview workflow rebuilds the packages from the exact release commit. Hands-on review on a physical Windows PC—including real-monitor scaling, full keyboard-only workflows, screen-reader use, and the target PC's MySQL/TLS/Credential Manager setup—remains a separate release-candidate requirement. Keep the app Windows-desktop-only; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
