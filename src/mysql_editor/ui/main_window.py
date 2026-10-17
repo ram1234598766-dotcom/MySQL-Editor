@@ -144,6 +144,8 @@ class MainWindow(QMainWindow):
         self._jobs: dict[str, tuple[str, dict]] = {}
         self._deferred_export_notifications: list[dict] = []
         self._schema_request_id: str | None = None
+        self._schema_expansion_requests: dict[str, str] = {}
+        self._schema_expand_items: dict[str, QTreeWidgetItem] = {}
         self._schema_completion_words: set[str] = set()
         self._schema_databases: set[str] = set()
         self._schema_tables: set[str] = set()
@@ -471,6 +473,8 @@ class MainWindow(QMainWindow):
         self.schema_tree.setHeaderHidden(True)
         self.schema_tree.setAccessibleName("MySQL databases, tables and views")
         self.schema_tree.itemActivated.connect(self._schema_item_activated)
+        self.schema_tree.itemExpanded.connect(self._schema_item_expanded)
+        self.schema_tree.itemCollapsed.connect(self._schema_item_collapsed)
         self.schema_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.schema_tree.customContextMenuRequested.connect(self._show_schema_context)
         schema_layout.addWidget(self.schema_tree, 1)
@@ -1158,6 +1162,8 @@ class MainWindow(QMainWindow):
     def refresh_schema(self):
         schema = str(self.config.get("default_schema", "") or self.connect_result.get("database", ""))
         self._schema_request_id = None
+        self._schema_expansion_requests.clear()
+        self._schema_expand_items.clear()
         self.schema_tree.clear()
         self._schema_databases.clear()
         self._schema_tables.clear()
@@ -1174,10 +1180,14 @@ class MainWindow(QMainWindow):
         self.schema_tree.clear()
         active_schema = result.get("schema", "")
         for database in result.get("databases", []):
-            item = QTreeWidgetItem([("▾  " if database == active_schema else "▸  ") + database])
-            item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema", "schema": database})
+            is_active = database == active_schema
+            item = QTreeWidgetItem([("▾  " if is_active else "▸  ") + database])
+            item.setData(0, Qt.ItemDataRole.UserRole, {
+                "kind": "schema", "schema": database,
+                "metadata_loaded": is_active,
+            })
             item.setToolTip(0, f"Database schema: {database}")
-            if database == active_schema:
+            if is_active:
                 for record in result.get("objects", []):
                     name = record["name"]
                     kind = record.get("type", "BASE TABLE")
@@ -1188,6 +1198,11 @@ class MainWindow(QMainWindow):
                     child.setToolTip(0, f"{kind}: {database}.{name}")
                     item.addChild(child)
                 item.setExpanded(True)
+            else:
+                placeholder = QTreeWidgetItem(["Expand to load tables and columns…"])
+                placeholder.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema_placeholder"})
+                placeholder.setToolTip(0, "Metadata for this schema is fetched only when expanded.")
+                item.addChild(placeholder)
             self.schema_tree.addTopLevelItem(item)
         self._active_schema_name = str(active_schema or "")
         self._schema_databases = {str(database) for database in result.get("databases", [])}
@@ -1210,6 +1225,84 @@ class MainWindow(QMainWindow):
                 self.schema_state_label.text() + " Column completion is limited to 10,000 columns."
             )
         self.status.setText(status)
+
+    def _schema_item_collapsed(self, item) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        if data.get("kind") == "schema":
+            item.setText(0, f"▸  {data.get('schema', '')}")
+
+    def _schema_item_expanded(self, item) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        if data.get("kind") != "schema":
+            return
+        schema = str(data.get("schema", "") or "")
+        item.setText(0, f"▾  {schema}")
+        if data.get("metadata_loaded") or data.get("metadata_loading") or not schema:
+            return
+        if schema in self._schema_expansion_requests:
+            return
+
+        while item.childCount():
+            item.takeChild(0)
+        placeholder = QTreeWidgetItem(["Loading tables and columns…"])
+        placeholder.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema_placeholder_loading"})
+        item.addChild(placeholder)
+        data["metadata_loading"] = True
+        item.setData(0, Qt.ItemDataRole.UserRole, data)
+
+        job_id = self._dispatch("schema_objects", {"schema": schema}, {"schema": schema})
+        if not job_id:
+            data["metadata_loading"] = False
+            item.setData(0, Qt.ItemDataRole.UserRole, data)
+            while item.childCount():
+                item.takeChild(0)
+            retry = QTreeWidgetItem(["Could not load metadata · collapse and expand to retry"])
+            retry.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema_placeholder"})
+            item.addChild(retry)
+            return
+        self._schema_expansion_requests[schema] = job_id
+        self._schema_expand_items[job_id] = item
+        self.status.setText(f"Loading schema metadata · {schema}…")
+
+    def _finish_schema_expansion(self, job_id: str, schema: str, item, result: dict) -> None:
+        if self._schema_expansion_requests.get(schema) == job_id:
+            self._schema_expansion_requests.pop(schema, None)
+        self._schema_expand_items.pop(job_id, None)
+        if item is None or item.treeWidget() is not self.schema_tree:
+            return
+
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        data.pop("metadata_loading", None)
+        while item.childCount():
+            item.takeChild(0)
+
+        if not result.get("ok"):
+            data["metadata_loaded"] = False
+            item.setData(0, Qt.ItemDataRole.UserRole, data)
+            retry = QTreeWidgetItem(["Could not load metadata · collapse and expand to retry"])
+            retry.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema_placeholder"})
+            retry.setToolTip(0, redact_secrets(str(result.get("error", "") or "")))
+            item.addChild(retry)
+            detail = redact_secrets(str(result.get("error", "") or "")).strip()
+            self.status.setText(f"Could not load schema {schema}." + (f" {detail}" if detail else ""))
+            return
+
+        for record in result.get("objects", []):
+            name = str(record.get("name", "") or "")
+            if not name:
+                continue
+            kind = str(record.get("type", "BASE TABLE"))
+            child = QTreeWidgetItem([("▤  " if kind == "BASE TABLE" else "◇  ") + name])
+            child.setData(0, Qt.ItemDataRole.UserRole, {
+                "kind": "table", "schema": schema, "table": name, "object_type": kind,
+            })
+            child.setToolTip(0, f"{kind}: {schema}.{name}")
+            item.addChild(child)
+        data["metadata_loaded"] = True
+        data["metadata_loading"] = False
+        item.setData(0, Qt.ItemDataRole.UserRole, data)
+        table_count = len(result.get("objects", []))
+        self.status.setText(f"Loaded {table_count:,} table/view object(s) from schema {schema}.")
 
     def _update_all_editor_completions(self) -> None:
         for index in range(self.editors.count()):
@@ -1425,6 +1518,11 @@ class MainWindow(QMainWindow):
                 self.refresh_history()
             if action == "query":
                 self._flush_deferred_export_notifications()
+            return
+        if action == "schema_objects":
+            item = self._schema_expand_items.get(job_id)
+            schema = str(context.get("schema", "") or "")
+            self._finish_schema_expansion(job_id, schema, item, result)
             return
         if action == "schema":
             if job_id != self._schema_request_id:

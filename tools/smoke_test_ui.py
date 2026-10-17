@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtCore import QObject, QSettings, Signal, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
@@ -195,6 +195,74 @@ def main():
             first._switch_connection(next_profile, next_config, next_result)
         assert editor._mysql_editor_connection_context == original_context
         assert first._current_connection_context()["profile_id"] == "qa-reporting"
+
+        # Expose the schema tree so Qt delivers the item expansion event in offscreen mode.
+        first.inspector_tabs.setCurrentIndex(0)
+        first.schema_tree.show()
+        app.processEvents()
+
+        # Non-active schemas use placeholders and fetch object metadata only on expansion.
+        first._fill_schema_tree({
+            "ok": True,
+            "databases": ["qa-reporting", "qa-warehouse", "qa-archive"],
+            "schema": "qa-reporting",
+            "objects": [{"name": "current_table", "type": "BASE TABLE"}],
+            "columns_by_table": {"current_table": ["id"]},
+            "column_metadata_truncated": False,
+        })
+        other = next(
+            first.schema_tree.topLevelItem(i)
+            for i in range(first.schema_tree.topLevelItemCount())
+            if (first.schema_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) or {}).get("schema")
+            == "qa-warehouse"
+        )
+        assert other.childCount() == 1
+        assert (other.child(0).data(0, Qt.ItemDataRole.UserRole) or {}).get("kind") == "schema_placeholder"
+        submissions_before = len(first.worker.submissions)
+        other.setExpanded(True)
+        app.processEvents()
+        assert len(first.worker.submissions) == submissions_before + 1
+        action, payload = first.worker.submissions[-1]
+        assert action == "schema_objects" and payload["schema"] == "qa-warehouse"
+        lazy_job = first._schema_expansion_requests["qa-warehouse"]
+        first._on_worker_completed(lazy_job, "schema_objects", {
+            "ok": True,
+            "schema": "qa-warehouse",
+            "objects": [{"name": "revenue", "type": "BASE TABLE"}],
+            "columns_by_table": {"revenue": ["id"]},
+            "column_metadata_truncated": False,
+        })
+        assert (other.data(0, Qt.ItemDataRole.UserRole) or {}).get("metadata_loaded") is True
+        assert other.childCount() == 1
+        assert (other.child(0).data(0, Qt.ItemDataRole.UserRole) or {}).get("table") == "revenue"
+        assert "qa-warehouse" not in first._schema_columns_by_table
+
+        archive = next(
+            first.schema_tree.topLevelItem(i)
+            for i in range(first.schema_tree.topLevelItemCount())
+            if (first.schema_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) or {}).get("schema")
+            == "qa-archive"
+        )
+        archive.setExpanded(True)
+        app.processEvents()
+        failed_job = first._schema_expansion_requests["qa-archive"]
+        first._on_worker_completed(failed_job, "schema_objects", {
+            "ok": False, "error": "access denied",
+        })
+        assert (archive.data(0, Qt.ItemDataRole.UserRole) or {}).get("metadata_loaded") is False
+        assert (archive.child(0).data(0, Qt.ItemDataRole.UserRole) or {}).get("kind") == "schema_placeholder"
+        previous_submissions = len(first.worker.submissions)
+        archive.setExpanded(False)
+        archive.setExpanded(True)
+        app.processEvents()
+        assert len(first.worker.submissions) == previous_submissions + 1
+        assert first.worker.submissions[-1][0] == "schema_objects"
+        retry_job = first._schema_expansion_requests["qa-archive"]
+        first._on_worker_completed(retry_job, "schema_objects", {
+            "ok": False, "error": "still denied",
+        })
+        # Restore the pre-existing persisted inspector preference after this test.
+        first.inspector_tabs.setCurrentIndex(1)
 
         submitted = []
         first._dispatch = lambda action, payload, context=None: submitted.append((action, payload, context))
