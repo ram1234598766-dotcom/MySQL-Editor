@@ -441,10 +441,23 @@ class SqlEditor(QPlainTextEdit):
 
     @staticmethod
     def _safe_identifiers(words) -> set[str]:
-        return {
-            str(word) for word in (words or ())
-            if _IDENTIFIER_COMPLETION.fullmatch(str(word))
-        }
+        """Normalize optional metadata without treating strings as character iterables."""
+        if words is None:
+            return set()
+        if isinstance(words, (str, bytes)):
+            candidates = (words,)
+        else:
+            try:
+                candidates = iter(words)
+            except TypeError:
+                return set()
+
+        safe: set[str] = set()
+        for word in candidates:
+            name = str(word)
+            if _IDENTIFIER_COMPLETION.fullmatch(name):
+                safe.add(name)
+        return safe
 
     def set_completion_words(self, words) -> None:
         """Backwards-compatible setter for safe schema/result identifiers."""
@@ -459,9 +472,12 @@ class SqlEditor(QPlainTextEdit):
         """Set bounded schema metadata used for context-sensitive suggestions."""
         self._completion_databases = self._safe_identifiers(databases)
         self._completion_tables = self._safe_identifiers(tables)
+        raw_columns_by_table = (
+            columns_by_table if isinstance(columns_by_table, dict) else {}
+        )
         self._completion_columns_by_table = {
             str(table): self._safe_identifiers(columns)
-            for table, columns in (columns_by_table or {}).items()
+            for table, columns in raw_columns_by_table.items()
             if _IDENTIFIER_COMPLETION.fullmatch(str(table))
         }
         self._completion_active_schema = str(active_schema or "")

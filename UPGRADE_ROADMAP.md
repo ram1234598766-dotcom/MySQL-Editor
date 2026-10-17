@@ -592,3 +592,7 @@ Contextual completion is now available while typing a partial MySQL backtick-quo
 ### Schema-scoped completion — 17 October 2026
 
 Completion now keeps table/view and column metadata associated with each schema as lazy-loaded schema nodes are expanded. `schema.table.column` and aliases of schema-qualified tables resolve against that schema's cached columns; `schema.` offers only the loaded table/view names for that schema. When a schema has not been loaded or its column metadata is unavailable, completion returns no scoped object suggestions rather than leaking similarly named columns from the active schema. Refresh clears these caches before new metadata arrives.
+
+### Completion edge-case hardening — 17 October 2026
+
+Completion metadata now fails closed when optional maps are malformed, and a string passed as an identifier collection is treated as one identifier rather than a sequence of characters. Regression tests cover escaped and doubled quotes, multiline line/block comments, empty and large multi-statement buffers, colliding aliases, unsafe or incorrectly shaped schema metadata, and verbatim multiline SQL paste. These tests keep completion scoped without mutating SQL while suggestions are calculated.

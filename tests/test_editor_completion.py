@@ -438,6 +438,146 @@ def test_unqualified_column_completion_scopes_to_current_statement_tables():
     assert "customer_id" not in candidates
 
 
+def test_completion_is_suppressed_inside_escaped_quotes_and_multiline_comments():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders"},
+        columns_by_table={
+            "customers": ["customer_id"],
+            "orders": ["order_id", "order_total"],
+        },
+    )
+
+    inside_quoted_strings = [
+        r"SELECT 'it\'s customers';",
+        "SELECT 'it''s customers';",
+        'SELECT "escaped \\" customers";',
+    ]
+    for source in inside_quoted_strings:
+        marker = "customers"
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(source.index(marker) + len(marker))
+        editor.setTextCursor(cursor)
+        assert editor._context_completion_words() == (), source
+
+    comment_sources = [
+        "-- customers are only mentioned here\nSELECT * FROM cus",
+        "SELECT 1 /* multiline\ncustomers comment */; SELECT * FROM cus",
+        "# customers are only mentioned here\nSELECT * FROM cus",
+    ]
+    for source in comment_sources:
+        marker = "customers"
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(source.index(marker) + len(marker))
+        editor.setTextCursor(cursor)
+        assert editor._context_completion_words() == (), source
+
+        # Moving to code after the comment must restore normal suggestions.
+        cursor = editor.textCursor()
+        cursor.setPosition(source.rindex("cus") + len("cus"))
+        editor.setTextCursor(cursor)
+        candidates = set(editor._context_completion_words())
+        assert "customers" in candidates, source
+
+
+def test_completion_handles_empty_and_large_multistatement_buffers():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders"},
+        columns_by_table={
+            "customers": ["customer_id", "display_name"],
+            "orders": ["order_id", "order_total"],
+        },
+    )
+
+    editor.setPlainText("")
+    assert {"SELECT", "COUNT"} <= set(editor._context_completion_words())
+    editor._show_completion(force=False)
+    assert editor.toPlainText() == ""
+
+    large_prefix = (
+        "SELECT 'customers;'; /* comment; */ SELECT * FROM customers AS c; "
+    ) * 1200
+    source = large_prefix + "SELECT o.order_i FROM orders AS o"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("order_i") + len("order_i"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"order_id", "order_total"} <= candidates
+    assert "customer_id" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_completion_rejects_malformed_or_unsafe_optional_schema_metadata():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        databases="app_db",
+        tables=["customers", "bad-table", None],
+        columns_by_table=["not", "a", "mapping"],
+        extra_words=17,
+        active_schema="app_db",
+        tables_by_schema={"analytics": "events", "bad-schema-name": ["unsafe_table"]},
+        columns_by_schema_and_table={
+            "analytics": {"orders": "analytics_order_id", "bad-table": ["unsafe-column"]},
+            "bad-schema-name": {"orders": ["unsafe_schema_column"]},
+        },
+    )
+
+    assert editor._completion_databases == {"app_db"}
+    assert editor._completion_tables == {"customers"}
+    assert editor._completion_columns_by_table == {}
+    assert editor._extra_completion_words == set()
+    assert editor._tables_for_schema("analytics") == {"events"}
+    assert editor._columns_for_schema_table("analytics", "orders") == {
+        "analytics_order_id"
+    }
+    assert editor._tables_for_schema("bad-schema-name") == set()
+    assert editor.toPlainText() == ""
+
+
+def test_completion_does_not_mix_columns_when_table_aliases_collide():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders"},
+        columns_by_table={
+            "customers": ["customer_id", "display_name"],
+            "orders": ["order_id", "order_total"],
+        },
+    )
+    source = "SELECT x. FROM customers AS x JOIN orders AS x ON x.id = x.id"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("x.") + len("x."))
+    editor.setTextCursor(cursor)
+
+    assert editor._context_completion_words() == ()
+    assert editor.toPlainText() == source
+
+
+def test_pasted_multiline_sql_is_preserved_without_auto_pairing():
+    editor = SqlEditor()
+    original_clipboard = QApplication.clipboard().text()
+    pasted = "SELECT (customer_id)\nFROM customers\nWHERE display_name = 'it''s ok';"
+    QApplication.clipboard().setText(pasted)
+    editor.setPlainText("-- draft\n")
+    cursor = editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+
+    try:
+        _send_key(editor, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+        assert editor.toPlainText() == "-- draft\n" + pasted
+    finally:
+        QApplication.clipboard().setText(original_clipboard)
+        editor.deleteLater()
+        _APP.processEvents()
+
+
 def test_context_completion_falls_back_when_schema_metadata_is_unavailable():
     editor = SqlEditor()
     editor.setPlainText("SELECT cou")
