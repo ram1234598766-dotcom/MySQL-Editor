@@ -1,6 +1,6 @@
 from mysql_editor.ui.theme import (
     COMPONENT_SIZES, EDITOR_PALETTES, RADII, SPACING, STYLESHEET, TOKENS, TYPOGRAPHY,
-    normalize_theme, resolve_theme, stylesheet_for_theme,
+    color_for_theme, normalize_theme, resolve_theme, stylesheet_for_theme,
 )
 
 
@@ -86,6 +86,15 @@ def test_light_theme_key_text_states_meet_wcag_aa_contrast():
     assert _contrast_ratio("#946200", "#F8FAFC") >= 4.5  # warning
     assert _contrast_ratio("#B42335", "#F8FAFC") >= 4.5  # danger
     assert _contrast_ratio("#1F6FEB", "#FFFFFF") >= 4.5  # focus ring
+
+def test_muted_result_text_token_meets_contrast_in_both_grid_themes():
+    dark = color_for_theme("text_muted", "dark")
+    light = color_for_theme("text_muted", "light")
+
+    assert dark == TOKENS["text_muted"]
+    assert light == "#65748A"
+    assert _contrast_ratio(dark, "#0B121D") >= 4.5
+    assert _contrast_ratio(light, "#FFFFFF") >= 4.5
 
 
 
