@@ -142,11 +142,10 @@ def test_credential_store_propagates_backend_failures_without_plaintext_fallback
 
     from mysql_editor.storage import CredentialStore
 
-    class PasswordDeleteError(Exception):
-        pass
+    delete_error_type = type("PasswordDeleteError", (Exception,), {})
 
     class BackendErrors:
-        PasswordDeleteError = PasswordDeleteError
+        PasswordDeleteError = delete_error_type
 
     class FailingKeyring:
         errors = BackendErrors
@@ -176,18 +175,17 @@ def test_credential_store_propagates_backend_failures_without_plaintext_fallback
 def test_credential_store_ignores_only_missing_credential_on_delete(monkeypatch):
     from mysql_editor.storage import CredentialStore
 
-    class PasswordDeleteError(Exception):
-        pass
+    delete_error_type = type("PasswordDeleteError", (Exception,), {})
 
     class BackendErrors:
-        PasswordDeleteError = PasswordDeleteError
+        PasswordDeleteError = delete_error_type
 
     class MissingKeyring:
         errors = BackendErrors
 
         @staticmethod
         def delete_password(*_args):
-            raise PasswordDeleteError("credential not found")
+            raise delete_error_type("credential not found")
 
     monkeypatch.setattr(CredentialStore, "_backend", staticmethod(lambda: MissingKeyring))
     CredentialStore().delete("already-removed-profile")
