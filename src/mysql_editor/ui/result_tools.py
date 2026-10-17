@@ -71,3 +71,34 @@ def result_filter_message(
         f"Quick filter: {visible_count:,} of {preview_count:,} preview row(s) match. "
         f"CSV export still includes all {fetched_count:,} fetched row(s)."
     )
+
+
+def result_summary_message(item: dict, preview_rows: int, fetched_rows: int) -> str:
+    """Describe a row result, status result, or error without confusing their meanings."""
+    kind = str(item.get("kind", "result")).casefold()
+    preview_count = max(0, int(preview_rows))
+    fetched_count = max(preview_count, int(fetched_rows))
+
+    if kind == "rows":
+        if fetched_count == 0:
+            return "Query completed successfully. No rows were returned."
+        message = f"Rows result · {fetched_count:,} row(s) fetched."
+        if item.get("preview_truncated") or fetched_count > preview_count:
+            message += (
+                f" Showing first {preview_count:,}; CSV export includes all "
+                f"{fetched_count:,} fetched row(s)."
+            )
+        return message
+
+    if kind == "status":
+        try:
+            affected = max(0, int(item.get("affected_rows", 0) or 0))
+        except (TypeError, ValueError):
+            affected = 0
+        if affected == 0:
+            return "Statement completed. No rows were affected."
+        return f"Statement completed. {affected:,} row(s) affected."
+
+    if kind == "error":
+        return "Statement failed. Review the error details in this result."
+    return f"{kind.title()} result · {fetched_count:,} row(s) received."

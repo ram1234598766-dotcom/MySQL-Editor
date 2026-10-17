@@ -100,3 +100,32 @@ def test_filter_clear_restores_the_underlying_result_message():
 
     MainWindow._filter_results(window, "")
     assert window.result_message.value == window._result_base_message
+
+
+
+def test_result_summary_distinguishes_empty_rows_from_statements_without_rows():
+    from mysql_editor.ui.result_tools import result_summary_message
+
+    assert result_summary_message({"kind": "rows", "row_count": 0}, 0, 0) == (
+        "Query completed successfully. No rows were returned."
+    )
+    assert result_summary_message({"kind": "status", "affected_rows": 0}, 1, 1) == (
+        "Statement completed. No rows were affected."
+    )
+    assert result_summary_message({"kind": "status", "affected_rows": 12}, 1, 1) == (
+        "Statement completed. 12 row(s) affected."
+    )
+
+
+def test_result_summary_explains_preview_truncation_and_failure():
+    from mysql_editor.ui.result_tools import result_summary_message
+
+    assert result_summary_message({
+        "kind": "rows", "row_count": 4321, "preview_truncated": True,
+    }, 2000, 4321) == (
+        "Rows result · 4,321 row(s) fetched. Showing first 2,000; "
+        "CSV export includes all 4,321 fetched row(s)."
+    )
+    assert result_summary_message({"kind": "error", "row_count": 1}, 1, 1) == (
+        "Statement failed. Review the error details in this result."
+    )

@@ -24,7 +24,8 @@ from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.result_tools import (
-    cell_detail_text, column_headers_tsv, result_filter_message, rows_tsv, selected_cells_tsv,
+    cell_detail_text, column_headers_tsv, result_filter_message, result_summary_message,
+    rows_tsv, selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
@@ -1170,15 +1171,7 @@ class MainWindow(QMainWindow):
             self.query_meta.setText(f"{total:,} row(s) · {total_duration} ms total")
         else:
             self.query_meta.setText(f"{total:,} row(s) · {duration} ms")
-        suffix = (
-            f" Showing first {MAX_PREVIEW_ROWS:,}; CSV export includes all fetched rows."
-            if item.get("preview_truncated") else ""
-        )
-        if item.get("kind") == "error":
-            suffix = " Statement failed; review the error details."
-        self._set_result_message(
-            f"{item.get('kind', 'result').title()} result · {total:,} row(s) received.{suffix}"
-        )
+        self._set_result_message(result_summary_message(item, len(rows), total))
         self._set_result_controls()
 
     def _on_worker_completed(self, job_id: str, action: str, result: dict):
@@ -1212,9 +1205,24 @@ class MainWindow(QMainWindow):
                 self.result_picker.setCurrentIndex(len(self._query_results) - 1)
                 self.result_picker.blockSignals(False)
                 self._select_result(self.result_picker.currentIndex(), result.get("duration_ms", 0))
-            elif result.get("ok"):
-                self.query_meta.setText("No result rows")
-                self._set_result_message("Statement completed. No result set was returned.")
+            else:
+                # A query with no result set must not leave an older grid/export target
+                # visible as though it belonged to this statement.
+                self._query_results = []
+                self.result_picker.blockSignals(True)
+                self.result_picker.clear()
+                self.result_picker.blockSignals(False)
+                self.result_model.update([], [])
+                self._current_result_id = None
+                self._result_fetched_row_count = 0
+                self.result_filter.clear()
+                self._set_result_completion_words([])
+                self._set_result_controls()
+                if result.get("ok"):
+                    self.query_meta.setText("No result set")
+                    self._set_result_message("Statement completed. No result set was returned.")
+                else:
+                    self._set_result_message(result.get("error", "Query failed."))
             if action == "query":
                 self._apply_query_outcome(outcome, result)
             else:
