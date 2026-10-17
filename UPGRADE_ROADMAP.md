@@ -554,3 +554,8 @@ The Settings menu now groups Appearance, Editor, Results, and Query History. Edi
 ### Query lifecycle feedback — 17 October 2026
 
 The worker now emits running/fetch progress and CSV export progress; the UI distinguishes a cancellation request from a confirmed MySQL interruption, recognizes partial script failure, and keeps earlier result sets available. A pure outcome classifier and database interruption tests cover completion, cancellation, interruption, partial failure, and ordinary failures.
+
+
+### Appearance preference work — 17 October 2026
+
+System/Light/Dark theme selection is now implemented in the desktop Settings menu. The selected preference is stored in QSettings, applied during startup, and can be changed immediately without rebuilding the main window or clearing editor/result state. Windows System mode reads the Windows app-colour preference; other platforms fall back to the Qt application palette. Regression tests cover invalid stored values, System resolution, and important light-theme widget states. High-DPI contrast and visual consistency still require manual review on real Windows displays before a release claim.
