@@ -901,7 +901,7 @@ class MainWindow(QMainWindow):
         self._set_editor_font_size(10)
 
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
-        database_actions = {"query", "schema", "schema_objects", "table_preview", "commit", "rollback"}
+        database_actions = {"query", "schema", "schema_objects", "table_preview", "use_schema", "commit", "rollback"}
         if action in database_actions and (
             not self._connection_available or self._disconnect_pending
         ):
@@ -1570,11 +1570,33 @@ class MainWindow(QMainWindow):
             self._preview_schema_table(data.get("schema", ""), data.get("table", ""))
 
     def _use_schema(self, schema: str):
-        if not schema:
+        # Schema selection changes the live MySQL session. Do not update displayed
+        # context until the worker confirms that MySQL accepted the switch.
+        schema = str(schema or "")
+        if not schema.strip():
             return
-        self.config["default_schema"] = schema
-        self.status.setText(f"Refreshing schema {schema}…")
-        self.refresh_schema()
+        if self._query_running:
+            self._report_query_busy("schema switch")
+            return
+        if not self._connection_available or self._disconnect_pending:
+            self.schema_state_label.setText(
+                "No active MySQL connection. Connect to a server to switch schemas."
+            )
+            self.status.setText("Schema switch unavailable · connect to MySQL first.")
+            return
+
+        current_schema = str(
+            self.connect_result.get("database")
+            or self.config.get("default_schema", "")
+            or ""
+        )
+        if schema == current_schema:
+            self.refresh_schema()
+            return
+
+        self.schema_state_label.setText(f"Switching active schema to {schema!r}…")
+        self.status.setText(f"Switching active MySQL schema to {schema!r}…")
+        self._dispatch("use_schema", {"schema": schema}, {"schema": schema})
 
     def _preview_schema_table(self, schema: str, table: str):
         if not schema or not table:
@@ -1612,7 +1634,7 @@ class MainWindow(QMainWindow):
             schema = str(data.get("schema", ""))
             schema_action = menu.addAction(
                 "Refresh this schema" if schema == self._active_schema_name
-                else "Use as default schema and refresh"
+                else "Switch active schema and refresh"
             )
             copy_action = menu.addAction("Copy schema name")
             chosen = menu.exec(self.schema_tree.viewport().mapToGlobal(point))
@@ -1767,6 +1789,70 @@ class MainWindow(QMainWindow):
                     + (f"\n{detail}" if detail else " Check the connection and try again.")
                 )
                 self.status.setText(detail or "Could not load schema metadata. Use Refresh to retry.")
+            return
+        if action == "use_schema":
+            schema = str(context.get("schema") or result.get("schema") or "")
+            if not result.get("ok") or not schema.strip():
+                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                current_schema = str(
+                    self.connect_result.get("database")
+                    or self.config.get("default_schema", "")
+                    or "(no default schema)"
+                )
+                message = (
+                    f"Could not switch active schema to {schema!r}; "
+                    f"the previous schema remains {current_schema!r}."
+                )
+                if detail:
+                    message += f" {detail}"
+                if result.get("connection_lost"):
+                    message += " The MySQL connection was lost; reconnect before retrying."
+                self.schema_state_label.setText(message)
+                self.status.setText(message)
+                return
+
+            self.config["default_schema"] = schema
+            self.connect_result["database"] = schema
+            self.profile["default_schema"] = schema
+            if "transaction_open" in result:
+                self._transaction_open = bool(result["transaction_open"])
+
+            persistence_error = ""
+            # Respect the user's current "remember this connection" choice. The
+            # live session still switches, but a disabled saving preference must
+            # not silently write the changed default into local profile metadata.
+            if self.config.get("save_profile"):
+                profile_id = str(self.profile.get("id") or "")
+                try:
+                    saved_profile = next(
+                        (profile for profile in self.repository.profiles() if profile.id == profile_id),
+                        None,
+                    )
+                    if saved_profile is not None:
+                        self.repository.save_profile(ConnectionProfile(**self.profile))
+                except Exception as exc:
+                    persistence_error = redact_secrets(str(exc)).strip()
+
+            self._update_connection_status()
+            active_context = self._current_connection_context()
+            # Tabs follow schema changes within their own profile, but tabs pinned
+            # to a different profile keep their target and still require confirmation.
+            for index in range(self.editors.count()):
+                editor = self.editors.widget(index)
+                if not isinstance(editor, SqlEditor):
+                    continue
+                bound = getattr(editor, "_mysql_editor_connection_context", None)
+                if connection_context_matches(bound, active_context):
+                    self._bind_editor_connection_context(editor, active_context)
+            self.refresh_schema()
+            if persistence_error:
+                QMessageBox.warning(
+                    self,
+                    "Schema switched; profile not saved",
+                    f"The active MySQL session switched to {schema!r}, but the saved connection "
+                    "profile could not be updated. This session is using the new schema; a future "
+                    "connection may still use the previous default.\n\n" + persistence_error,
+                )
             return
         if action == "disconnect":
             self._disconnect_pending = False

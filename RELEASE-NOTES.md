@@ -30,6 +30,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 - Completion is a bounded editing aid, not a full MySQL grammar or type-checking engine. It should not change SQL unless a completion item is accepted.
 
 ### Connections and schema navigation
+- Selecting a different database in Schema Explorer now switches the actual MySQL session on the database worker thread. The active badge, schema metadata, and saved profile default change only after MySQL confirms success; a failed switch keeps the prior context.
 - Direct local-to-server MySQL connections, saved profiles, duplicate/delete profile actions, and saved database passwords stored through Windows Credential Manager rather than plaintext application storage.
 - Explicit Automatic TLS, Verify server identity, and Disabled TLS policies; strict verification can use a supplied CA file.
 - Schema Explorer supports database/table/view navigation, refresh, safe identifier copying, limited table preview, and generating a SELECT in a new tab.

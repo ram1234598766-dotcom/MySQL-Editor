@@ -606,3 +606,8 @@ The Settings > Editor tab-width preference now affects actual Tab insertion and 
 ### Dependency audit scope — 17 October 2026
 
 Expanded the dependency security gate beyond `requirements.txt`: CI installs the declared project/test extras plus PyInstaller and the license inventory tool, audits the compatible runtime requirement set, then audits the actually installed test and packaging environment. The Windows packaging workflow now performs the same installed-environment audit before packaging begins. The release CycloneDX SBOM stays deliberately runtime-focused; the separate audit gates catch known advisories in test/build tooling too. CI results for this change are pending until the pull request checks complete.
+
+
+### Active schema session correctness — 17 October 2026
+
+The Phase 4 schema-selection flow now switches the live MySQL session via a worker-thread `USE` operation with safely quoted identifiers. Workspace and saved-profile context are updated only after the server accepts the switch. A rejected switch preserves the previous UI/profile context, and schema switches are refused while a query is running. Regression coverage checks quoted schema names, worker connection-context updates, failed switches, and the UI's context-preservation path. CI and Windows package validation are required before calling this fix complete; physical Windows visual QA remains separate.

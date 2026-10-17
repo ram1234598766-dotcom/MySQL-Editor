@@ -249,8 +249,10 @@ def _fake_mysql_connection(row=("8.4.0", "analytics", "tester@localhost"), conne
     class FakeCursor:
         def __init__(self):
             self.close_calls = 0
+            self.executed: list[str] = []
 
-        def execute(self, _statement):
+        def execute(self, statement):
+            self.executed.append(statement)
             if execute_error is not None:
                 raise execute_error
 
@@ -718,3 +720,44 @@ def test_delimiter_script_is_rejected_before_opening_a_cursor():
     assert "no part was submitted" in result["error"]
     assert result["transaction_open"] is True
     assert connection.cursor_calls == 0
+
+def test_use_schema_switches_the_live_session_with_a_quoted_identifier():
+    worker = DatabaseWorker()
+    connection = _fake_mysql_connection()
+    worker._connection = connection
+    worker._connection_config = {"host": "localhost", "database": "old_schema"}
+    schema = "sales` archive"
+
+    try:
+        result = worker._dispatch("use_schema", {"schema": schema})
+
+        assert result == {
+            "ok": True,
+            "schema": schema,
+            "transaction_open": False,
+        }
+        assert connection.cursor_instance.executed == ["USE `sales`` archive`"]
+        assert connection.cursor_instance.close_calls == 1
+        assert worker._connection_config["database"] == schema
+    finally:
+        worker._cleanup_resources()
+
+
+def test_failed_schema_switch_does_not_update_worker_connection_context():
+    import pytest
+
+    worker = DatabaseWorker()
+    connection = _fake_mysql_connection(execute_error=RuntimeError("database access denied"))
+    worker._connection = connection
+    worker._connection_config = {"host": "localhost", "database": "old_schema"}
+
+    try:
+        with pytest.raises(RuntimeError, match="database access denied"):
+            worker._dispatch("use_schema", {"schema": "restricted_schema"})
+
+        assert worker._connection_config["database"] == "old_schema"
+        assert connection.cursor_instance.executed == ["USE `restricted_schema`"]
+        assert connection.cursor_instance.close_calls == 1
+    finally:
+        worker._cleanup_resources()
+
