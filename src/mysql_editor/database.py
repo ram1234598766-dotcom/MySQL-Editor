@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
 from mysql_editor.core import (
-    redact_secrets, redact_sql_secrets, safe_identifier, split_sql_statements,
+    redact_sql_secrets, safe_identifier, split_sql_statements,
     unsupported_delimiter_message,
 )
 
