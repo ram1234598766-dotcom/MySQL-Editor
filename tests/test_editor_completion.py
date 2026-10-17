@@ -504,7 +504,7 @@ def test_up_and_down_navigate_completion_without_moving_sql_caret():
     assert popup.currentIndex().data() == "COUNT"
     assert editor.textCursor().position() == original_position
     assert editor.toPlainText() == source
-    assert editor.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    assert editor.hasFocus()
     assert popup.focusPolicy() == Qt.FocusPolicy.NoFocus
     editor.close()
 

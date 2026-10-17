@@ -410,9 +410,6 @@ class SqlEditor(QPlainTextEdit):
         self._completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         self._completer.setMaxVisibleItems(14)
         self._completer.setWrapAround(False)
-        # Keep navigation keys routed through SqlEditor so the caret never escapes
-        # into the suggestion view while the popup is visible.
-        self._completer.popup().setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._completer.activated.connect(self.insert_completion)
         self._refresh_completions()
 
