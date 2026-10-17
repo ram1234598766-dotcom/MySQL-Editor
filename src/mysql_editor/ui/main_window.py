@@ -1814,17 +1814,24 @@ class MainWindow(QMainWindow):
             self.config["default_schema"] = schema
             self.connect_result["database"] = schema
             self.profile["default_schema"] = schema
+            if "transaction_open" in result:
+                self._transaction_open = bool(result["transaction_open"])
+
             persistence_error = ""
-            profile_id = str(self.profile.get("id") or "")
-            try:
-                saved_profile = next(
-                    (profile for profile in self.repository.profiles() if profile.id == profile_id),
-                    None,
-                )
-                if saved_profile is not None:
-                    self.repository.save_profile(ConnectionProfile(**self.profile))
-            except Exception as exc:
-                persistence_error = redact_secrets(str(exc)).strip()
+            # Respect the user's current "remember this connection" choice. The
+            # live session still switches, but a disabled saving preference must
+            # not silently write the changed default into local profile metadata.
+            if self.config.get("save_profile"):
+                profile_id = str(self.profile.get("id") or "")
+                try:
+                    saved_profile = next(
+                        (profile for profile in self.repository.profiles() if profile.id == profile_id),
+                        None,
+                    )
+                    if saved_profile is not None:
+                        self.repository.save_profile(ConnectionProfile(**self.profile))
+                except Exception as exc:
+                    persistence_error = redact_secrets(str(exc)).strip()
 
             self._update_connection_status()
             active_context = self._current_connection_context()
