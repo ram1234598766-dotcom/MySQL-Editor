@@ -136,3 +136,94 @@ def test_editor_view_preferences_persist_and_apply_to_current_and_new_tabs(tmp_p
         window.close()
         repository.close()
         _APP.processEvents()
+
+
+
+def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitter(
+    tmp_path, monkeypatch,
+):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "theme-preservation.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-theme", "name": "Development", "host": "localhost",
+        "port": 3306, "username": "reader",
+    }
+    config = {
+        "host": "localhost", "port": 3306, "username": "reader",
+        "default_schema": "app_db", "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(
+        worker, repository, object(), profile, config, {"database": "app_db"}
+    )
+    try:
+        window.resize(1280, 820)
+        window.show()
+        _APP.processEvents()
+
+        source = "SELECT city FROM cities;"
+        first_editor = window._current_editor()
+        assert isinstance(first_editor, SqlEditor)
+        first_editor.setPlainText(source)
+        start = source.index("city")
+        cursor = first_editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(start + len("city"), cursor.MoveMode.KeepAnchor)
+        first_editor.setTextCursor(cursor)
+        window.new_query_tab("SELECT 1;")
+        window.editors.setCurrentIndex(0)
+        _APP.processEvents()
+
+        window.result_model.update(
+            ["City"], [["London"], ["Paris"], ["Lonely"]]
+        )
+        window.result_filter.setText("lon")
+        _APP.processEvents()
+
+        assert window.editors.count() == 2
+        assert window.editors.currentIndex() == 0
+        assert first_editor.textCursor().selectedText() == "city"
+        assert window.result_filter.text() == "lon"
+        assert window.result_proxy.rowCount() == 2
+
+        before_buffer = first_editor.toPlainText()
+        before_cursor = first_editor.textCursor().position()
+        before_selection = (
+            first_editor.textCursor().selectionStart(),
+            first_editor.textCursor().selectionEnd(),
+            first_editor.textCursor().selectedText(),
+        )
+        before_tab = window.editors.currentIndex()
+        before_splitter = window.main_split.saveState()
+        before_connection = (
+            window.connection_badge.text(),
+            window.connection_details.text(),
+        )
+        before_rows = list(window.result_model.rows)
+
+        window._set_theme("light")
+        _APP.processEvents()
+
+        assert settings.values["ui/theme"] == "light"
+        assert window.editors.count() == 2
+        assert window.editors.currentIndex() == before_tab
+        assert first_editor.toPlainText() == before_buffer
+        assert first_editor.textCursor().position() == before_cursor
+        assert (
+            first_editor.textCursor().selectionStart(),
+            first_editor.textCursor().selectionEnd(),
+            first_editor.textCursor().selectedText(),
+        ) == before_selection
+        assert window.result_filter.text() == "lon"
+        assert window.result_proxy.rowCount() == 2
+        assert window.result_model.rows == before_rows
+        assert window.main_split.saveState() == before_splitter
+        assert (
+            window.connection_badge.text(),
+            window.connection_details.text(),
+        ) == before_connection
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
