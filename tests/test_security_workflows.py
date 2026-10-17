@@ -53,6 +53,7 @@ def test_windows_build_uses_read_only_permissions_and_isolates_release_write_acc
     assert "uses: actions/download-artifact@v7" in publish_job
     assert "needs: build" in publish_job
     assert "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in publish_job
+    assert "GH_REPO: ${{ github.repository }}" in publish_job
     assert "contents: write" not in build_job
 
     upload_at = build_job.index("Upload Windows packages")

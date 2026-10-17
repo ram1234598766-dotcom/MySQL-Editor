@@ -164,6 +164,7 @@ jobs:
       - name: Publish Windows packages to GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
