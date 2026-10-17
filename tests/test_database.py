@@ -196,3 +196,50 @@ def test_partial_result_cache_initialization_closes_spool_and_fails_tasks(monkey
     assert worker._spool is None
     assert not spool_dir.exists()
 
+def test_worker_shutdown_closes_and_removes_result_cache(tmp_path):
+    worker = DatabaseWorker()
+    events = []
+    spool_dir = worker._spool_dir
+    worker.completed.connect(lambda job_id, action, result: events.append((job_id, action, result)))
+    worker.submit("unsupported-test-action", {}, task_id="shutdown-cleanup")
+    worker.shutdown()
+
+    worker.run()
+
+    assert len(events) == 1
+    assert events[0][0:2] == ("shutdown-cleanup", "unsupported-test-action")
+    assert events[0][2]["ok"] is False
+    assert "Unknown worker action" in events[0][2]["error"]
+    assert worker._spool is None
+    assert not spool_dir.exists()
+
+
+def test_worker_recovers_from_task_exception_and_completes_following_tasks(monkeypatch):
+    worker = DatabaseWorker()
+    events = []
+    spool_dir = worker._spool_dir
+    worker.completed.connect(lambda job_id, action, result: events.append((job_id, action, result)))
+
+    def dispatch(action, payload):
+        if payload.get("explode"):
+            raise RuntimeError("password=exception-secret")
+        return {"ok": True, "action": action}
+
+    monkeypatch.setattr(worker, "_dispatch", dispatch)
+    worker.submit("query", {"explode": True}, task_id="failing-task")
+    worker.submit("schema", {"schema": "analytics"}, task_id="following-task")
+    worker.shutdown()
+
+    worker.run()
+
+    assert [(job_id, action) for job_id, action, _result in events] == [
+        ("failing-task", "query"),
+        ("following-task", "schema"),
+    ]
+    assert events[0][2]["ok"] is False
+    assert "exception-secret" not in events[0][2]["error"]
+    assert events[0][2]["error"] == "password=[REDACTED]"
+    assert events[1][2] == {"ok": True, "action": "schema"}
+    assert worker._spool is None
+    assert not spool_dir.exists()
+
