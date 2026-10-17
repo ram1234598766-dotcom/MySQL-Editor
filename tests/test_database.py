@@ -345,7 +345,11 @@ def test_cancel_current_query_serializes_kill_against_statement_transition(monke
         def close(self):
             pass
 
-    monkeypatch.setattr(mysql.connector, "connect", lambda **_kwargs: FakeControlConnection())
+    def connect_outside_worker_lock(**_kwargs):
+        assert not worker._lock.locked(), "Control connection setup must not hold the worker lock"
+        return FakeControlConnection()
+
+    monkeypatch.setattr(mysql.connector, "connect", connect_outside_worker_lock)
 
     class ImmediateThread:
         def __init__(self, target, **_kwargs):
@@ -359,6 +363,61 @@ def test_cancel_current_query_serializes_kill_against_statement_transition(monke
 
     assert executed == ["KILL QUERY 17"]
     assert messages == [("script-task", "Cancellation request sent to MySQL.")]
+
+
+def test_cancel_current_query_skips_if_generation_changes_during_control_connect(monkeypatch):
+    import mysql.connector
+    import mysql_editor.database as database_module
+
+    worker = DatabaseWorker()
+    worker._connection_config = {"host": "localhost", "user": "tester", "password": "test"}
+    worker._connection_id = 17
+    worker._active_query = True
+    worker._active_query_task_id = "script-task"
+    worker._active_query_generation = 6
+    messages = []
+    executed = []
+    closed = []
+    worker.task_activity.connect(lambda task_id, message: messages.append((task_id, message)))
+
+    class FakeCursor:
+        def execute(self, statement):
+            executed.append(statement)
+
+        def close(self):
+            pass
+
+    class FakeControlConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            closed.append(True)
+
+    def connect_then_advance(**_kwargs):
+        assert not worker._lock.locked(), "Control connection setup must not block worker state"
+        with worker._lock:
+            worker._active_query_generation += 1
+        return FakeControlConnection()
+
+    monkeypatch.setattr(mysql.connector, "connect", connect_then_advance)
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(database_module.threading, "Thread", ImmediateThread)
+    worker.cancel_current_query()
+
+    assert executed == []
+    assert closed == [True]
+    assert messages == [
+        ("script-task", "Cancellation skipped because the SQL statement changed or finished.")
+    ]
+
 
 def _fake_mysql_connection(row=("8.4.0", "analytics", "tester@localhost"), connection_id=17, execute_error=None):
     class FakeCursor:
