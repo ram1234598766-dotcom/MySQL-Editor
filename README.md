@@ -61,11 +61,11 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 
 ## UX and upgrade roadmap
 
-The implementation history and remaining phases are documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. Completed work includes the shared design system, Reduce Motion, Find/Replace, contextual SQL completion, persisted editor/result preferences, connection/schema recovery, CSV export semantics, and Phase 6 accessibility and visual-QA improvements.
+The implementation history and remaining phases are documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. Completed work spans the shared design system, Reduce Motion, Find/Replace, contextual SQL completion, persisted editor/result preferences, connection/schema recovery, CSV export semantics, Phase 6 accessibility and visual-QA improvements, Phase 7 reliability/security hardening, and Phase 8 release provenance and gated Windows packaging.
 
 The intended visual direction remains a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and transitions that never block work.
 
-**Roadmap status:** the Phase 6 code changes passed the automated desktop CI, dependency audit, and Windows package smoke checks recorded in the roadmap. The release-preview workflow rebuilds the packages from the exact release commit. Hands-on review on a physical Windows PC—including real-monitor scaling, full keyboard-only workflows, screen-reader use, and the target PC's MySQL/TLS/Credential Manager setup—remains a separate release-candidate requirement. Keep the app Windows-desktop-only; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
+**Roadmap status:** the latest verified Windows preview, [Build 173](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases/tag/windows-preview-39057661925), was built from commit [`6a7a4c0e8ab95d3da8d1e5abb0181494ba3adb9e`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/6a7a4c0e8ab95d3da8d1e5abb0181494ba3adb9e). Its [desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39057661944), [dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39057662008), and [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39057661925) all succeeded. The Windows workflow built and smoke-tested the application-folder package, portable executable, installer, and install/uninstall flow. Hands-on review on a physical Windows PC—including real-monitor scaling, full keyboard-only workflows, screen-reader use, and the target PC's MySQL/TLS/Credential Manager setup—remains a separate release-candidate requirement. Keep the app Windows-desktop-only; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
@@ -96,6 +96,12 @@ Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Ed
 | **sbom.cdx.json** | Software dependency inventory in CycloneDX format, when published |
 | **THIRD_PARTY_LICENSES.md** | Third-party license inventory, when published |
 | **WINDOWS_SIGNING.md** | Explicit signing status for that release |
+
+### Brand assets and logo rendering
+
+The tracked master logo is `assets/mysql-editor-logo.webp`. Run `python tools/build_brand_assets.py` to regenerate the transparent PNG derivative, `assets/mysql-editor.ico` with 16, 24, 32, 48, 64, 128, and 256 px icon frames, and the two Inno Setup wizard images. The asset pipeline removes the light matte connected to the outer background, reduces pale edge fringes, preserves the artwork's proportions, and keeps white details enclosed within the logo badge. The tracked source image is left unchanged.
+
+The Windows packaging workflow regenerates these assets before building so the app icon and installer branding use the same logo revision. The latest verified Build 173 release contains [`MySQLEditor-Setup.exe`](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases/download/windows-preview-39057661925/MySQLEditor-Setup.exe), [`MySQLEditor-Portable.exe`](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases/download/windows-preview-39057661925/MySQLEditor-Portable.exe), and [`MySQLEditor-Folder.zip`](https://github.com/ram1234598766-dotcom/MySQL-Editor/releases/download/windows-preview-39057661925/MySQLEditor-Folder.zip). These assets were produced by the successful [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39057661925) for the linked source commit above. The preview is unsigned; this packaging result is not a publisher signature or a substitute for physical-monitor visual QA.
 
 ### About Windows warnings
 
@@ -385,7 +391,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 - Query-history redaction is heuristic and cannot guarantee detection of every secret or sensitive literal.
 - Automatic TLS does not verify server identity; Disabled TLS does not encrypt the connection.
 - Windows Credential Manager behavior, high-DPI appearance, upgrade-in-place, and varied external-server TLS configurations still require real-environment testing.
-- Resizing a logo derivative cannot restore detail that is absent from a low-resolution source image.
+- Automated logo generation preserves the tracked source and cleans its alpha edges; final rendering still needs visual review on a physical Windows display at the intended DPI scales.
 - This is a pre-release Windows desktop client. Android, cloud synchronization, collaboration, and cross-device account features are not included.
 
 ## Contributing
