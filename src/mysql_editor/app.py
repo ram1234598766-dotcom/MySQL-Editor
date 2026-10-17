@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import QDialog, QProgressDialog
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from mysql_editor.core import redact_secrets
 from mysql_editor.database import DatabaseWorker
@@ -25,6 +25,8 @@ def main() -> int:
     app.setApplicationName("MySQL Editor")
     app.setOrganizationName("MySQL Editor")
     app.setStyle("Fusion")
+    # Keep chrome typography consistent without overriding SQL editor font preferences.
+    app.setFont(QFont("Segoe UI", 9))
     theme_preference = QSettings().value("ui/theme", "dark", type=str)
     app.setStyleSheet(stylesheet_for_theme(theme_preference))
     for base in (Path(__file__).resolve().parents[2], Path(getattr(sys, "_MEIPASS", "."))):

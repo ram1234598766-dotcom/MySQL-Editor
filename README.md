@@ -219,7 +219,7 @@ Shortcuts can depend on which widget has focus.
 
 The **Settings** menu groups working preferences by purpose:
 
-- **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. Reduce motion disables optional transitions while leaving status feedback intact.
+- **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. SQL syntax highlighting, line-number gutter, active-line shading, and bracket matching follow the selected palette. Reduce motion disables optional transitions while leaving status feedback intact.
 - **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
 - **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
 - **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.

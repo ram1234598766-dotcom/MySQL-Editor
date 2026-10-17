@@ -28,7 +28,7 @@ from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
-from mysql_editor.ui.theme import normalize_theme, stylesheet_for_theme
+from mysql_editor.ui.theme import normalize_theme, resolve_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
     cell_detail_text, column_headers_tsv, column_width_samples, result_filter_message,
     result_picker_label, result_summary_message, rows_tsv, selected_cells_tsv,
@@ -656,10 +656,23 @@ class MainWindow(QMainWindow):
     def _set_theme(self, value: str):
         """Apply an appearance preference without rebuilding or losing the workspace."""
         theme = normalize_theme(value)
+        resolved_theme = resolve_theme(theme)
         self._settings.setValue("ui/theme", theme)
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(stylesheet_for_theme(theme))
+            app.setStyleSheet(stylesheet_for_theme(resolved_theme))
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                # QApplication stylesheet changes can repolish fonts; restore the explicit
+                # SQL editor preferences so appearance switches never reset readability.
+                font = editor.font()
+                font.setPointSize(self._editor_font_size)
+                editor.setFont(font)
+                editor.setTabStopDistance(
+                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
+                )
+                editor.set_editor_theme(resolved_theme)
         label = {"system": "System", "light": "Light", "dark": "Dark"}[theme]
         self.status.setText(
             f"Appearance changed to {label}. Editor contents and workspace state were preserved."
@@ -886,6 +899,7 @@ class MainWindow(QMainWindow):
 
     def new_query_tab(self, text: str = "", path: str | None = None):
         editor = SqlEditor()
+        editor.set_editor_theme(resolve_theme(self._settings.value("ui/theme", "dark", type=str)))
         self._bind_editor_connection_context(editor, self._current_connection_context())
         editor.set_completion_context(
             databases=self._schema_databases,
