@@ -65,7 +65,7 @@ The next planned quality phase is documented in **[UPGRADE_ROADMAP.md](UPGRADE_R
 
 The intended visual direction is a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and short transitions that never block work. The plan proposes motion tokens and explicit checks for keyboard focus, interrupted animations, high-DPI layouts, and result-grid performance.
 
-**Roadmap status:** implementation is in progress. Shared dark-theme tokens, Reduce Motion controls, the inline Find/Replace bar, and live line/column/selection status are implemented with regression coverage; broader theme switching, completion refinements, connection/result UX, accessibility, and release verification remain roadmap work. Automated checks do not replace Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
+**Roadmap status:** implementation is in progress. Shared dark-theme tokens, Reduce Motion controls, the inline Find/Replace bar, and live line/column/selection status are implemented with regression coverage; semantic completion refinements, deeper accessibility, and release verification remain roadmap work. Automated checks do not replace Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
@@ -218,7 +218,7 @@ Shortcuts can depend on which widget has focus.
 
 The **Settings** menu groups working preferences by purpose:
 
-- **Appearance:** Reduce motion immediately disables optional transitions while leaving status feedback intact.
+- **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. Reduce motion disables optional transitions while leaving status feedback intact.
 - **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
 - **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
 - **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.
