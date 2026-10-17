@@ -1481,6 +1481,8 @@ class MainWindow(QMainWindow):
         expected_action, context = pending
         if expected_action != action:
             return
+        if result.get("connection_lost"):
+            self._mark_connection_lost(str(result.get("error", "") or ""))
         outcome = None
         if action == "query":
             if "transaction_open" in result:
@@ -2272,10 +2274,46 @@ class MainWindow(QMainWindow):
                 "The password was not written to a file.\n\n" + redact_secrets(str(exc)),
             )
 
+    def _set_connection_badge_state(self, state: str) -> None:
+        self.connection_badge.setProperty("connectionState", state)
+        style = self.connection_badge.style()
+        style.unpolish(self.connection_badge)
+        style.polish(self.connection_badge)
+        self.connection_badge.update()
+
+    def _mark_connection_lost(self, error_message: str = "") -> None:
+        """Show a lost database session without discarding query buffers or target details."""
+        host = str(self.config.get("host", "MySQL") or "MySQL")
+        profile_name = str(self.profile.get("name", "Connection") or "Connection")
+        schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
+        hint = "MySQL session lost. Reconnect before running more SQL."
+        detail = redact_secrets(str(error_message or "")).strip()
+        details = f"{hint}" + (f" Details: {detail}" if detail else "")
+        self.connection_badge.setText(f"●  {profile_name} · {host} · Connection lost")
+        self.connection_badge.setToolTip(details)
+        self.connection_badge.setAccessibleName("MySQL connection lost")
+        self.connection_badge.setAccessibleDescription(details)
+        self._set_connection_badge_state("lost")
+        self.connection_details.setText(
+            f"{self.config.get('username', '')}@{host}:{self.config.get('port', 3306)} · {schema} · Lost"
+        )
+        self.connection_details.setToolTip(details)
+        self.connection_details.setAccessibleName("Lost MySQL connection details")
+        self.connection_details.setAccessibleDescription(details)
+        self._transaction_open = False
+        if hasattr(self, "commit_button"):
+            self.commit_button.setEnabled(False)
+        if hasattr(self, "rollback_button"):
+            self.rollback_button.setEnabled(False)
+        self.status.setText(hint)
+
     def _update_connection_status(self):
         host = self.config.get("host", "MySQL")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
-        self.connection_badge.setText(f"●  {host} · Connected")
+        profile_name = str(self.profile.get("name", "Connection") or "Connection")
+        self.connection_badge.setText(f"●  {profile_name} · {host} · Connected")
+        self.connection_badge.setAccessibleName("Active MySQL connection status")
+        self._set_connection_badge_state("connected")
         details = (
             f"{host}:{self.config.get('port', 3306)} · {self.config.get('username', '')} · "
             f"Database: {schema} · Server: {self.connect_result.get('server_version', 'MySQL')} · "

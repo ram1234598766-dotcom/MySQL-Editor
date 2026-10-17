@@ -36,6 +36,26 @@ def safe_db_error(error: BaseException) -> str:
         message = message[:1600] + "…"
     return message or "The database operation failed. Check the connection and server logs."
 
+def is_connection_lost(error: BaseException) -> bool:
+    """Recognize errors that mean the active MySQL session can no longer be used."""
+    try:
+        error_number = int(getattr(error, "errno", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        error_number = 0
+    if error_number in {2006, 2013, 2055}:
+        return True
+    sqlstate = str(getattr(error, "sqlstate", "") or "").upper()
+    if sqlstate.startswith("08"):
+        return True
+    message = str(error).casefold()
+    return any(fragment in message for fragment in (
+        "server has gone away",
+        "lost connection to mysql server",
+        "connection is not available",
+        "connection not available",
+    ))
+
+
 def is_query_interrupted(error: BaseException) -> bool:
     """Recognize MySQL's explicit query-interrupted error, not generic failures/timeouts."""
     message = str(error).casefold()
@@ -138,7 +158,13 @@ class DatabaseWorker(QThread):
                         try:
                             result = self._dispatch(task["action"], task["payload"])
                         except Exception as exc:
-                            result = {"ok": False, "error": safe_db_error(exc)}
+                            connection_lost = is_connection_lost(exc)
+                            if connection_lost:
+                                self._close_connection()
+                            result = {
+                                "ok": False, "error": safe_db_error(exc),
+                                "connection_lost": connection_lost,
+                            }
                     self.completed.emit(task["id"], task["action"], result)
                 finally:
                     self._current_task_id = None
@@ -325,6 +351,7 @@ class DatabaseWorker(QThread):
             for statement_number, sql in enumerate(statements, start=1):
                 self._report_activity(f"Running statement {statement_number} of {len(statements)}…")
                 statement_start = time.perf_counter()
+                connection_lost = False
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)
@@ -383,21 +410,28 @@ class DatabaseWorker(QThread):
                         })
                 except Exception as exc:
                     interrupted = is_query_interrupted(exc)
+                    connection_lost = is_connection_lost(exc)
                     results.append({
                         "headers": ["Error"], "rows": [[safe_db_error(exc)]], "row_count": 1,
                         "kind": "error", "interrupted": interrupted,
                         "statement_index": statement_number, "statement_count": len(statements),
-                        "warning_count": 0,
+                        "warning_count": 0, "connection_lost": connection_lost,
                         "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                     })
                     return {
                         "ok": False, "results": results, "error": safe_db_error(exc),
-                        "interrupted": interrupted,
+                        "interrupted": interrupted, "connection_lost": connection_lost,
                         "duration_ms": int((time.perf_counter() - started) * 1000),
-                        "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+                        "transaction_open": False if connection_lost else bool(
+                            getattr(self._connection, "in_transaction", False)
+                        ),
                     }
                 finally:
-                    cursor.close()
+                    try:
+                        cursor.close()
+                    finally:
+                        if connection_lost:
+                            self._close_connection()
         finally:
             with self._lock:
                 self._active_query = False

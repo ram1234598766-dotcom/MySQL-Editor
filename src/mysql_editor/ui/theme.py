@@ -40,6 +40,7 @@ QLabel#pageTitle { font-size: 23px; font-weight: 700; }
 QLabel#panelTitle { font-size: 13px; font-weight: 650; }
 QLabel#sectionLabel { color: #aabbd2; font-size: 10px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
+QLabel#connectionBadge[connectionState="lost"] { color: #F07886; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
 QWidget#statusStrip { background: #121a27; border-top: 1px solid #354760; }
 QLabel#statusBar { background: transparent; color: #c0ccdc; border: none; padding: 7px 13px; }
 QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: 10px; }
@@ -119,6 +120,7 @@ _LIGHT_COLOR_MAP = {
     "#d3e1f5": "#344256", "#111e2f": "#F6F8FB", "#405675": "#CBD5E1",
     "#9cb0cc": "#526174", "#47c8e1": "#087E8B", "#aabbd2": "#526174",
     "#3bd49b": "#126B50", "#142d2b": "#DFF5ED", "#426d62": "#ACD6C7",
+    "#3a1f26": "#FCE7E9", "#8f3541": "#FDA4AF",
     "#354760": "#D6DEE8", "#c0ccdc": "#526174", "#151f2e": "#F2F5F9",
     "#40516a": "#CFD8E3", "#080e17": "#FFFFFF", "#286cc7": "#225EA8",
     "#4a9bff": "#1F6FEB", "#101a29": "#F8FAFC", "#22334b": "#E4EBF3",

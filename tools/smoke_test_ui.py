@@ -218,6 +218,21 @@ def main():
         assert editor._mysql_editor_connection_context == original_context
         assert first._current_connection_context()["profile_id"] == "qa-reporting"
 
+        # A worker disconnect must surface a distinct, accessible connection-lost state.
+        lost_job = "lost-connection-smoke"
+        first._schema_request_id = lost_job
+        first._jobs[lost_job] = ("schema", {})
+        first._on_worker_completed(lost_job, "schema", {
+            "ok": False, "connection_lost": True,
+            "error": "Lost connection to MySQL server during query",
+        })
+        assert "Connection lost" in first.connection_badge.text()
+        assert first.connection_badge.property("connectionState") == "lost"
+        assert "Reconnect before running more SQL" in first.connection_badge.toolTip()
+        first._update_connection_status()
+        assert "Connected" in first.connection_badge.text()
+        assert first.connection_badge.property("connectionState") == "connected"
+
         # Expose the schema tree so Qt delivers the item expansion event in offscreen mode.
         first.inspector_tabs.setCurrentIndex(0)
         first.schema_tree.show()

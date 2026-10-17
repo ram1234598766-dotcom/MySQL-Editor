@@ -169,6 +169,7 @@ Commit and Rollback act on the active connection. Some MySQL statements, particu
 A multi-statement script can create several result entries. Use the result picker to switch among them. The grid displays column headers and rows along with row-count and duration information where available.
 
 - **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. CSV export preserves the original server-fetch order, not the grid's current sort order.
+- If the database session drops during a query, the connection badge changes to **Connection lost**, includes a reconnect hint, and the worker discards the dead session. Reconnect before sending more SQL; query tabs and buffers remain in place.
 - **Quick filter** searches visible row cells case-insensitively. Clear the filter to show all rows in the current preview.
 - **Copy selected cells** copies a tab-separated rectangular selection; tabs and newlines inside values are quoted so copied data stays parseable.
 - **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.

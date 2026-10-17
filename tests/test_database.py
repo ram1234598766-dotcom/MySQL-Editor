@@ -1,4 +1,6 @@
-from mysql_editor.database import DatabaseWorker, is_query_interrupted, safe_db_error
+from mysql_editor.database import (
+    DatabaseWorker, is_connection_lost, is_query_interrupted, safe_db_error,
+)
 
 
 def test_automatic_tls_does_not_require_an_explicit_certificate_file():
@@ -496,3 +498,80 @@ def test_csv_export_preserves_fetch_order_for_unsorted_rows(tmp_path):
         rows = list(csv.reader(handle))
     assert rows == [["name", "rank"], ["zeta", "30"], ["Alpha", "10"], ["beta", "20"]]
     spool_owner._spool.close()
+
+
+def test_connection_loss_classifier_recognizes_mysql_disconnects_only():
+    class MysqlError(Exception):
+        def __init__(self, message, errno=None, sqlstate=None):
+            super().__init__(message)
+            self.errno = errno
+            self.sqlstate = sqlstate
+
+    assert is_connection_lost(MysqlError("gone away", errno=2006))
+    assert is_connection_lost(MysqlError("lost while fetching", errno=2013))
+    assert is_connection_lost(MysqlError("connection reset", sqlstate="08S01"))
+    assert is_connection_lost(MysqlError("Lost connection to MySQL server during query"))
+    assert not is_connection_lost(MysqlError("Access denied", errno=1045))
+    assert not is_connection_lost(MysqlError("Syntax error", errno=1064, sqlstate="42000"))
+
+
+def test_query_disconnect_closes_the_dead_session_and_marks_result(tmp_path):
+    import sqlite3
+
+    class MysqlError(Exception):
+        errno = 2013
+        sqlstate = "HY000"
+
+    class Cursor:
+        with_rows = False
+        rowcount = -1
+        warning_count = 0
+        description = None
+
+        def execute(self, _sql):
+            raise MysqlError("Lost connection to MySQL server during query")
+
+        def close(self):
+            self.closed = True
+
+    class Connection:
+        in_transaction = True
+
+        def __init__(self):
+            self.closed = False
+            self.cursor_object = Cursor()
+
+        def cursor(self):
+            return self.cursor_object
+
+        def close(self):
+            self.closed = True
+
+    worker = DatabaseWorker()
+    connection = Connection()
+    worker._connection = connection
+    worker._report_activity = lambda _message: None
+    worker._spool = sqlite3.connect(":memory:")
+    worker._spool.executescript("""
+        CREATE TABLE result_meta (
+            result_id TEXT PRIMARY KEY, headers TEXT NOT NULL,
+            statement TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE result_rows (
+            result_id TEXT NOT NULL, row_idx INTEGER NOT NULL,
+            values_json TEXT NOT NULL, PRIMARY KEY(result_id,row_idx)
+        );
+    """)
+    try:
+        result = worker._execute_script("SELECT 1;")
+        assert result["ok"] is False
+        assert result["connection_lost"] is True
+        assert result["transaction_open"] is False
+        assert result["results"][0]["connection_lost"] is True
+        assert worker._connection is None
+        assert connection.closed is True
+        assert connection.cursor_object.closed is True
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
