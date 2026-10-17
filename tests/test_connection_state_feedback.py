@@ -87,7 +87,7 @@ def test_disconnect_is_queued_and_preserves_local_query_work(tmp_path):
         assert window.connect_button.isEnabled()
         assert not window.run_button.isEnabled()
         assert not window.schema_refresh_button.isEnabled()
-        assert "connect to a server" in window.schema_state_label.text().lower()
+        assert "connect to a mysql server" in window.schema_state_label.text().lower()
 
         before = len(worker.submissions)
         assert window._dispatch("query", {"sql": "SELECT 2;"}) is None
