@@ -138,6 +138,7 @@ class MainWindow(QMainWindow):
         self.config = config
         self.connect_result = connect_result
         self._jobs: dict[str, tuple[str, dict]] = {}
+        self._deferred_export_notifications: list[dict] = []
         self._schema_request_id: str | None = None
         self._schema_completion_words: set[str] = set()
         self._schema_databases: set[str] = set()
@@ -1342,6 +1343,8 @@ class MainWindow(QMainWindow):
                     "success" if outcome == "complete" else "error" if outcome else ("success" if result.get("ok") else "error"),
                 )
                 self.refresh_history()
+            if action == "query":
+                self._flush_deferred_export_notifications()
             return
         if action == "schema":
             if job_id != self._schema_request_id:
@@ -1364,14 +1367,16 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
             return
         if action == "export_csv":
-            if result.get("ok"):
-                self.status.setText(f"CSV exported · {result.get('row_count', 0):,} row(s)")
-                QMessageBox.information(
-                    self, "CSV export complete",
-                    f"Exported {result.get('row_count', 0):,} row(s) to:\n{result['path']}",
-                )
-            else:
-                QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
+            if self._query_running:
+                # A newer query owns the status area. Defer modal feedback until it completes.
+                self._deferred_export_notifications.append({
+                    "ok": bool(result.get("ok")),
+                    "row_count": result.get("row_count", 0),
+                    "path": str(result.get("path") or ""),
+                    "error": str(result.get("error") or "Export failed."),
+                })
+                return
+            self._show_export_notification(result)
 
     def _apply_query_outcome(self, outcome: str | None, result: dict):
         error = str(result.get("error") or "Query failed.")
@@ -1411,7 +1416,30 @@ class MainWindow(QMainWindow):
             self._set_result_message(error)
             self.status.setText(error)
 
+    def _show_export_notification(self, result: dict) -> None:
+        if result.get("ok"):
+            row_count = int(result.get("row_count", 0) or 0)
+            path = str(result.get("path") or "the chosen destination")
+            self.status.setText(f"CSV exported · {row_count:,} row(s)")
+            QMessageBox.information(
+                self, "CSV export complete",
+                f"Exported {row_count:,} row(s) to:\n{path}",
+            )
+        else:
+            QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
+
+    def _flush_deferred_export_notifications(self) -> None:
+        """Show export feedback only after the newer query has completed."""
+        if self._query_running:
+            return
+        pending, self._deferred_export_notifications = self._deferred_export_notifications, []
+        for notification in pending:
+            self._show_export_notification(notification)
+
     def _on_activity(self, message: str):
+        if self._query_running and message.startswith(("Exporting CSV", "Exported ")):
+            # Progress from an earlier export must not overwrite the queued/running query.
+            return
         self.status.setText(message)
         if message.startswith("Running "):
             self.query_meta.setText("Running…")

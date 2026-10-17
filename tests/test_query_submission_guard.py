@@ -142,3 +142,53 @@ def test_transaction_controls_disable_during_query_and_restore_after_completion(
         window._query_running = False
         window.close()
         repository.close()
+
+
+def test_export_progress_and_completion_do_not_overwrite_a_newer_query(
+    tmp_path, monkeypatch
+):
+    window, repository, _worker = _make_window(tmp_path)
+    dialogs = []
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "information",
+        lambda _parent, title, message: dialogs.append((title, message)),
+    )
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: dialogs.append((title, message)),
+    )
+    try:
+        export_job = window._dispatch(
+            "export_csv", {"result_id": "result-1", "path": "results.csv"}
+        )
+        query_job = window._dispatch("query", {"sql": "SELECT 1;"})
+        assert window._query_running is True
+        assert window.status.text() == "Query queued…"
+
+        window._on_activity("Exporting CSV rows…")
+        window._on_activity("Exported 10 CSV row(s) so far…")
+        assert window.status.text() == "Query queued…"
+
+        window._on_worker_completed(
+            export_job,
+            "export_csv",
+            {"ok": True, "row_count": 10, "path": "results.csv"},
+        )
+        assert dialogs == []
+        assert window.status.text() == "Query queued…"
+        assert len(window._deferred_export_notifications) == 1
+
+        window._on_worker_completed(
+            query_job, "query", {"ok": True, "results": [], "duration_ms": 1}
+        )
+        assert window._query_running is False
+        assert len(dialogs) == 1
+        assert dialogs[0][0] == "CSV export complete"
+        assert window.status.text().startswith("Statement complete")
+        assert window._deferred_export_notifications == []
+    finally:
+        window._query_running = False
+        window.close()
+        repository.close()
