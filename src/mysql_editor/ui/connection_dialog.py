@@ -259,7 +259,7 @@ class ConnectionDialog(QDialog):
             self.exit_button,
             self.connect_button,
         )
-        for first, second in zip(controls, controls[1:]):
+        for first, second in zip(controls, controls[1:], strict=False):
             QWidget.setTabOrder(first, second)
 
     @staticmethod

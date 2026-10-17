@@ -173,7 +173,7 @@ def test_connection_dialog_controls_have_accessible_names_and_visual_keyboard_or
     first.setFocus(Qt.FocusReason.OtherFocusReason)
     app.processEvents()
     assert app.focusWidget() is first
-    for current, expected in zip(visible_controls, visible_controls[1:]):
+    for current, expected in zip(visible_controls, visible_controls[1:], strict=False):
         QTest.keyClick(current, Qt.Key.Key_Tab)
         app.processEvents()
         assert app.focusWidget() is expected, (
