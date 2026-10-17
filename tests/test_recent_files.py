@@ -1,8 +1,6 @@
 """Regression tests for path-only recent SQL file tracking."""
 from pathlib import Path
 
-import pytest
-
 from mysql_editor.recent_files import (
     MAX_RECENT_SQL_FILES,
     normalize_recent_sql_paths,

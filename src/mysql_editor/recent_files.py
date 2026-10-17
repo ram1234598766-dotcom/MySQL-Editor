@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 MAX_RECENT_SQL_FILES = 10
 
