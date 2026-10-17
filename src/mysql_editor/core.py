@@ -261,7 +261,7 @@ def _transaction_effect(statement: str) -> str:
     if command in {"CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "GRANT", "REVOKE"}:
         return "clear"
     if command == "SET" and re.match(
-        r"SET\\s+(?:SESSION\\s+)?AUTOCOMMIT\\s*=\\s*(?:1|ON)\\b",
+        r"SET\s+(?:SESSION\s+)?AUTOCOMMIT\s*=\s*(?:1|ON)\b",
         normalized,
     ):
         return "clear"
