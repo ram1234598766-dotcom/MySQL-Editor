@@ -160,6 +160,9 @@ def test_schema_switch_is_blocked_while_query_is_running(tmp_path):
         assert window.config["default_schema"] == "old_schema"
         assert window.connect_result["database"] == "old_schema"
     finally:
+        # MainWindow asks for cancellation when closing with a query marked active.
+        # This test simulates only the guard; teardown must remain non-interactive.
+        window._query_running = False
         window.close()
         repository.close()
 
