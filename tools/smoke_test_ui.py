@@ -100,7 +100,21 @@ def main():
         )
         insert_button.click()
         assert "information_schema.tables" in first._current_editor().toPlainText()
+        first._current_editor().setPlainText("SELECT alpha, alpha;")
         first._current_editor().document().setModified(False)
+        first.show_find_replace(replace=True)
+        first.find_bar.search_input.setText("alpha")
+        first._refresh_find_count()
+        first.find_bar.replace_input.setText("beta")
+        assert first.find_bar.match_count.text() == "2 matches"
+        assert first._navigate_find_match()
+        assert first._current_editor().textCursor().selectedText() == "alpha"
+        first._replace_one()
+        assert first._current_editor().toPlainText() == "SELECT beta, alpha;"
+        first._replace_all()
+        assert first._current_editor().toPlainText() == "SELECT beta, beta;"
+        assert first.find_bar.match_count.text() == "No matches"
+        first.find_bar.close_bar()
         first.inspector_tabs.setCurrentIndex(1)
         tour._skip()
         assert first_repo.get_setting("guided_tour_completed") == "true"

@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap
+from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
     QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
@@ -20,6 +20,7 @@ from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalReposi
 from mysql_editor.ui.animations import fade_in
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
+from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
@@ -119,6 +120,10 @@ class MainWindow(QMainWindow):
         self._last_sql = ""
         self._last_saved_paths: dict[int, str] = {}
         self._settings = QSettings()
+        self._find_count_timer = QTimer(self)
+        self._find_count_timer.setSingleShot(True)
+        self._find_count_timer.setInterval(80)
+        self._find_count_timer.timeout.connect(self._refresh_find_count)
         try:
             font_size = int(self._settings.value("ui/editorFontSize", 10))
         except (TypeError, ValueError):
@@ -261,6 +266,17 @@ class MainWindow(QMainWindow):
         heading_row.addWidget(self.run_selection_button)
         heading_row.addWidget(self.run_button)
         center_layout.addLayout(heading_row)
+
+        self.find_bar = FindReplaceBar(self.center)
+        self.find_bar.search_changed.connect(self._queue_find_count_refresh)
+        self.find_bar.find_next_requested.connect(lambda: self._navigate_find_match())
+        self.find_bar.find_previous_requested.connect(
+            lambda: self._navigate_find_match(backward=True)
+        )
+        self.find_bar.replace_requested.connect(self._replace_one)
+        self.find_bar.replace_all_requested.connect(self._replace_all)
+        self.find_bar.closed.connect(self._close_find_bar)
+        center_layout.addWidget(self.find_bar)
 
         self.editors = QTabWidget()
         self.editors.setObjectName("editorTabs")
@@ -575,6 +591,7 @@ class MainWindow(QMainWindow):
         self.editors.setCurrentIndex(index)
         editor.document().setModified(False)
         editor.textChanged.connect(lambda ed=editor: self._update_tab_title(ed))
+        editor.textChanged.connect(self._queue_find_count_refresh)
         editor.setFocus()
 
     def _update_tab_title(self, editor):
@@ -604,6 +621,7 @@ class MainWindow(QMainWindow):
 
     def _update_editor_actions(self, *_):
         self._set_result_controls()
+        self._refresh_find_count()
 
     def _set_result_controls(self):
         self.export_button.setEnabled(bool(self._current_result_id))
@@ -1048,35 +1066,136 @@ class MainWindow(QMainWindow):
         self._write_current_editor(str(path))
 
     def find_text(self):
-        editor = self._current_editor()
-        if not editor:
-            return
-        phrase, ok = QInputDialog.getText(self, "Find", "Search text:")
-        if ok and phrase and not editor.find(phrase):
-            cursor = editor.textCursor()
-            cursor.movePosition(cursor.MoveOperation.Start)
-            editor.setTextCursor(cursor)
-            if not editor.find(phrase):
-                self.status.setText("No matching text found.")
+        self._show_find_replace(replace=False)
 
     def replace_text(self):
+        self._show_find_replace(replace=True)
+
+    def _show_find_replace(self, replace: bool):
         editor = self._current_editor()
-        if not editor:
+        selected_text = ""
+        if editor is not None and editor.textCursor().hasSelection():
+            selected_text = editor.textCursor().selectedText().replace("\u2029", "\n")
+        self.find_bar.show_bar(replace=replace, seed_text=selected_text or None)
+        self._refresh_find_count()
+
+    def _close_find_bar(self):
+        editor = self._current_editor()
+        if editor is not None:
+            editor.setFocus()
+
+    def show_find_replace(self, replace: bool = False):
+        """Open Find/Replace from a menu, shortcut, or host-level UI action."""
+        self._show_find_replace(replace=replace)
+
+    def _queue_find_count_refresh(self, *_):
+        if hasattr(self, "_find_count_timer"):
+            self._find_count_timer.start()
+
+    def _refresh_find_count(self):
+        if not hasattr(self, "find_bar"):
             return
-        old, ok = QInputDialog.getText(self, "Replace", "Find:")
-        if not ok or not old:
+        editor = self._current_editor()
+        if editor is None:
+            self.find_bar.set_match_count(0)
             return
-        new, ok = QInputDialog.getText(self, "Replace", "Replace with:")
-        if not ok:
-            return
-        source = editor.toPlainText()
-        count = source.count(old)
-        if count:
-            editor.setPlainText(source.replace(old, new))
-            editor.document().setModified(True)
-            self.status.setText(f"Replaced {count} occurrence(s).")
+        total = count_matches(
+            editor.toPlainText(),
+            self.find_bar.search_text(),
+            self.find_bar.match_case(),
+        )
+        self.find_bar.set_match_count(total)
+
+    def _navigate_find_match(self, backward: bool = False) -> bool:
+        editor = self._current_editor()
+        if editor is None:
+            return False
+        needle = self.find_bar.search_text()
+        if not needle:
+            self.status.setText("Enter text to find in the current SQL query.")
+            self._refresh_find_count()
+            return False
+
+        flags = QTextDocument.FindFlag(0)
+        if self.find_bar.match_case():
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
+        if backward:
+            flags |= QTextDocument.FindFlag.FindBackward
+
+        found = editor.find(needle, flags)
+        if not found:
+            cursor = editor.textCursor()
+            cursor.movePosition(
+                QTextCursor.MoveOperation.End if backward else QTextCursor.MoveOperation.Start
+            )
+            editor.setTextCursor(cursor)
+            found = editor.find(needle, flags)
+
+        if found:
+            editor.setFocus()
+            self.status.setText("Match selected.")
         else:
-            self.status.setText("No matching text found.")
+            self.status.setText(f"No matches for {needle!r}.")
+        self._refresh_find_count()
+        return bool(found)
+
+    def _replace_one(self):
+        editor = self._current_editor()
+        needle = self.find_bar.search_text()
+        if editor is None or not needle:
+            return
+
+        cursor = editor.textCursor()
+        selected = cursor.selectedText().replace("\u2029", "\n")
+        case_sensitive = self.find_bar.match_case()
+        matched = selected == needle if case_sensitive else selected.casefold() == needle.casefold()
+        if not matched:
+            if not self._navigate_find_match():
+                return
+            cursor = editor.textCursor()
+            selected = cursor.selectedText().replace("\u2029", "\n")
+            matched = selected == needle if case_sensitive else selected.casefold() == needle.casefold()
+            if not matched:
+                return
+
+        cursor.insertText(self.find_bar.replacement_text())
+        editor.setTextCursor(cursor)
+        self.status.setText("Replaced one occurrence.")
+        self._refresh_find_count()
+        self._navigate_find_match()
+
+    def _replace_all(self):
+        editor = self._current_editor()
+        needle = self.find_bar.search_text()
+        if editor is None or not needle:
+            return
+
+        flags = QTextDocument.FindFlag(0)
+        if self.find_bar.match_case():
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
+        replacement = self.find_bar.replacement_text()
+        original_cursor = editor.textCursor()
+        cursor = QTextCursor(editor.document())
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.beginEditBlock()
+        replaced = 0
+        try:
+            while True:
+                match = editor.document().find(needle, cursor, flags)
+                if match.isNull():
+                    break
+                match.insertText(replacement)
+                cursor = match
+                replaced += 1
+        finally:
+            cursor.endEditBlock()
+
+        editor.setTextCursor(original_cursor)
+        self._refresh_find_count()
+        self.status.setText(
+            f"Replaced {replaced:,} occurrence(s)." if replaced
+            else f"No matches for {needle!r}."
+        )
 
     def clear_history(self):
         self.repository.set_history_enabled(False)

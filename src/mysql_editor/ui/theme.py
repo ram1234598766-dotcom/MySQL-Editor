@@ -64,6 +64,10 @@ QToolButton#navButton:checked { background: #132b42; color: #62dff0; border: 1px
 QToolButton#navButton:focus { border: 1px solid #5bbdff; }
 QLabel#navHint { color: #7187a3; font-size: 9px; font-weight: 650; letter-spacing: 1px; padding-right: 5px; }
 QLabel#connectionDetails { color: #a7bad1; font-size: 10px; }
+QWidget#findReplaceBar { background: #101927; border: 1px solid #26364B; border-radius: 7px; }
+QWidget#findReplaceBar QLabel#findMatchCount { color: #A6B6CB; font-size: 10px; padding: 4px; }
+QWidget#findReplaceBar QPushButton { padding: 5px 9px; min-height: 16px; }
+QWidget#findReplaceBar QCheckBox { color: #A6B6CB; spacing: 6px; }
 QSplitter::handle { background: #263e58; width: 5px; height: 5px; }
 QSplitter::handle:hover { background: #4a9bff; }
 QLabel#tourEyebrow { color: #58dcec; font-weight: 700; font-size: 10px; letter-spacing: 1.2px; }

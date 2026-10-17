@@ -35,7 +35,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Multiple SQL tabs with unsaved-change markers and a confirmation before discarding modified tabs.
 - SQL syntax highlighting, line numbers, current-line highlighting, indentation, and a monospace font.
 - MySQL keyword/function completion plus suitable identifiers learned from the current schema and result-column names. Use **Ctrl+Space** to open completion on demand.
-- SQL formatting, find and replace, SQL-file open/save, and saved query snippets.
+- SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
 - Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, and editor font size are stored locally.
 - Animated five-step guided tour that can insert a sample SELECT into the editor.
 
@@ -63,7 +63,7 @@ The next planned quality phase is documented in **[UPGRADE_ROADMAP.md](UPGRADE_R
 
 The intended visual direction is a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and short transitions that never block work. The plan proposes motion tokens and explicit checks for keyboard focus, interrupted animations, high-DPI layouts, and result-grid performance.
 
-**Roadmap status:** planned—not a claim that all visual redesign, theme switching, animation utilities, or future editor features already exist. Implement each phase through focused pull requests with regression tests and visual verification. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
+**Roadmap status:** implementation is in progress. Shared dark-theme tokens, Reduce Motion controls, and the inline Find/Replace bar are implemented with regression coverage; broader theme switching, completion refinements, connection/result UX, accessibility, and release verification remain roadmap work. Automated checks do not replace Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
@@ -197,8 +197,8 @@ Shortcuts can depend on which widget has focus.
 | **Ctrl+O** | Open SQL file |
 | **Ctrl+S** | Save current SQL file |
 | **Ctrl+Shift+S** | Save SQL snippet |
-| **Ctrl+F** | Find text |
-| **Ctrl+H** | Replace text |
+| **Ctrl+F** | Open inline Find bar; Enter navigates matches |
+| **Ctrl+H** | Open inline Find/Replace bar; Replace and Replace all are available |
 | **Ctrl+Enter** | Run current statement |
 | **Ctrl+Shift+Enter** | Run selected SQL |
 | **Ctrl+Alt+Enter** | Run complete script |
@@ -316,6 +316,7 @@ A successful automated run is evidence only for the checks that actually ran. It
 | **src/mysql_editor/database.py** | Background MySQL worker, query execution, schema inspection, result spool, cancellation request, CSV export |
 | **src/mysql_editor/storage.py** | Local SQLite metadata, history/preferences, Argon2id verifier, Credential Manager adapter |
 | **src/mysql_editor/ui/editor.py** | SQL editor, highlighting, line numbers, indentation, and completion |
+| **src/mysql_editor/ui/find_replace_bar.py** | Inline literal Find/Replace controls and match counting |
 | **src/mysql_editor/ui/connection_dialog.py** | Connection form, profile selection, test/connect actions, first-run lock setup |
 | **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, result grid, schema/history/snippets, transaction controls and export |
 | **src/mysql_editor/ui/tutorial.py** | Animated guided tour |
