@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
-from mysql_editor.ui.animations import fade_in
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
@@ -706,7 +705,6 @@ class MainWindow(QMainWindow):
             self._refresh_saved_queries()
 
         if destination in {"Schema explorer", "Query history", "Saved queries"}:
-            fade_in(self.inspector_tabs, self._settings)
 
     def _insert_tour_example(self):
         editor = self._current_editor()
