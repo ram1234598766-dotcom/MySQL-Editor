@@ -307,10 +307,10 @@ A local package build is not proof that the artifact is ready for distribution. 
 
 ## Testing and CI
 
-Install the development dependencies:
+Install the development and packaging dependencies:
 
 ~~~powershell
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]" pyinstaller pip-licenses
 ~~~
 
 Run the repository checks:
@@ -320,9 +320,12 @@ python -m ruff check src tests tools
 python -m compileall -q src tests tools
 python -m pytest
 python -m pip_audit -r requirements.txt
+python -m pip_audit
 ~~~
 
-GitHub Actions runs lint, compilation, and unit tests across Python 3.12–3.14. A separate integration job starts a disposable MySQL 8.4 service and exercises query execution, schema inspection, transaction rollback, and CSV export. Windows CI checks Qt imports/UI behavior, builds the application-folder and portable packages plus installer, launches the packaged apps, and exercises silent install/uninstall behavior. Consult the Actions page for the exact commit you intend to use.
+The requirements-file audit checks the declared runtime dependency constraints. The no-argument audit checks the installed environment, including development, test, and packaging tools. GitHub Actions runs both. The release CycloneDX SBOM intentionally describes runtime dependencies only; packaging tools are covered by the separate installed-environment audit.
+
+GitHub Actions runs lint, compilation, and unit tests across Python 3.12–3.14. A separate integration job starts a disposable MySQL 8.4 service and exercises query execution, schema inspection, transaction rollback, and CSV export. Windows CI checks Qt imports/UI behavior, builds the application-folder and portable packages plus installer, audits the installed packaging environment, launches the packaged apps, and exercises silent install/uninstall behavior. Consult the Actions page for the exact commit you intend to use.
 
 A successful automated run is evidence only for the checks that actually ran. It does not prove all display scales, upgrade paths, credential-vault states, external server configurations, or end-user PCs were manually tested.
 
