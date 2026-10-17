@@ -157,6 +157,7 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
     window = MainWindow(
         worker, repository, object(), profile, config, {"database": "app_db"}
     )
+    original_stylesheet = _APP.styleSheet()
     try:
         window.resize(1280, 820)
         window.show()
@@ -226,4 +227,5 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
     finally:
         window.close()
         repository.close()
+        _APP.setStyleSheet(original_stylesheet)
         _APP.processEvents()
