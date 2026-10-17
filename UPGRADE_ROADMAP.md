@@ -596,3 +596,8 @@ Completion now keeps table/view and column metadata associated with each schema 
 ### Completion edge-case hardening — 17 October 2026
 
 Completion metadata now fails closed when optional maps are malformed, and a string passed as an identifier collection is treated as one identifier rather than a sequence of characters. Regression tests cover escaped and doubled quotes, multiline line/block comments, empty and large multi-statement buffers, colliding aliases, unsafe or incorrectly shaped schema metadata, and verbatim multiline SQL paste. These tests keep completion scoped without mutating SQL while suggestions are calculated.
+
+
+### SQL editor preference completion — 17 October 2026
+
+The Settings > Editor tab-width preference now affects actual Tab insertion and automatic indentation after common SQL block openers, not only the visual tab stop. Added persisted toggles for line-number visibility and current-line highlighting; changes apply to open tabs and new tabs. Bracket-matching feedback remains available when current-line highlighting is disabled. Regression checks cover invalid stored boolean values, all supported indentation widths, and the independent gutter/highlight controls. Automated Windows packaging does not replace manual high-DPI visual review on a physical PC.
