@@ -19,6 +19,24 @@ from mysql_editor.core import redact_secrets, safe_identifier, split_sql_stateme
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
 
+CSV_NULL_TOKEN = r"\N"  # noqa: S105 - CSV marker, not a credential.
+
+
+def _csv_export_value(value: Any) -> Any:
+    """Encode SQL NULL separately from empty text, escaping literal backslash-led text.
+
+    The dedicated NULL token is unquoted. Empty strings remain empty fields.
+    To avoid colliding with the NULL token, any text value that starts
+    with a backslash is escaped by adding one extra leading backslash.
+    """
+    if value is None:
+        return CSV_NULL_TOKEN
+    if isinstance(value, str) and value.startswith("\\"):
+        return "\\" + value
+    return value
+
+
+
 def json_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -517,7 +535,7 @@ class DatabaseWorker(QThread):
                     "SELECT values_json FROM result_rows WHERE result_id=? ORDER BY row_idx", (result_id,)
                 )
                 for (value_json,) in cursor:
-                    writer.writerow(json.loads(value_json))
+                    writer.writerow([_csv_export_value(value) for value in json.loads(value_json)])
                     count += 1
                     if count >= next_progress_row:
                         report_activity(f"Exported {count:,} CSV row(s)…")

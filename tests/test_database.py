@@ -87,7 +87,7 @@ def test_csv_export_replaces_existing_file_only_after_success(tmp_path):
     assert result["row_count"] == 2
     with destination.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
-    assert rows == [["name", "value"], ["alpha", ""], ["βeta", "42"]]
+    assert rows == [["name", "value"], ["alpha", r"\N"], ["βeta", "42"]]
     assert list(tmp_path.glob(".report.csv.*.tmp")) == []
     spool_owner._spool.close()
 
@@ -495,4 +495,41 @@ def test_csv_export_preserves_fetch_order_for_unsorted_rows(tmp_path):
     with destination.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
     assert rows == [["name", "rank"], ["zeta", "30"], ["Alpha", "10"], ["beta", "20"]]
+    spool_owner._spool.close()
+
+
+
+def test_csv_export_distinguishes_sql_null_empty_text_and_literal_null_token(tmp_path):
+    import csv
+    import json
+
+    spool_owner = _csv_spool()
+    result_id = "null-vs-empty"
+    spool_owner._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["kind", "value"]), "SELECT", 4),
+    )
+    spool_owner._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [
+            (result_id, 0, json.dumps(["sql-null", None])),
+            (result_id, 1, json.dumps(["empty-text", ""])),
+            (result_id, 2, json.dumps(["literal-null-token", r"\N"])),
+            (result_id, 3, json.dumps(["path-text", r"\reports\monthly.csv"])),
+        ],
+    )
+    destination = tmp_path / "null-vs-empty.csv"
+
+    result = DatabaseWorker._export_csv(spool_owner, result_id, str(destination))
+
+    assert result["ok"] is True
+    with destination.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    assert rows == [
+        ["kind", "value"],
+        ["sql-null", r"\N"],
+        ["empty-text", ""],
+        ["literal-null-token", r"\\N"],
+        ["path-text", r"\\reports\monthly.csv"],
+    ]
     spool_owner._spool.close()
