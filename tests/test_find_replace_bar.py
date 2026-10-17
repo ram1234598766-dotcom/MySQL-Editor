@@ -44,7 +44,7 @@ def test_find_bar_exposes_accessible_actions_and_emits_search_changes():
     bar.replace_all_requested.connect(lambda: replace_all_requests.append(True))
 
     bar.search_input.setText("table")
-    bar.match_case.setChecked(True)
+    bar.match_case_checkbox.setChecked(True)
     bar.next_button.click()
     bar.replace_all_button.click()
 

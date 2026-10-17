@@ -56,9 +56,9 @@ class FindReplaceBar(QWidget):
         self.next_button.setObjectName("findNextButton")
         self.next_button.setAccessibleName("Find next")
         self.next_button.setToolTip("Find next match. Press Enter in the search field.")
-        self.match_case = QCheckBox("Match case", self)
-        self.match_case.setObjectName("matchCaseCheckBox")
-        self.match_case.setAccessibleName("Match case")
+        self.match_case_checkbox = QCheckBox("Match case", self)
+        self.match_case_checkbox.setObjectName("matchCaseCheckBox")
+        self.match_case_checkbox.setAccessibleName("Match case")
         self.close_button = QPushButton("×", self)
         self.close_button.setAccessibleName("Close Find/Replace")
         self.close_button.setToolTip("Close Find/Replace and return focus to the SQL editor.")
@@ -94,7 +94,7 @@ class FindReplaceBar(QWidget):
         self.hide()
 
         self.search_input.textChanged.connect(self._emit_search_changed)
-        self.match_case.toggled.connect(self._emit_search_changed)
+        self.match_case_checkbox.toggled.connect(self._emit_search_changed)
         self.search_input.returnPressed.connect(self.find_next_requested.emit)
         self.replace_input.returnPressed.connect(self.replace_requested.emit)
         self.previous_button.clicked.connect(self.find_previous_requested.emit)
@@ -130,7 +130,7 @@ class FindReplaceBar(QWidget):
         return self.replace_input.text()
 
     def match_case(self) -> bool:
-        return self.match_case.isChecked()
+        return self.match_case_checkbox.isChecked()
 
     def set_match_count(self, count: int):
         count = max(0, int(count))
