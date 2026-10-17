@@ -150,3 +150,28 @@ def test_result_picker_label_handles_malformed_metadata_safely():
         "kind": "error", "row_count": "invalid", "statement_index": 4,
         "statement_count": 2, "warning_count": -2,
     }, 0) == "Statement 4 · Result 1 · Error · 0 row(s)"
+
+
+def test_column_width_samples_are_bounded_and_keep_full_result_data_untouched():
+    from mysql_editor.ui.result_tools import column_width_samples
+
+    long_value = "x" * 600
+    headers = ["id", "note"]
+    rows = [[index, long_value] for index in range(100)]
+    samples = column_width_samples(headers, rows, max_sample_rows=12, max_chars=40)
+
+    assert samples[0] == ["id"] + [str(index) for index in range(12)]
+    assert len(samples[1]) == 13
+    assert samples[1][0] == "note"
+    assert samples[1][1] == "x" * 40 + "…"
+    assert len(rows) == 100
+    assert rows[0][1] == long_value
+
+
+def test_column_width_samples_clamp_extreme_settings_and_handle_empty_columns():
+    from mysql_editor.ui.result_tools import column_width_samples
+
+    assert column_width_samples(["a"], [[index] for index in range(100)], max_sample_rows=10000)[0][0:2] == ["a", "0"]
+    assert len(column_width_samples(["a"], [[index] for index in range(100)], max_sample_rows=10000)[0]) == 65
+    assert column_width_samples([], [[1, 2]], max_sample_rows=10) == []
+    assert column_width_samples(["a"], [[1]], max_sample_rows="invalid") == [["a", "1"]]

@@ -30,8 +30,8 @@ from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.theme import normalize_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
-    cell_detail_text, column_headers_tsv, result_filter_message, result_picker_label,
-    result_summary_message, rows_tsv, selected_cells_tsv,
+    cell_detail_text, column_headers_tsv, column_width_samples, result_filter_message,
+    result_picker_label, result_summary_message, rows_tsv, selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
@@ -1438,6 +1438,14 @@ class MainWindow(QMainWindow):
         elif chosen == refresh_action:
             self._use_schema(schema)
 
+    def _size_result_columns(self, headers: list[str], rows: list[list]) -> None:
+        """Size columns from a bounded sample; long values remain available in cell details."""
+        samples = column_width_samples(headers, rows, max_sample_rows=32, max_chars=160)
+        metrics = self.result_grid.fontMetrics()
+        for column, values in enumerate(samples):
+            measured = max((metrics.horizontalAdvance(value) for value in values), default=0)
+            self.result_grid.setColumnWidth(column, min(480, max(88, measured + 28)))
+
     def _select_result(self, index: int, total_duration: int | None = None):
         if index < 0 or index >= len(self._query_results):
             self._current_result_id = None
@@ -1447,8 +1455,10 @@ class MainWindow(QMainWindow):
         item = self._query_results[index]
         self.result_filter.clear()
         self._set_result_completion_words(item.get("headers", []))
+        headers = item.get("headers", [])
         rows = item.get("rows", [])
-        self.result_model.update(item.get("headers", []), rows)
+        self.result_model.update(headers, rows)
+        self._size_result_columns(headers, rows)
         self._current_result_id = item.get("result_id")
         try:
             total = max(len(rows), int(item.get("row_count", len(rows)) or 0))

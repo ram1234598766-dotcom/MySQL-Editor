@@ -73,6 +73,39 @@ def result_filter_message(
     )
 
 
+def column_width_samples(
+    headers: Sequence[Any],
+    rows: Sequence[Sequence[Any]],
+    *,
+    max_sample_rows: int = 32,
+    max_chars: int = 160,
+) -> list[list[str]]:
+    """Prepare bounded display samples for column sizing without scanning whole results.
+
+    Sampling is capped even if callers pass very large values. Long cell contents are
+    truncated for measuring; the full value remains in the result model and cell details.
+    """
+    try:
+        sample_limit = min(64, max(0, int(max_sample_rows)))
+    except (TypeError, ValueError, OverflowError):
+        sample_limit = 32
+    try:
+        char_limit = min(512, max(16, int(max_chars)))
+    except (TypeError, ValueError, OverflowError):
+        char_limit = 160
+
+    def display_sample(value: Any) -> str:
+        text = "(NULL)" if value is None else str(value)
+        return text if len(text) <= char_limit else text[:char_limit] + "…"
+
+    samples = [[display_sample(header)] for header in headers]
+    for row in list(rows[:sample_limit]):
+        for column in range(len(samples)):
+            if column < len(row):
+                samples[column].append(display_sample(row[column]))
+    return samples
+
+
 def result_picker_label(item: dict, result_index: int) -> str:
     """Label a result with its script statement and warning count when available."""
     try:
