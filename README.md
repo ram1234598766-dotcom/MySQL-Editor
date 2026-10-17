@@ -51,7 +51,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 
 ### Results and release engineering
 - Switch between results returned by different statements in a script.
-- Sortable result grid, numeric-aware sorting, NULL display, and copy-selected-cells support.
+- Sortable result grid, numeric-aware sorting, NULL display, and clipboard actions for selected cells/rows, headers, and the full untruncated cell value.
 - Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
 - Up to 2,000 rows per result are shown in the grid. Fetched result rows are also stored in a temporary local SQLite spool for CSV export.
 - Atomic CSV export to help preserve an existing destination when a write fails.

@@ -564,3 +564,8 @@ System/Light/Dark theme selection is now implemented in the desktop Settings men
 ### SQL completion refinement — 17 October 2026
 
 Contextual column completion now remains scoped to the relevant schema tables after commas in common `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Regression coverage verifies that unrelated table columns are not introduced and SQL text is not changed while suggestions are computed. This remains a bounded heuristic rather than a complete MySQL grammar parser.
+
+
+### Full-value clipboard action — 17 October 2026
+
+The cell-details dialog now offers an explicit **Copy full value** action for long or wide cells. The clipboard receives the original cell text rather than the dialog's explanatory NULL label; SQL NULL uses the app's established `NULL` clipboard marker and empty text remains an empty clipboard string. Tests cover the dialog action and scalar formatting.

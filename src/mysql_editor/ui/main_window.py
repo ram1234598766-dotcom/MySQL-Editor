@@ -30,8 +30,9 @@ from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.theme import normalize_theme, resolve_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
-    cell_detail_text, column_headers_tsv, column_width_samples, result_filter_message,
-    result_picker_label, result_summary_message, rows_tsv, selected_cells_tsv,
+    cell_copy_text, cell_detail_text, column_headers_tsv, column_width_samples,
+    result_filter_message, result_picker_label, result_summary_message, rows_tsv,
+    selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import (
     normalize_editor_font_family, normalize_result_row_height, normalize_tab_width,
@@ -1859,10 +1860,34 @@ class MainWindow(QMainWindow):
         detail.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         detail.setAccessibleName(f"Full value for column {column_name}")
         layout.addWidget(detail, 1)
+        action_row = QHBoxLayout()
+        copy_button = QPushButton("Copy full value", dialog)
+        copy_button.setObjectName("copyCellValueButton")
+        copy_button.setAccessibleName(f"Copy full cell value from column {column_name}")
+        copy_button.setAccessibleDescription(
+            "Copies the underlying cell value. SQL NULL is copied as NULL; empty text stays blank."
+        )
+        copy_button.clicked.connect(
+            lambda _checked=False, selected_value=value, selected_column=column_name:
+                self._copy_cell_detail_value(selected_value, selected_column)
+        )
+        action_row.addWidget(copy_button)
+        action_row.addStretch(1)
         close_button = QPushButton("Close", dialog)
         close_button.clicked.connect(dialog.accept)
-        layout.addWidget(close_button)
+        action_row.addWidget(close_button)
+        layout.addLayout(action_row)
         dialog.exec()
+
+    def _copy_cell_detail_value(self, value, column_name: str) -> None:
+        """Copy a full detail value without conflating SQL NULL and empty text."""
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.clipboard().setText(cell_copy_text(value))
+        self.status.setText(
+            f"Copied full cell value from {column_name}. "
+            "SQL NULL is copied as NULL; empty text stays blank."
+        )
 
     def _set_history_enabled(self, enabled: bool):
         self.repository.set_history_enabled(enabled)
