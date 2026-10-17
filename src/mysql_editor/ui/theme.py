@@ -18,6 +18,38 @@ TOKENS = {
     "status_danger": "#F07886",
 }
 
+
+# Palette for the SQL editor's own painting/highlighting. Qt stylesheets do not
+# style QSyntaxHighlighter formats or the custom line-number gutter.
+EDITOR_PALETTES = {
+    "dark": {
+        "keyword": "#37D6E7",
+        "string": "#F6C56F",
+        "number": "#BD9CFF",
+        "function": "#69B7FF",
+        "comment": "#7F93AD",
+        "gutter_background": "#0A111B",
+        "gutter_text": "#71839D",
+        "gutter_active_text": "#D2DEED",
+        "current_line_background": "#122136",
+        "bracket_background": "#2B526D",
+        "bracket_foreground": "#F5FAFF",
+    },
+    "light": {
+        "keyword": "#087E8B",
+        "string": "#946200",
+        "number": "#6D28D9",
+        "function": "#1F6FEB",
+        "comment": "#526174",
+        "gutter_background": "#F1F5F9",
+        "gutter_text": "#526174",
+        "gutter_active_text": "#243246",
+        "current_line_background": "#EFF6FC",
+        "bracket_background": "#D6E6F9",
+        "bracket_foreground": "#243246",
+    },
+}
+
 # Component rules remain one stylesheet so semantic palette changes are applied
 # consistently. Values are resolved here because Qt stylesheets do not support CSS vars.
 STYLESHEET = r'''
