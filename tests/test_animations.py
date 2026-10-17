@@ -41,6 +41,7 @@ def test_fade_in_restores_widget_graphics_state_after_completion():
     animation = getattr(widget, "_mysql_editor_fade_animation", None)
     assert animation is not None
     assert widget.graphicsEffect() is not None
+    assert getattr(widget, "_mysql_editor_fade_effect", None) is widget.graphicsEffect()
     assert widget.graphicsEffect().parent() is None
 
     QTest.qWait(35)
@@ -48,6 +49,7 @@ def test_fade_in_restores_widget_graphics_state_after_completion():
 
     assert widget.graphicsEffect() is None
     assert getattr(widget, "_mysql_editor_fade_animation", None) is None
+    assert getattr(widget, "_mysql_editor_fade_effect", None) is None
     widget.close()
 
 
@@ -65,6 +67,7 @@ def test_reduce_motion_interrupts_and_cleans_an_active_fade():
     assert animation.state() == QAbstractAnimation.State.Stopped
     assert widget.graphicsEffect() is None
     assert getattr(widget, "_mysql_editor_fade_animation", None) is None
+    assert getattr(widget, "_mysql_editor_fade_effect", None) is None
     widget.close()
 
 

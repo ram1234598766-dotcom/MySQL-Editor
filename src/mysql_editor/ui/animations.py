@@ -22,6 +22,7 @@ def fade_in(widget: QWidget, settings: QSettings | None = None, duration_ms: int
         previous.deleteLater()
         widget._mysql_editor_fade_animation = None
         widget.setGraphicsEffect(None)
+        widget._mysql_editor_fade_effect = None
 
     if reduce_motion_enabled(settings) or not widget.isVisible():
         return
@@ -29,6 +30,8 @@ def fade_in(widget: QWidget, settings: QSettings | None = None, duration_ms: int
     effect = QGraphicsOpacityEffect()
     effect.setOpacity(0.72)
     widget.setGraphicsEffect(effect)
+    # QWidget takes C++ ownership of the effect; retain its Python wrapper while active.
+    widget._mysql_editor_fade_effect = effect
     animation = QPropertyAnimation(effect, b"opacity", widget)
     animation.setDuration(max(0, min(int(duration_ms), STANDARD_DURATION_MS)))
     animation.setStartValue(0.72)
@@ -39,6 +42,7 @@ def fade_in(widget: QWidget, settings: QSettings | None = None, duration_ms: int
         if getattr(widget, "_mysql_editor_fade_animation", None) is animation:
             widget.setGraphicsEffect(None)
             widget._mysql_editor_fade_animation = None
+            widget._mysql_editor_fade_effect = None
         animation.deleteLater()
 
     animation.finished.connect(cleanup)
