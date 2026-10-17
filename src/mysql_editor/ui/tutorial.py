@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from mysql_editor.ui.animations import TOUR_DURATION_MS, reduce_motion_enabled
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -159,12 +160,18 @@ class ProductTourDialog(QDialog):
         footer.addWidget(self.next_button)
         root.addLayout(footer)
 
-        self._opacity = QGraphicsOpacityEffect(self.pages)
-        self._opacity.setOpacity(1.0)
-        self.pages.setGraphicsEffect(self._opacity)
-        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
-        self._fade.setDuration(210)
-        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # Honour the same persisted Reduce Motion setting as workspace transitions.
+        # In immediate mode, don't attach an opacity effect at all.
+        self._reduce_motion = reduce_motion_enabled()
+        self._opacity: QGraphicsOpacityEffect | None = None
+        self._fade: QPropertyAnimation | None = None
+        if not self._reduce_motion:
+            self._opacity = QGraphicsOpacityEffect(self.pages)
+            self._opacity.setOpacity(1.0)
+            self.pages.setGraphicsEffect(self._opacity)
+            self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
+            self._fade.setDuration(TOUR_DURATION_MS)
+            self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._render_page()
 
     def _render_page(self):
@@ -188,11 +195,21 @@ class ProductTourDialog(QDialog):
         self._index = index
         self.pages.setCurrentIndex(index)
         self._render_page()
+        if self._fade is None or self._opacity is None:
+            return
         self._fade.stop()
         self._opacity.setOpacity(0.22)
         self._fade.setStartValue(0.22)
         self._fade.setEndValue(1.0)
         self._fade.start()
+
+    def done(self, result: int) -> None:
+        """Stop any active transition when the dialog closes or finishes."""
+        if self._fade is not None:
+            self._fade.stop()
+        if self._opacity is not None:
+            self._opacity.setOpacity(1.0)
+        super().done(result)
 
     def _next(self):
         if self._index == len(self._pages) - 1:
