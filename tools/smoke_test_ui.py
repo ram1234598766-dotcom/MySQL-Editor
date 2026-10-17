@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.main_window import MainWindow
@@ -179,6 +179,40 @@ def main():
             assert first._write_current_editor(str(blocker / "cannot-save.sql")) is False
         assert editor.document().isModified()
         editor.document().setModified(False)
+
+        # Switching profile must not silently reroute a query tab created on another server.
+        original_context = dict(editor._mysql_editor_connection_context)
+        next_profile = {
+            "id": "qa-reporting", "name": "Reporting", "host": "db-other.example",
+            "port": 3307, "username": "reporter",
+        }
+        next_config = {
+            "host": "db-other.example", "port": 3307, "username": "reporter",
+            "default_schema": "analytics", "tls_mode": "Automatic TLS", "save_profile": False,
+        }
+        next_result = {"server_version": "8.4", "database": "analytics"}
+        with patch.object(first, "_persist_profile"), patch.object(first, "refresh_schema"):
+            first._switch_connection(next_profile, next_config, next_result)
+        assert editor._mysql_editor_connection_context == original_context
+        assert first._current_connection_context()["profile_id"] == "qa-reporting"
+
+        submitted = []
+        first._dispatch = lambda action, payload, context=None: submitted.append((action, payload, context))
+        with patch(
+            "mysql_editor.ui.main_window.QMessageBox.warning",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ):
+            first._execute_sql("SELECT 42;")
+        assert submitted == []
+        assert "not submitted" in first.status.text()
+
+        with patch(
+            "mysql_editor.ui.main_window.QMessageBox.warning",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            first._execute_sql("SELECT 42;")
+        assert submitted and submitted[-1][0] == "query"
+        assert editor._mysql_editor_connection_context["profile_id"] == "qa-reporting"
 
         first.close()
         first_repo.close()
