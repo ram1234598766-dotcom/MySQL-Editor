@@ -130,3 +130,69 @@ def test_only_explicit_mysql_interruption_errors_are_classified_as_interrupted()
     assert is_query_interrupted(MysqlException("statement interrupted", sqlstate="70100"))
     assert not is_query_interrupted(MysqlException("Lost connection to MySQL server", 2013))
     assert not is_query_interrupted(RuntimeError("Execution timed out"))
+
+def test_result_cache_startup_failure_completes_every_queued_task_and_cleans_up(monkeypatch):
+    import sqlite3
+
+    import mysql_editor.database as database_module
+
+    worker = DatabaseWorker()
+    events = []
+    spool_dir = worker._spool_dir
+
+    def fail_connect(*_args, **_kwargs):
+        raise sqlite3.OperationalError("disk is full")
+
+    monkeypatch.setattr(database_module.sqlite3, "connect", fail_connect)
+    worker.completed.connect(lambda job_id, action, result: events.append((job_id, action, result)))
+    worker.submit("query", {"sql": "SELECT 1"}, task_id="query-pending")
+    worker.submit("schema", {"schema": "analytics"}, task_id="schema-pending")
+    worker.shutdown()
+
+    worker.run()
+
+    assert [(job_id, action) for job_id, action, _result in events] == [
+        ("query-pending", "query"),
+        ("schema-pending", "schema"),
+    ]
+    assert all(result["ok"] is False for _job_id, _action, result in events)
+    assert all("local result cache" in result["error"].lower() for _job_id, _action, result in events)
+    assert all("disk is full" in result["error"] for _job_id, _action, result in events)
+    assert worker._spool is None
+    assert not spool_dir.exists()
+
+
+def test_partial_result_cache_initialization_closes_spool_and_fails_tasks(monkeypatch):
+    import sqlite3
+
+    import mysql_editor.database as database_module
+
+    class BrokenSpool:
+        closed = False
+
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("journal mode unavailable")
+
+        def close(self):
+            self.closed = True
+
+    spool = BrokenSpool()
+    worker = DatabaseWorker()
+    events = []
+    spool_dir = worker._spool_dir
+
+    monkeypatch.setattr(database_module.sqlite3, "connect", lambda *_args, **_kwargs: spool)
+    worker.completed.connect(lambda job_id, action, result: events.append((job_id, action, result)))
+    worker.submit("export_csv", {"result_id": "r", "path": "ignored.csv"}, task_id="partial-init")
+    worker.shutdown()
+
+    worker.run()
+
+    assert len(events) == 1
+    assert events[0][0:2] == ("partial-init", "export_csv")
+    assert events[0][2]["ok"] is False
+    assert "journal mode unavailable" in events[0][2]["error"]
+    assert spool.closed is True
+    assert worker._spool is None
+    assert not spool_dir.exists()
+

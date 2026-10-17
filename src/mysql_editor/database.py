@@ -67,7 +67,8 @@ class DatabaseWorker(QThread):
         self._tasks.put({"id": task_id, "action": action, "payload": payload or {}})
         return task_id
 
-    def run(self) -> None:
+    def _initialize_result_spool(self) -> None:
+        """Create the worker-owned on-disk result cache."""
         self._spool = sqlite3.connect(self._spool_path)
         self._spool.execute("PRAGMA journal_mode=WAL")
         self._spool.executescript("""
@@ -81,25 +82,50 @@ class DatabaseWorker(QThread):
             );
         """)
         self._spool.commit()
-        while True:
-            task = self._tasks.get()
-            if task is None:
-                break
-            try:
-                result = self._dispatch(task["action"], task["payload"])
-            except Exception as exc:
-                result = {"ok": False, "error": safe_db_error(exc)}
-            self.completed.emit(task["id"], task["action"], result)
+
+    def _cleanup_resources(self) -> None:
+        """Release connections and remove the temporary result cache after any exit path."""
         self._close_connection()
-        if self._spool:
-            self._spool.close()
-            self._spool = None
+        if self._spool is not None:
+            spool, self._spool = self._spool, None
+            try:
+                spool.close()
+            except Exception:
+                pass
         try:
             for item in self._spool_dir.iterdir():
+                if item.is_dir():
+                    continue
                 item.unlink(missing_ok=True)
             self._spool_dir.rmdir()
         except OSError:
+            # A cache cleanup problem must not mask the original worker result.
             pass
+
+    def run(self) -> None:
+        startup_error: str | None = None
+        try:
+            self._initialize_result_spool()
+        except Exception as exc:
+            startup_error = (
+                "Could not initialize the local result cache: " + safe_db_error(exc)
+            )
+
+        try:
+            while True:
+                task = self._tasks.get()
+                if task is None:
+                    break
+                if startup_error is not None:
+                    result = {"ok": False, "error": startup_error}
+                else:
+                    try:
+                        result = self._dispatch(task["action"], task["payload"])
+                    except Exception as exc:
+                        result = {"ok": False, "error": safe_db_error(exc)}
+                self.completed.emit(task["id"], task["action"], result)
+        finally:
+            self._cleanup_resources()
 
     def shutdown(self) -> None:
         self._tasks.put(None)
