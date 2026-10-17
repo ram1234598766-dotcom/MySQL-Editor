@@ -99,6 +99,44 @@ def test_context_completion_suggests_columns_for_table_alias_without_mutating_sq
     assert editor.toPlainText() == source
 
 
+def test_unqualified_column_completion_scopes_to_current_statement_tables():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders", "inventory"},
+        columns_by_table={
+            "customers": ["customer_id", "display_name"],
+            "orders": ["order_id", "order_total"],
+            "inventory": ["sku", "warehouse_code"],
+        },
+        extra_words={"result_label"},
+    )
+
+    source = (
+        "SELECT disp FROM customers c "
+        "JOIN orders o ON c.customer_id = o.order_id WHERE "
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("disp") + len("disp"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+    assert {"display_name", "customer_id", "order_id", "order_total"} <= candidates
+    assert "warehouse_code" not in candidates
+    assert "sku" not in candidates
+    assert "result_label" in candidates
+    assert editor.toPlainText() == source
+
+    next_source = "SELECT ware FROM inventory i WHERE "
+    editor.setPlainText(next_source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len(next_source))
+    editor.setTextCursor(cursor)
+    candidates = set(editor._context_completion_words())
+    assert "warehouse_code" in candidates
+    assert "customer_id" not in candidates
+
+
 def test_context_completion_falls_back_when_schema_metadata_is_unavailable():
     editor = SqlEditor()
     editor.setPlainText("SELECT cou")
