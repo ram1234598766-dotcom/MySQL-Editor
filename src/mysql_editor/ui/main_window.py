@@ -21,6 +21,9 @@ from mysql_editor.core import classify_statement, current_statement, format_sql,
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.animations import fade_in
+from mysql_editor.ui.connection_context import (
+    build_connection_context, connection_context_label, connection_context_matches,
+)
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
@@ -807,8 +810,63 @@ class MainWindow(QMainWindow):
         editor = self.editors.currentWidget()
         return editor if isinstance(editor, SqlEditor) else None
 
+    def _current_connection_context(self) -> dict[str, str | int]:
+        return build_connection_context(self.profile, self.config, self.connect_result)
+
+    def _bind_editor_connection_context(self, editor: SqlEditor, context: dict[str, str | int]) -> None:
+        editor._mysql_editor_connection_context = dict(context)
+        base = getattr(editor, "_mysql_editor_base_accessible_description", None)
+        if base is None:
+            base = editor.accessibleDescription()
+            editor._mysql_editor_base_accessible_description = base
+        target = connection_context_label(context)
+        detail = (
+            f"Query target: {target}. If the active connection profile changes, "
+            "SQL execution requires explicit confirmation."
+        )
+        editor.setAccessibleDescription(f"{base}\n{detail}".strip())
+        editor.setToolTip(detail)
+        index = self.editors.indexOf(editor) if hasattr(self, "editors") else -1
+        if index >= 0:
+            self.editors.setTabToolTip(index, detail)
+
+    def _confirm_query_target(self, editor: SqlEditor) -> bool:
+        active = self._current_connection_context()
+        bound = getattr(editor, "_mysql_editor_connection_context", None)
+        if not bound:
+            self._bind_editor_connection_context(editor, active)
+            return True
+        if connection_context_matches(bound, active):
+            if bound != active:
+                self._bind_editor_connection_context(editor, active)
+            return True
+
+        previous_label = connection_context_label(bound)
+        active_label = connection_context_label(active)
+        answer = QMessageBox.warning(
+            self,
+            "Confirm query target",
+            "This query tab was opened under a different connection profile.\n\n"
+            f"Tab target:\n{previous_label}\n\n"
+            f"Active target:\n{active_label}\n\n"
+            "Executing now will send this SQL to the active target. Continue and associate "
+            "this query tab with that target?",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.status.setText(
+                "SQL not submitted · query target differs from the active connection. "
+                "Confirm the target before retrying."
+            )
+            return False
+        self._bind_editor_connection_context(editor, active)
+        self.status.setText(f"Query target confirmed · {active_label}")
+        return True
+
     def new_query_tab(self, text: str = "", path: str | None = None):
         editor = SqlEditor()
+        self._bind_editor_connection_context(editor, self._current_connection_context())
         editor.set_completion_context(
             databases=self._schema_databases,
             tables=self._schema_tables,
@@ -825,6 +883,8 @@ class MainWindow(QMainWindow):
         if text:
             editor.setPlainText(text)
         index = self.editors.addTab(editor, Path(path).name if path else "untitled.sql")
+        editor._mysql_editor_connection_context = dict(editor._mysql_editor_connection_context)
+        self.editors.setTabToolTip(index, editor.toolTip())
         self._last_saved_paths[id(editor)] = path or ""
         self.editors.setCurrentIndex(index)
         editor.document().setModified(False)
@@ -989,6 +1049,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "No SQL selected", "Place the cursor inside a statement or select SQL to run."
             )
+            return
+        editor = self._current_editor()
+        if editor is None or not self._confirm_query_target(editor):
             return
         if len(statements) == 1:
             risk, explanation = classify_statement(statements[0])
@@ -1959,6 +2022,15 @@ class MainWindow(QMainWindow):
         self.connect_result = connect_result
         self._update_connection_status()
         self.refresh_schema()
+        editor = self._current_editor()
+        if editor is not None:
+            bound = getattr(editor, "_mysql_editor_connection_context", None)
+            active = self._current_connection_context()
+            if bound and not connection_context_matches(bound, active):
+                self.status.setText(
+                    "Active MySQL connection changed. This query tab keeps its prior target; "
+                    "confirm before executing SQL on the new connection."
+                )
 
     def _persist_profile(self, profile: dict, config: dict):
         if not config.get("save_profile"):
