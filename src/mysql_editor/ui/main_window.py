@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QApplication, QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -25,6 +25,7 @@ from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
+from mysql_editor.ui.theme import normalize_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
     cell_detail_text, column_headers_tsv, result_filter_message, result_summary_message,
     rows_tsv, selected_cells_tsv,
@@ -503,6 +504,21 @@ class MainWindow(QMainWindow):
         settings_menu = self.menuBar().addMenu("&Settings")
 
         appearance_menu = settings_menu.addMenu("Appearance")
+        theme_menu = appearance_menu.addMenu("Theme")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        current_theme = normalize_theme(self._settings.value("ui/theme", "dark", type=str))
+        for label, value in (("System", "system"), ("Light", "light"), ("Dark", "dark")):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(value == current_theme)
+            action.triggered.connect(
+                lambda checked, selected=value: self._set_theme(selected) if checked else None
+            )
+            theme_group.addAction(action)
+            theme_menu.addAction(action)
+        appearance_menu.addSeparator()
+
         reduce_motion = QAction("Reduce motion", self)
         reduce_motion.setCheckable(True)
         reduce_motion.setChecked(self._settings.value("ui/reduceMotion", False, type=bool))
@@ -557,6 +573,18 @@ class MainWindow(QMainWindow):
         self._action(help_menu, "Guided tour", "F1", self._show_product_tour)
         self._action(help_menu, "SQL safety information", "", self.show_safety_info)
         self._action(help_menu, "About MySQL Editor", "", self.show_about)
+
+    def _set_theme(self, value: str):
+        """Apply an appearance preference without rebuilding or losing the workspace."""
+        theme = normalize_theme(value)
+        self._settings.setValue("ui/theme", theme)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(stylesheet_for_theme(theme))
+        label = {"system": "System", "light": "Light", "dark": "Dark"}[theme]
+        self.status.setText(
+            f"Appearance changed to {label}. Editor contents and workspace state were preserved."
+        )
 
     def _action(self, menu: QMenu, text: str, shortcut: str, callback):
         action = QAction(text, self)
