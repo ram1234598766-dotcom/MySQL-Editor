@@ -12,7 +12,7 @@ STANDARD_DURATION_MS = 180
 TOUR_DURATION_MS = 260
 MAX_DURATION_MS = 280
 _COLOR_ANIMATION_ATTR = "_mysql_editor_color_animation"
-_COLOR_ANIMATION_TOKEN_ATTR = "_mysql_editor_color_animation_token"
+_COLOR_ANIMATION_GENERATION_ATTR = "_mysql_editor_color_animation_token"
 
 
 def reduce_motion_enabled(settings: QSettings | None = None) -> bool:
@@ -30,7 +30,7 @@ def stop_color_animation(widget: QWidget) -> None:
     """Stop the widget's active color transition without leaving stale state behind."""
     animation = getattr(widget, _COLOR_ANIMATION_ATTR, None)
     setattr(widget, _COLOR_ANIMATION_ATTR, None)
-    setattr(widget, _COLOR_ANIMATION_TOKEN_ATTR, None)
+    setattr(widget, _COLOR_ANIMATION_GENERATION_ATTR, None)
     if animation is None:
         return
     animation.stop()
@@ -64,21 +64,21 @@ def animate_label_color(
 
     def update_color(value, target_ref=widget_ref, active_token=token) -> None:
         target = target_ref()
-        if target is not None and getattr(target, _COLOR_ANIMATION_TOKEN_ATTR, None) is active_token:
+        if target is not None and getattr(target, _COLOR_ANIMATION_GENERATION_ATTR, None) is active_token:
             _set_label_color(target, value)
 
     def finish(target_ref=widget_ref, active_token=token) -> None:
         target = target_ref()
-        if target is None or getattr(target, _COLOR_ANIMATION_TOKEN_ATTR, None) is not active_token:
+        if target is None or getattr(target, _COLOR_ANIMATION_GENERATION_ATTR, None) is not active_token:
             return
         _set_label_color(target, end)
         setattr(target, _COLOR_ANIMATION_ATTR, None)
-        setattr(target, _COLOR_ANIMATION_TOKEN_ATTR, None)
+        setattr(target, _COLOR_ANIMATION_GENERATION_ATTR, None)
 
     animation.valueChanged.connect(update_color)
     animation.finished.connect(finish)
     animation.finished.connect(animation.deleteLater)
     setattr(widget, _COLOR_ANIMATION_ATTR, animation)
-    setattr(widget, _COLOR_ANIMATION_TOKEN_ATTR, token)
+    setattr(widget, _COLOR_ANIMATION_GENERATION_ATTR, token)
     animation.start()
     return animation
