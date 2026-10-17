@@ -19,6 +19,48 @@ TOKENS = {
 }
 
 
+# UI geometry and type are named here so component styles can evolve together.
+# Values are CSS pixels unless a key explicitly uses point units.
+SPACING = {
+    "scale": (4, 8, 12, 16, 20, 24, 32),
+    "menu_vertical": 4,
+    "menu_horizontal": 10,
+    "button_vertical": 8,
+    "button_horizontal": 11,
+    "tab_vertical": 9,
+    "tab_horizontal": 12,
+    "tree_item_padding": 4,
+    "input_padding": 7,
+}
+
+TYPOGRAPHY = {
+    "app_family": "Segoe UI",
+    "app_size_pt": 9,
+    "caption_px": 10,
+    "body_px": 12,
+    "panel_title_px": 13,
+    "brand_title_px": 17,
+    "dialog_title_px": 20,
+    "page_title_px": 23,
+}
+
+RADII = {
+    "compact": 4,
+    "control": 6,
+    "button": 7,
+    "panel": 9,
+    "feature": 10,
+}
+
+COMPONENT_SIZES = {
+    "button_min_height": 19,
+    "tree_item_min_height": 25,
+    "checkbox_indicator": 16,
+    "splitter_handle": 5,
+    "scrollbar": 12,
+}
+
+
 # Palette for the SQL editor's own painting/highlighting. Qt stylesheets do not
 # style QSyntaxHighlighter formats or the custom line-number gutter.
 EDITOR_PALETTES = {
@@ -54,23 +96,23 @@ EDITOR_PALETTES = {
 # consistently. Values are resolved here because Qt stylesheets do not support CSS vars.
 # App-level typography is set through QApplication. Avoid universal font rules here so
 # each SQL editor can keep its configured monospace family and point size.
-STYLESHEET = r'''
+_STYLESHEET_TEMPLATE = r'''
 QMainWindow, QDialog, QWidget { background: #0B111B; color: #e8f1ff; }
-QMenuBar { background: #121a27; color: #e8f1ff; padding: 4px 10px; border-bottom: 1px solid #2c3a50; }
+QMenuBar { background: #121a27; color: #e8f1ff; padding: @SPACE_MENU_VERTICAL@px @SPACE_MENU_HORIZONTAL@px; border-bottom: 1px solid #2c3a50; }
 QMenuBar::item { padding: 6px 9px; border-radius: 5px; }
 QMenuBar::item:selected, QMenu { background: #172235; }
 QMenu { border: 1px solid #344761; padding: 5px; }
-QMenu::item { padding: 7px 25px 7px 12px; border-radius: 4px; }
+QMenu::item { padding: 7px 25px 7px 12px; border-radius: @RADIUS_COMPACT@px; }
 QMenu::item:selected { background: #2569cb; color: white; }
 QLabel { color: #e8f1ff; }
 QLabel#mutedText { color: #a9bad0; }
 QLabel#noticeText { color: #d3e1f5; background: #111e2f; border: 1px solid #405675; border-radius: 7px; padding: 9px; }
-QLabel#dialogTitle { font-size: 20px; font-weight: 650; }
-QLabel#brandTitle { font-size: 17px; font-weight: 700; }
+QLabel#dialogTitle { font-size: @TYPE_DIALOG_TITLE@px; font-weight: 650; }
+QLabel#brandTitle { font-size: @TYPE_BRAND_TITLE@px; font-weight: 700; }
 QLabel#brandSubtitle { color: #9cb0cc; font-size: 9px; font-weight: 650; letter-spacing: 1px; }
 QLabel#logoMark { color: #47c8e1; font-size: 28px; font-weight: 700; }
-QLabel#pageTitle { font-size: 23px; font-weight: 700; }
-QLabel#panelTitle { font-size: 13px; font-weight: 650; }
+QLabel#pageTitle { font-size: @TYPE_PAGE_TITLE@px; font-weight: 700; }
+QLabel#panelTitle { font-size: @TYPE_PANEL_TITLE@px; font-weight: 650; }
 QLabel#sectionLabel { color: #aabbd2; font-size: 10px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
 QLabel#connectionBadge[connectionState="lost"] { color: #F07886; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
@@ -81,14 +123,14 @@ QLabel#securityNotice, QFrame#securityCard { background: #151f2e; border: 1px so
 QFrame#separator { color: #40516a; max-height: 1px; }
 QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTreeWidget, QListWidget {
   background: #080e17; color: #e8f1ff; border: 1px solid #405675;
-  border-radius: 6px; padding: 7px; selection-background-color: #286cc7;
+  border-radius: @RADIUS_CONTROL@px; padding: @SPACE_INPUT_PADDING@px; selection-background-color: #286cc7;
   selection-color: white; min-height: 20px;
 }
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTreeWidget:focus, QListWidget:focus,
 QPushButton:focus, QToolButton:focus, QTableView:focus, QTabBar::tab:focus { border: 1px solid #4a9bff; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView { background: #101a29; color: #e8f1ff; selection-background-color: #2569cb; }
-QPushButton { background: #172235; color: #e8f1ff; border: 1px solid #405675; border-radius: 7px; padding: 8px 11px; min-height: 19px; }
+QPushButton { background: #172235; color: #e8f1ff; border: 1px solid #405675; border-radius: @RADIUS_BUTTON@px; padding: @SPACE_BUTTON_VERTICAL@px @SPACE_BUTTON_HORIZONTAL@px; min-height: @SIZE_BUTTON_MIN_HEIGHT@px; }
 QPushButton:hover { background: #22334b; border-color: #87a4ca; }
 QPushButton:pressed { background: #0b1422; }
 QPushButton:disabled { color: #8293a9; background: #121a26; border-color: #35465c; }
@@ -101,16 +143,16 @@ QToolButton#navButton:checked { background: #132b42; color: #62dff0; border: 1px
 QToolButton#navButton:focus { border: 1px solid #5bbdff; }
 QLabel#navHint { color: #7187a3; font-size: 9px; font-weight: 650; letter-spacing: 1px; padding-right: 5px; }
 QLabel#connectionDetails { color: #a7bad1; font-size: 10px; }
-QWidget#findReplaceBar { background: #101927; border: 1px solid #26364B; border-radius: 7px; }
+QWidget#findReplaceBar { background: #101927; border: 1px solid #26364B; border-radius: @RADIUS_BUTTON@px; }
 QWidget#findReplaceBar QLabel#findMatchCount { color: #A6B6CB; font-size: 10px; padding: 4px; }
 QWidget#findReplaceBar QPushButton { padding: 5px 9px; min-height: 16px; }
 QWidget#findReplaceBar QCheckBox { color: #A6B6CB; spacing: 6px; }
-QSplitter::handle { background: #263e58; width: 5px; height: 5px; }
+QSplitter::handle { background: #263e58; width: @SIZE_SPLITTER_HANDLE@px; height: @SIZE_SPLITTER_HANDLE@px; }
 QSplitter::handle:hover { background: #4a9bff; }
 QLabel#tourEyebrow { color: #58dcec; font-weight: 700; font-size: 10px; letter-spacing: 1.2px; }
 QLabel#tourStep { color: #91a9c4; font-weight: 700; font-size: 10px; }
 QLabel#tourTitle { color: #f0f6ff; font-size: 23px; font-weight: 700; }
-QFrame#tourCard { background: #111d2d; border: 1px solid #2d425b; border-radius: 10px; }
+QFrame#tourCard { background: #111d2d; border: 1px solid #2d425b; border-radius: @RADIUS_FEATURE@px; }
 QLabel#tourNumber { color: #5ddbec; font-size: 10px; font-weight: 750; }
 QLabel#tourCardTitle { color: #edf5ff; font-weight: 650; font-size: 12px; }
 QLabel#tourCardBody { color: #adc0d5; font-size: 11px; }
@@ -119,19 +161,19 @@ QLabel#tourProgress { padding: 0 2px; }
 QLabel#tourProgress[current="true"] { color: #58dcec; font-size: 14px; }
 QLabel#tourProgress[current="false"] { color: #7187a3; font-size: 12px; }
 QTabWidget::pane { background: #090f19; border: 1px solid #405675; border-radius: 7px; top: -1px; }
-QTabBar::tab { background: #172235; color: #b6c5d9; padding: 9px 12px; border: 1px solid #354760; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 3px; }
+QTabBar::tab { background: #172235; color: #b6c5d9; padding: @SPACE_TAB_VERTICAL@px @SPACE_TAB_HORIZONTAL@px; border: 1px solid #354760; border-top-left-radius: @RADIUS_CONTROL@px; border-top-right-radius: @RADIUS_CONTROL@px; margin-right: 3px; }
 QTabBar::tab:selected { background: #090f19; color: #e8f1ff; border-bottom-color: #090f19; }
 QTableView { background: #0b121d; alternate-background-color: #101b2a; color: #e8f1ff; gridline-color: #354760; border: 1px solid #405675; selection-background-color: #1d4f88; selection-color: white; }
 QHeaderView::section { background: #172235; color: #cad7e7; border: none; border-bottom: 1px solid #405675; padding: 8px; font-weight: 650; }
 QTreeWidget, QListWidget { border: none; }
-QTreeWidget::item, QListWidget::item { min-height: 25px; padding: 4px; }
+QTreeWidget::item, QListWidget::item { min-height: @SIZE_TREE_ITEM_MIN_HEIGHT@px; padding: @SPACE_TREE_ITEM_PADDING@px; }
 QTreeWidget::item:selected, QListWidget::item:selected { background: #205ca4; border-radius: 4px; }
-QScrollBar:vertical { background: #101927; width: 12px; margin: 1px; }
+QScrollBar:vertical { background: #101927; width: @SIZE_SCROLLBAR@px; margin: 1px; }
 QScrollBar::handle:vertical { background: #486181; border-radius: 5px; min-height: 24px; }
-QScrollBar:horizontal { background: #101927; height: 12px; margin: 1px; }
+QScrollBar:horizontal { background: #101927; height: @SIZE_SCROLLBAR@px; margin: 1px; }
 QScrollBar::handle:horizontal { background: #486181; border-radius: 5px; min-width: 24px; }
 QCheckBox { spacing: 8px; }
-QCheckBox::indicator { width: 16px; height: 16px; }
+QCheckBox::indicator { width: @SIZE_CHECKBOX_INDICATOR@px; height: @SIZE_CHECKBOX_INDICATOR@px; }
 QCheckBox::indicator:unchecked { background: #080e17; border: 1px solid #6b829e; border-radius: 3px; }
 QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; border-radius: 3px; }
 QLabel#statusSuccess { color: #4CC7A3; }
@@ -139,6 +181,42 @@ QLabel#statusWarning { color: #F2BE6B; }
 QLabel#statusDanger { color: #F07886; }
 QPushButton#accentSecondary { border-color: #8D91FF; }
 '''
+ 
+ 
+_STYLE_METRIC_VALUES = {
+    "@SPACE_MENU_VERTICAL@": SPACING["menu_vertical"],
+    "@SPACE_MENU_HORIZONTAL@": SPACING["menu_horizontal"],
+    "@SPACE_BUTTON_VERTICAL@": SPACING["button_vertical"],
+    "@SPACE_BUTTON_HORIZONTAL@": SPACING["button_horizontal"],
+    "@SPACE_TAB_VERTICAL@": SPACING["tab_vertical"],
+    "@SPACE_TAB_HORIZONTAL@": SPACING["tab_horizontal"],
+    "@SPACE_TREE_ITEM_PADDING@": SPACING["tree_item_padding"],
+    "@SPACE_INPUT_PADDING@": SPACING["input_padding"],
+    "@TYPE_DIALOG_TITLE@": TYPOGRAPHY["dialog_title_px"],
+    "@TYPE_BRAND_TITLE@": TYPOGRAPHY["brand_title_px"],
+    "@TYPE_PAGE_TITLE@": TYPOGRAPHY["page_title_px"],
+    "@TYPE_PANEL_TITLE@": TYPOGRAPHY["panel_title_px"],
+    "@RADIUS_COMPACT@": RADII["compact"],
+    "@RADIUS_CONTROL@": RADII["control"],
+    "@RADIUS_BUTTON@": RADII["button"],
+    "@RADIUS_FEATURE@": RADII["feature"],
+    "@SIZE_BUTTON_MIN_HEIGHT@": COMPONENT_SIZES["button_min_height"],
+    "@SIZE_TREE_ITEM_MIN_HEIGHT@": COMPONENT_SIZES["tree_item_min_height"],
+    "@SIZE_CHECKBOX_INDICATOR@": COMPONENT_SIZES["checkbox_indicator"],
+    "@SIZE_SPLITTER_HANDLE@": COMPONENT_SIZES["splitter_handle"],
+    "@SIZE_SCROLLBAR@": COMPONENT_SIZES["scrollbar"],
+}
+
+
+def _resolve_style_metrics(template: str) -> str:
+    """Resolve named geometry and type tokens for Qt's stylesheet engine."""
+    result = template
+    for placeholder, value in _STYLE_METRIC_VALUES.items():
+        result = result.replace(placeholder, str(value))
+    return result
+
+
+STYLESHEET = _resolve_style_metrics(_STYLESHEET_TEMPLATE)
 
 
 # A light palette is generated by translating the shared dark stylesheet rather than

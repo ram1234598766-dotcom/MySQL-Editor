@@ -18,7 +18,7 @@ from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.main_window import MainWindow
 
-from mysql_editor.ui.theme import stylesheet_for_theme
+from mysql_editor.ui.theme import TYPOGRAPHY, stylesheet_for_theme
 
 def main() -> int:
     app = QApplication(sys.argv)
@@ -26,7 +26,7 @@ def main() -> int:
     app.setOrganizationName("MySQL Editor")
     app.setStyle("Fusion")
     # Keep chrome typography consistent without overriding SQL editor font preferences.
-    app.setFont(QFont("Segoe UI", 9))
+    app.setFont(QFont(TYPOGRAPHY["app_family"], TYPOGRAPHY["app_size_pt"]))
     theme_preference = QSettings().value("ui/theme", "dark", type=str)
     app.setStyleSheet(stylesheet_for_theme(theme_preference))
     for base in (Path(__file__).resolve().parents[2], Path(getattr(sys, "_MEIPASS", "."))):

@@ -1,5 +1,6 @@
 from mysql_editor.ui.theme import (
-    EDITOR_PALETTES, STYLESHEET, TOKENS, normalize_theme, resolve_theme, stylesheet_for_theme,
+    COMPONENT_SIZES, EDITOR_PALETTES, RADII, SPACING, STYLESHEET, TOKENS, TYPOGRAPHY,
+    normalize_theme, resolve_theme, stylesheet_for_theme,
 )
 
 
@@ -134,3 +135,19 @@ def test_guided_tour_progress_states_are_styled_by_shared_theme_in_both_palettes
     assert 'QLabel#tourProgress[current="false"]' in light
     assert "color: #087E8B; font-size: 14px;" in light
     assert "color: #63748A; font-size: 12px;" in light
+
+
+
+def test_design_metrics_are_named_and_resolved_into_shared_stylesheet():
+    assert SPACING["scale"] == (4, 8, 12, 16, 20, 24, 32)
+    assert TYPOGRAPHY["app_family"] == "Segoe UI"
+    assert TYPOGRAPHY["app_size_pt"] == 9
+    assert TYPOGRAPHY["dialog_title_px"] == 20
+    assert RADII["button"] == 7
+    assert RADII["control"] == 6
+    assert COMPONENT_SIZES["button_min_height"] == 19
+    assert COMPONENT_SIZES["tree_item_min_height"] == 25
+    assert COMPONENT_SIZES["checkbox_indicator"] == 16
+    assert not any(token in STYLESHEET for token in ("@SPACE_", "@TYPE_", "@RADIUS_", "@SIZE_"))
+    assert "border-radius: 7px; padding: 8px 11px; min-height: 19px;" in STYLESHEET
+    assert "QLabel#pageTitle { font-size: 23px; font-weight: 700; }" in STYLESHEET
