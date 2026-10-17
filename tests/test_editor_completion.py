@@ -489,12 +489,12 @@ def test_bracket_auto_pairing_uses_qt_utf16_cursor_offsets_with_unicode():
 
 def test_comma_separated_column_completion_scopes_to_the_active_clause():
     cases = [
-        "SELECT display_name, customer_ FROM customers AS c",
-        "SELECT * FROM customers c ORDER BY display_name, customer_",
-        "SELECT * FROM customers c GROUP BY display_name, customer_",
-        "UPDATE customers SET display_name = 'x', customer_",
+        ("SELECT display_name, customer_ FROM customers AS c", "customer_"),
+        ("SELECT * FROM customers c ORDER BY display_name, customer_", None),
+        ("SELECT * FROM customers c GROUP BY display_name, customer_", None),
+        ("UPDATE customers SET display_name = 'x', customer_", None),
     ]
-    for source in cases:
+    for source, cursor_token in cases:
         editor = SqlEditor()
         try:
             editor.set_completion_context(
@@ -507,7 +507,10 @@ def test_comma_separated_column_completion_scopes_to_the_active_clause():
             )
             editor.setPlainText(source)
             cursor = editor.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
+            if cursor_token:
+                cursor.setPosition(source.index(cursor_token) + len(cursor_token))
+            else:
+                cursor.movePosition(cursor.MoveOperation.End)
             editor.setTextCursor(cursor)
 
             candidates = set(editor._context_completion_words())
