@@ -121,7 +121,9 @@ def main():
         recent_source.write_text(private_sql, encoding="utf-8")
         assert first._open_sql_path(recent_source) is True
         normalized_recent = str(recent_source.resolve())
-        assert first._settings.value("ui/recentSqlFiles", []) == [normalized_recent]
+        stored_recent_paths = first._recent_sql_paths()
+        assert len(stored_recent_paths) == 1
+        assert os.path.normcase(stored_recent_paths[0]) == os.path.normcase(normalized_recent)
         assert private_sql not in repr(first._settings.value("ui/recentSqlFiles", []))
         first._refresh_recent_sql_menu()
         assert any(action.toolTip() == normalized_recent for action in first.recent_sql_menu.actions())
