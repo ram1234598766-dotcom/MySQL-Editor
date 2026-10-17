@@ -50,3 +50,28 @@ def test_light_theme_translates_shared_component_styles_and_preserves_contrast()
 def test_system_stylesheet_resolves_to_a_concrete_palette():
     assert stylesheet_for_theme("system", system_is_dark=True) == STYLESHEET
     assert stylesheet_for_theme("system", system_is_dark=False) == stylesheet_for_theme("light")
+
+
+def _linear_channel(component: int) -> float:
+    value = component / 255
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def _luminance(hex_color: str) -> float:
+    channels = [_linear_channel(int(hex_color[index:index + 2], 16)) for index in (1, 3, 5)]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast_ratio(foreground: str, background: str) -> float:
+    values = sorted((_luminance(foreground), _luminance(background)), reverse=True)
+    return (values[0] + 0.05) / (values[1] + 0.05)
+
+
+def test_light_theme_key_text_states_meet_wcag_aa_contrast():
+    assert _contrast_ratio("#243246", "#F8FAFC") >= 4.5  # primary text
+    assert _contrast_ratio("#526174", "#F8FAFC") >= 4.5  # secondary text
+    assert _contrast_ratio("#F8FAFC", "#087E8B") >= 4.5  # primary button
+    assert _contrast_ratio("#126B50", "#DFF5ED") >= 4.5  # success badge
+    assert _contrast_ratio("#946200", "#F8FAFC") >= 4.5  # warning
+    assert _contrast_ratio("#B42335", "#F8FAFC") >= 4.5  # danger
+    assert _contrast_ratio("#1F6FEB", "#FFFFFF") >= 4.5  # focus ring
