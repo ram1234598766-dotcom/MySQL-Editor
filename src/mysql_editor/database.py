@@ -270,12 +270,14 @@ class DatabaseWorker(QThread):
         if action == "disconnect":
             self._close_connection()
             return {"ok": True}
-        if action in {"query", "schema", "table_preview", "commit", "rollback"} and self._connection is None:
+        if action in {"query", "schema", "schema_objects", "table_preview", "commit", "rollback"} and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
             return self._execute_script(str(payload.get("sql", "")))
         if action == "schema":
             return self._read_schema(str(payload.get("schema", "")))
+        if action == "schema_objects":
+            return self._read_schema_objects(str(payload.get("schema", "")))
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
         if action == "commit":
@@ -413,40 +415,58 @@ class DatabaseWorker(QThread):
                 schema = str(row[0] or "") if row else ""
             finally:
                 cursor.close()
-        objects: list[dict[str, str]] = []
+
+        objects_result = (
+            self._read_schema_objects(schema)
+            if schema and schema in databases
+            else {
+                "ok": True, "schema": schema, "objects": [],
+                "columns_by_table": {}, "column_metadata_truncated": False,
+            }
+        )
+        return {"ok": True, "databases": databases, **objects_result}
+
+    def _read_schema_objects(self, schema: str) -> dict[str, Any]:
+        """Fetch table/view and column metadata for one schema on demand."""
+        schema = str(schema or "").strip()
+        if not schema:
+            return {"ok": False, "error": "A database schema must be selected."}
+
+        cursor = self._connection.cursor()
+        try:
+            cursor.execute(f"SHOW FULL TABLES FROM {safe_identifier(schema)}")
+            objects = [
+                {"name": str(row[0]), "type": str(row[1])}
+                for row in cursor.fetchall()
+            ]
+        finally:
+            cursor.close()
+
         columns_by_table: dict[str, list[str]] = {}
         column_metadata_truncated = False
-        if schema and schema in databases:
-            cursor = self._connection.cursor()
-            try:
-                cursor.execute(f"SHOW FULL TABLES FROM {safe_identifier(schema)}")
-                objects = [{"name": str(row[0]), "type": str(row[1])} for row in cursor.fetchall()]
-            finally:
-                cursor.close()
+        # Metadata is bounded so a very wide schema can't flood completion. A lack of
+        # optional column privileges must not prevent table/view browsing.
+        column_cursor = self._connection.cursor()
+        try:
+            column_cursor.execute(
+                "SELECT TABLE_NAME, COLUMN_NAME "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s "
+                "ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 10001",
+                (schema,),
+            )
+            column_rows = column_cursor.fetchall()
+            column_metadata_truncated = len(column_rows) > 10000
+            for table_name, column_name in column_rows[:10000]:
+                columns_by_table.setdefault(str(table_name), []).append(str(column_name))
+        except Exception:
+            columns_by_table = {}
+            column_metadata_truncated = False
+        finally:
+            column_cursor.close()
 
-            # Schema metadata is fetched on the database worker, never on the Qt UI
-            # thread. Bound the result size so a very wide schema can't flood completion.
-            column_cursor = self._connection.cursor()
-            try:
-                column_cursor.execute(
-                    "SELECT TABLE_NAME, COLUMN_NAME "
-                    "FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = %s "
-                    "ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 10001",
-                    (schema,),
-                )
-                column_rows = column_cursor.fetchall()
-                column_metadata_truncated = len(column_rows) > 10000
-                for table_name, column_name in column_rows[:10000]:
-                    columns_by_table.setdefault(str(table_name), []).append(str(column_name))
-            except Exception:
-                # Lack of optional column metadata must not break schema/table browsing.
-                columns_by_table = {}
-                column_metadata_truncated = False
-            finally:
-                column_cursor.close()
         return {
-            "ok": True, "databases": databases, "schema": schema, "objects": objects,
+            "ok": True, "schema": schema, "objects": objects,
             "columns_by_table": columns_by_table,
             "column_metadata_truncated": column_metadata_truncated,
         }
