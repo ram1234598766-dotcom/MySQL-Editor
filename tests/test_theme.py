@@ -119,3 +119,18 @@ def test_sql_syntax_palette_text_meets_wcag_aa_on_editor_surface():
                 f"{theme_name} editor {role} contrast failed: "
                 f"{_contrast_ratio(palette[role], gutter_background):.2f}:1"
             )
+
+
+
+def test_guided_tour_progress_states_are_styled_by_shared_theme_in_both_palettes():
+    dark = stylesheet_for_theme("dark")
+    light = stylesheet_for_theme("light")
+
+    assert 'QLabel#tourProgress[current="true"]' in dark
+    assert 'QLabel#tourProgress[current="false"]' in dark
+    assert "color: #58dcec; font-size: 14px;" in dark
+    assert "color: #7187a3; font-size: 12px;" in dark
+    assert 'QLabel#tourProgress[current="true"]' in light
+    assert 'QLabel#tourProgress[current="false"]' in light
+    assert "color: #087E8B; font-size: 14px;" in light
+    assert "color: #63748A; font-size: 12px;" in light
