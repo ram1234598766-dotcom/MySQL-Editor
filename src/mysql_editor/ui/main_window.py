@@ -824,7 +824,7 @@ class MainWindow(QMainWindow):
             f"Query target: {target}. If the active connection profile changes, "
             "SQL execution requires explicit confirmation."
         )
-        editor.setAccessibleDescription(f"{base}\\n{detail}".strip())
+        editor.setAccessibleDescription(f"{base}\n{detail}".strip())
         editor.setToolTip(detail)
         index = self.editors.indexOf(editor) if hasattr(self, "editors") else -1
         if index >= 0:
@@ -846,9 +846,9 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.warning(
             self,
             "Confirm query target",
-            "This query tab was opened under a different connection profile.\\n\\n"
-            f"Tab target:\\n{previous_label}\\n\\n"
-            f"Active target:\\n{active_label}\\n\\n"
+            "This query tab was opened under a different connection profile.\n\n"
+            f"Tab target:\n{previous_label}\n\n"
+            f"Active target:\n{active_label}\n\n"
             "Executing now will send this SQL to the active target. Continue and associate "
             "this query tab with that target?",
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
