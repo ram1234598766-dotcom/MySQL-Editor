@@ -26,7 +26,7 @@ from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
-from mysql_editor.ui.schema_tools import qualified_identifier, select_preview_sql
+from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
 
 
 class ResultsModel(QAbstractTableModel):
@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         self.config = config
         self.connect_result = connect_result
         self._jobs: dict[str, tuple[str, dict]] = {}
+        self._schema_request_id: str | None = None
         self._schema_completion_words: set[str] = set()
         self._schema_databases: set[str] = set()
         self._schema_tables: set[str] = set()
@@ -386,12 +387,30 @@ class MainWindow(QMainWindow):
         self.inspector_tabs.setObjectName("inspectorTabs")
         self.inspector_tabs.setMinimumWidth(245)
         self.inspector_tabs.setMaximumWidth(360)
+        schema_page = QWidget()
+        schema_layout = QVBoxLayout(schema_page)
+        schema_layout.setContentsMargins(6, 6, 6, 6)
+        schema_layout.setSpacing(6)
+        schema_toolbar = QHBoxLayout()
+        self.schema_state_label = QLabel("Schema metadata has not been loaded yet.")
+        self.schema_state_label.setObjectName("mutedText")
+        self.schema_state_label.setWordWrap(True)
+        self.schema_state_label.setAccessibleName("Schema explorer status")
+        schema_toolbar.addWidget(self.schema_state_label, 1)
+        self.schema_refresh_button = QPushButton("Refresh")
+        self.schema_refresh_button.setAccessibleName("Refresh schema metadata")
+        self.schema_refresh_button.setToolTip("Reload visible databases, tables, views and columns.")
+        self.schema_refresh_button.clicked.connect(self.refresh_schema)
+        schema_toolbar.addWidget(self.schema_refresh_button)
+        schema_layout.addLayout(schema_toolbar)
         self.schema_tree = QTreeWidget()
         self.schema_tree.setHeaderHidden(True)
+        self.schema_tree.setAccessibleName("MySQL databases, tables and views")
         self.schema_tree.itemActivated.connect(self._schema_item_activated)
         self.schema_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.schema_tree.customContextMenuRequested.connect(self._show_schema_context)
-        self.inspector_tabs.addTab(self.schema_tree, "Schema")
+        schema_layout.addWidget(self.schema_tree, 1)
+        self.inspector_tabs.addTab(schema_page, "Schema")
         self.history_list = QListWidget()
         self.history_list.itemDoubleClicked.connect(self._history_selected)
         self.inspector_tabs.addTab(self.history_list, "History")
@@ -948,7 +967,18 @@ class MainWindow(QMainWindow):
 
     def refresh_schema(self):
         schema = str(self.config.get("default_schema", "") or self.connect_result.get("database", ""))
-        self._dispatch("schema", {"schema": schema})
+        self._schema_request_id = None
+        self.schema_tree.clear()
+        self._schema_databases.clear()
+        self._schema_tables.clear()
+        self._schema_columns_by_table.clear()
+        self._schema_completion_words.clear()
+        self._active_schema_name = ""
+        self._update_all_editor_completions()
+        self.schema_state_label.setText("Loading database, table and column metadata…")
+        self.schema_refresh_button.setEnabled(False)
+        self.status.setText("Refreshing schema metadata…")
+        self._schema_request_id = self._dispatch("schema", {"schema": schema})
 
     def _fill_schema_tree(self, result: dict):
         self.schema_tree.clear()
@@ -982,9 +1012,13 @@ class MainWindow(QMainWindow):
             for table, columns in (result.get("columns_by_table") or {}).items()
         }
         self._update_all_editor_completions()
+        self.schema_state_label.setText(schema_status_message(result))
         status = f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)"
         if result.get("column_metadata_truncated"):
             status += " · column completion limited to 10,000 columns"
+            self.schema_state_label.setText(
+                self.schema_state_label.text() + " Column completion is limited to 10,000 columns."
+            )
         self.status.setText(status)
 
     def _update_all_editor_completions(self) -> None:
@@ -1176,17 +1210,19 @@ class MainWindow(QMainWindow):
                 self.refresh_history()
             return
         if action == "schema":
+            if job_id != self._schema_request_id:
+                return
+            self._schema_request_id = None
+            self.schema_refresh_button.setEnabled(True)
             if result.get("ok"):
                 self._fill_schema_tree(result)
             else:
-                self.status.setText(result.get("error", "Could not load schemas."))
-                self.schema_tree.clear()
-                self._schema_completion_words.clear()
-                self._schema_databases.clear()
-                self._schema_tables.clear()
-                self._schema_columns_by_table.clear()
-                self._active_schema_name = ""
-                self._update_all_editor_completions()
+                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                self.schema_state_label.setText(
+                    "Schema metadata could not be loaded."
+                    + (f"\n{detail}" if detail else " Check the connection and try again.")
+                )
+                self.status.setText(detail or "Could not load schema metadata. Use Refresh to retry.")
             return
         if action in {"commit", "rollback"}:
             self.status.setText(result.get("message", result.get("error", action.title())))
