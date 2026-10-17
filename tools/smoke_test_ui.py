@@ -93,6 +93,9 @@ def main():
         assert "ignores grid sorting and the visible-row filter" in first.export_button.accessibleDescription()
         assert export_semantics in first.result_filter.toolTip()
         assert "fetch order" in first.result_grid.accessibleDescription().lower()
+        assert ("SQL NULL is encoded as " + r"\N") in first.export_button.accessibleDescription()
+        assert "empty text stays blank" in first.export_button.accessibleDescription()
+        assert "escaped by adding one leading backslash" in first.export_button.accessibleDescription()
         assert first.font().pointSize() >= 0
         assert editor.font().pointSize() == 10
 

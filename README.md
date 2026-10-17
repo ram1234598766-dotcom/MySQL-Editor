@@ -175,7 +175,7 @@ A multi-statement script can create several result entries. Use the result picke
 - **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.
 - **Cell details** opens a read-only view for long values, showing the column, row, and whether the value is SQL NULL, empty text, or non-empty text.
 - **CSV export** uses rows fetched into the current session result spool, not just the visible grid. The 2,000-row display preview and active quick filter do not limit the exported fetched result set. CSV export retains fetch order even after sorting and filtering.
-- **NULL** appears as **(NULL)** in the display and copies as the marker **NULL**. CSV follows standard empty-field output here: SQL NULL and an empty string both produce an empty field, so inspect cell details before exporting if this distinction matters to downstream processing.
+- **NULL vs empty text:** the grid displays SQL NULL as **(NULL)**; clipboard copy uses the marker **NULL** while empty text remains blank. CSV writes SQL NULL as the unquoted token `\N` and leaves empty text as an empty field. Text values beginning with a backslash are escaped by adding one leading backslash, so a literal text value `\N` exports as `\\N`. Consumers importing these files should decode this documented convention to restore SQL NULL and the original backslash-leading text.
 
 The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
 
