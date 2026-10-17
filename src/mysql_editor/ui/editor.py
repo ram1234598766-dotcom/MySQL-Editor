@@ -355,6 +355,58 @@ class SqlEditor(QPlainTextEdit):
                 return table_ref
         return None
 
+    def _referenced_tables_in_current_statement(self) -> set[str]:
+        """Return known table names referenced by the statement around the cursor.
+
+        This intentionally handles common FROM/JOIN/UPDATE/INTO contexts rather than
+        attempting to parse the full MySQL grammar. Strings and comments are masked
+        before scanning so their contents cannot introduce false table references.
+        """
+        sql = self.toPlainText()
+        cursor_position = self.textCursor().position()
+        code_mask = _sql_code_mask(sql)
+        code_sql = "".join(
+            char if code_mask[position] else " "
+            for position, char in enumerate(sql)
+        )
+
+        start = 0
+        for position in range(min(cursor_position, len(sql))):
+            if sql[position] == ";" and code_mask[position]:
+                start = position + 1
+        end = len(sql)
+        for position in range(min(cursor_position, len(sql)), len(sql)):
+            if sql[position] == ";" and code_mask[position]:
+                end = position
+                break
+        statement = code_sql[start:end]
+
+        reserved_aliases = {
+            "ALL", "AND", "AS", "BY", "CROSS", "EXCEPT", "FOR", "GROUP",
+            "HAVING", "INNER", "INTERSECT", "JOIN", "LEFT", "LIMIT", "LOCK",
+            "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SET", "UNION",
+            "USE", "USING", "WHERE", "WINDOW",
+        }
+        table_pattern = re.compile(
+            r"\\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\\s+"
+            r"(?:`?([A-Za-z_$][A-Za-z0-9_$]*)`?\\s*\\.\\s*)?"
+            r"`?([A-Za-z_$][A-Za-z0-9_$]*)`?"
+            r"(?:\\s+(?:AS\\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
+            re.IGNORECASE,
+        )
+        known_tables = {
+            name.casefold(): name for name in self._completion_columns_by_table
+        }
+        referenced: set[str] = set()
+        for match in table_pattern.finditer(statement):
+            name = known_tables.get(match.group(2).casefold())
+            if name is not None:
+                referenced.add(name.casefold())
+            alias = match.group(3)
+            if alias and alias.upper() not in reserved_aliases and name is not None:
+                referenced.add(name.casefold())
+        return referenced
+
     def _context_completion_words(self) -> tuple[str, ...]:
         """Choose suggestions for the SQL clause around the cursor without parsing all MySQL."""
         all_words = self._all_completion_words()
@@ -400,8 +452,10 @@ class SqlEditor(QPlainTextEdit):
         )
         if column_context:
             columns = set(self._extra_completion_words)
-            for table_columns in self._completion_columns_by_table.values():
-                columns.update(table_columns)
+            referenced_tables = self._referenced_tables_in_current_statement()
+            for table, table_columns in self._completion_columns_by_table.items():
+                if not referenced_tables or table.casefold() in referenced_tables:
+                    columns.update(table_columns)
             return tuple(sorted(set(SQL_COMPLETIONS) | columns, key=str.casefold))
 
         return tuple(sorted(all_words, key=str.casefold))
