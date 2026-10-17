@@ -477,7 +477,17 @@ class DatabaseWorker(QThread):
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
         count = 0
-        self._report_activity("Exporting CSV rows…")
+
+        def report_activity(message: str) -> None:
+            reporter = getattr(self, "_report_activity", None)
+            if callable(reporter):
+                reporter(message)
+            else:
+                activity = getattr(self, "activity", None)
+                if activity is not None:
+                    activity.emit(message)
+
+        report_activity("Exporting CSV rows…")
         next_progress_row = 5000
         try:
             with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -490,7 +500,7 @@ class DatabaseWorker(QThread):
                     writer.writerow(json.loads(value_json))
                     count += 1
                     if count >= next_progress_row:
-                        self._report_activity(f"Exported {count:,} CSV row(s)…")
+                        report_activity(f"Exported {count:,} CSV row(s)…")
                         next_progress_row = ((count // 5000) + 1) * 5000
                 handle.flush()
                 os.fsync(handle.fileno())
