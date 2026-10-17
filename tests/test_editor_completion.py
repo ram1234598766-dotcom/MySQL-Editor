@@ -910,3 +910,54 @@ def test_comma_separated_column_completion_scopes_to_the_active_clause():
         finally:
             editor.deleteLater()
             _APP.processEvents()
+
+
+
+def test_tab_width_controls_explicit_tab_and_automatic_indentation():
+    for width in (2, 4, 8):
+        editor = SqlEditor()
+        try:
+            editor.set_tab_width(width)
+            editor.setPlainText("BEGIN")
+            cursor = editor.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            editor.setTextCursor(cursor)
+
+            _send_key(editor, Qt.Key.Key_Return)
+            assert editor.toPlainText() == "BEGIN\n" + (" " * width)
+
+            _send_key(editor, Qt.Key.Key_Tab)
+            assert editor.toPlainText() == "BEGIN\n" + (" " * (width * 2))
+        finally:
+            editor.deleteLater()
+    _APP.processEvents()
+
+
+def test_line_number_and_current_line_preferences_preserve_bracket_feedback():
+    editor = SqlEditor()
+    try:
+        source = "SELECT (1)"
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(source.index("(") + 1)
+        editor.setTextCursor(cursor)
+
+        assert editor.line_number_area_width() > 0
+        assert len(editor.extraSelections()) == 3
+
+        editor.set_line_numbers_visible(False)
+        assert editor.line_number_area.isHidden()
+        assert editor.line_number_area_width() == 0
+
+        editor.set_current_line_highlight_enabled(False)
+        assert len(editor.extraSelections()) == 2
+        assert editor.toPlainText() == source
+
+        editor.set_line_numbers_visible(True)
+        editor.set_current_line_highlight_enabled(True)
+        assert not editor.line_number_area.isHidden()
+        assert editor.line_number_area_width() > 0
+        assert len(editor.extraSelections()) == 3
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()

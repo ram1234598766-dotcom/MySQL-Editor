@@ -2,7 +2,7 @@
 import pytest
 
 from mysql_editor.ui.preferences import (
-    DEFAULT_EDITOR_FONT_FAMILY, normalize_editor_font_family,
+    DEFAULT_EDITOR_FONT_FAMILY, normalize_boolean_preference, normalize_editor_font_family,
     normalize_result_row_height, normalize_tab_width,
 )
 
@@ -33,3 +33,15 @@ def test_result_row_height_accepts_only_supported_values(value, expected):
 ])
 def test_editor_font_family_setting_is_normalized_safely(value, expected):
     assert normalize_editor_font_family(value) == expected
+
+
+
+@pytest.mark.parametrize(("value", "default", "expected"), [
+    (True, False, True), (False, True, False),
+    (1, False, True), (0, True, False),
+    ("true", False, True), ("YES", False, True), ("on", False, True),
+    ("false", True, False), ("no", True, False), ("OFF", True, False),
+    ("invalid", True, True), (None, False, False), ([], True, True),
+])
+def test_boolean_preferences_normalize_supported_values_and_fall_back(value, default, expected):
+    assert normalize_boolean_preference(value, default) is expected
