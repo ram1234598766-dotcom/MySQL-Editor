@@ -296,6 +296,8 @@ class MainWindow(QMainWindow):
         self.editors.setTabPosition(QTabWidget.TabPosition.North)
         self.editors.tabCloseRequested.connect(self.close_query_tab)
         self.editors.currentChanged.connect(self._update_editor_actions)
+        self.editors.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.editors.tabBar().customContextMenuRequested.connect(self._show_editor_tab_context)
 
         result_panel = QWidget()
         result_layout = QVBoxLayout(result_panel)
@@ -754,6 +756,76 @@ class MainWindow(QMainWindow):
             editor.deleteLater()
         if self.editors.count() == 0:
             self.new_query_tab()
+
+    def _show_editor_tab_context(self, point):
+        tab_bar = self.editors.tabBar()
+        index = tab_bar.tabAt(point)
+        if index < 0:
+            return
+
+        self.editors.setCurrentIndex(index)
+        selected_editor = self.editors.widget(index)
+        menu = QMenu(self)
+        new_action = menu.addAction("New query")
+        close_action = menu.addAction("Close tab")
+        close_others_action = menu.addAction("Close other tabs")
+        close_others_action.setEnabled(self.editors.count() > 1)
+        menu.addSeparator()
+        save_action = menu.addAction("Save SQL file")
+        chosen = menu.exec(tab_bar.mapToGlobal(point))
+
+        if chosen == new_action:
+            self.new_query_tab()
+        elif chosen == close_action:
+            self.close_query_tab(self.editors.indexOf(selected_editor))
+        elif chosen == close_others_action:
+            self.close_other_query_tabs(self.editors.indexOf(selected_editor))
+        elif chosen == save_action:
+            self.save_sql_file()
+
+    def close_other_query_tabs(self, keep_index: int):
+        """Close every query tab except one, confirming all dirty tabs in a single prompt."""
+        count = self.editors.count()
+        if not 0 <= keep_index < count:
+            return
+
+        keep_editor = self.editors.widget(keep_index)
+        to_close = [
+            (index, self.editors.widget(index), self.editors.tabText(index))
+            for index in range(count)
+            if index != keep_index
+        ]
+        dirty_names = [
+            label for _, editor, label in to_close
+            if editor is not None and editor.document().isModified()
+        ]
+        if dirty_names:
+            details = "\n".join(f"• {name}" for name in dirty_names[:8])
+            if len(dirty_names) > 8:
+                details += f"\n…and {len(dirty_names) - 8} more"
+            answer = QMessageBox.question(
+                self,
+                "Close other queries",
+                f"{len(dirty_names)} other query tab(s) have unsaved changes. "
+                "Discard them and close the other tabs?\n\n" + details,
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Discard:
+                return
+
+        for index in range(count - 1, -1, -1):
+            editor = self.editors.widget(index)
+            if editor is keep_editor:
+                continue
+            self._last_saved_paths.pop(id(editor), None)
+            self.editors.removeTab(index)
+            if editor is not None:
+                editor.deleteLater()
+
+        self.editors.setCurrentWidget(keep_editor)
+        if hasattr(self, "status"):
+            self.status.setText(f"Closed {len(to_close)} other query tab(s).")
 
     def _update_editor_actions(self, *_):
         self._set_result_controls()
