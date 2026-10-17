@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE_TEST = ROOT / "tools" / "smoke_test_ui.py"
 OUTPUT_DIR = ROOT / "dist" / "ui-visual-qa"
+THEMES = ("dark", "light")
 SCALES = (
     ("100-percent", "1.0"),
     ("125-percent", "1.25"),
@@ -43,6 +44,7 @@ def main() -> None:
     manifest = {
         "capture_mode": "Windows GitHub Actions runner using the native Qt Windows platform",
         "scale_method": "QT_SCALE_FACTOR on native Qt Windows platform",
+        "themes": list(THEMES),
         "note": (
             "Simulated Qt scale factors only. These screenshots are not physical-monitor "
             "captures and do not replace hands-on Windows DPI review. All grid rows are "
@@ -50,37 +52,40 @@ def main() -> None:
         ),
         "screenshots": [],
     }
-    for label, factor in SCALES:
-        output = OUTPUT_DIR / f"mysql-editor-dark-{label}.png"
-        env = os.environ.copy()
-        env["QT_QPA_PLATFORM"] = "windows"
-        env["QT_SCALE_FACTOR"] = factor
-        env["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-        env["MYSQL_EDITOR_CAPTURE_PATH"] = str(output)
-        env["MYSQL_EDITOR_EXPECTED_SCALE"] = factor
-        # Fixed interpreter and repo-owned script; no shell or external command input.
-        subprocess.run(  # noqa: S603
-            [sys.executable, str(SMOKE_TEST)],
-            cwd=ROOT,
-            env=env,
-            check=True,
-            timeout=180,
-        )
-        if not output.is_file() or output.stat().st_size < 10_000:
-            raise RuntimeError(f"Screenshot output is missing or too small: {output}")
-        width, height = read_png_dimensions(output)
-        record = {
-            "file": output.name,
-            "requested_scale": float(factor),
-            "png_width_px": width,
-            "png_height_px": height,
-            "file_size_bytes": output.stat().st_size,
-        }
-        manifest["screenshots"].append(record)
-        print(
-            f"{output.name}: requested={factor}x, image={width}x{height}, "
-            f"bytes={output.stat().st_size}"
-        )
+    for theme_name in THEMES:
+        for label, factor in SCALES:
+            output = OUTPUT_DIR / f"mysql-editor-{theme_name}-{label}.png"
+            env = os.environ.copy()
+            env["QT_QPA_PLATFORM"] = "windows"
+            env["QT_SCALE_FACTOR"] = factor
+            env["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+            env["MYSQL_EDITOR_CAPTURE_PATH"] = str(output)
+            env["MYSQL_EDITOR_EXPECTED_SCALE"] = factor
+            env["MYSQL_EDITOR_EXPECTED_THEME"] = theme_name
+            # Fixed interpreter and repo-owned script; no shell or external command input.
+            subprocess.run(  # noqa: S603
+                [sys.executable, str(SMOKE_TEST)],
+                cwd=ROOT,
+                env=env,
+                check=True,
+                timeout=180,
+            )
+            if not output.is_file() or output.stat().st_size < 10_000:
+                raise RuntimeError(f"Screenshot output is missing or too small: {output}")
+            width, height = read_png_dimensions(output)
+            record = {
+                "file": output.name,
+                "theme": theme_name,
+                "requested_scale": float(factor),
+                "png_width_px": width,
+                "png_height_px": height,
+                "file_size_bytes": output.stat().st_size,
+            }
+            manifest["screenshots"].append(record)
+            print(
+                f"{output.name}: theme={theme_name}, requested={factor}x, "
+                f"image={width}x{height}, bytes={output.stat().st_size}"
+            )
 
     manifest_path = OUTPUT_DIR / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

@@ -58,8 +58,16 @@ def make_window(database_path: Path):
 
 
 
-def capture_screenshot(output_path: Path, requested_scale: float) -> None:
-    """Capture synthetic-only workbench screenshots for simulated Qt DPI review."""
+def capture_screenshot(
+    output_path: Path, requested_scale: float, theme_name: str = "dark",
+) -> None:
+    """Capture synthetic-only workbench screenshots for simulated Qt DPI review.
+
+    The theme is explicitly selected so dark and light palettes can be checked at each
+    simulated DPI without contacting a MySQL server.
+    """
+    if theme_name not in {"dark", "light"}:
+        raise ValueError(f"Unsupported visual-QA theme: {theme_name!r}")
     with tempfile.TemporaryDirectory(prefix="mysql-editor-visual-qa-") as temporary:
         root = Path(temporary)
         os.environ["LOCALAPPDATA"] = str(root / "localappdata")
@@ -93,14 +101,14 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
             f"resolved={QFontInfo(screenshot_font).family()!r}",
             f"available={len(available_fonts)} families",
         )
-        app.setStyleSheet(stylesheet_for_theme("dark"))
+        app.setStyleSheet(stylesheet_for_theme(theme_name))
         QSettings().clear()
 
         window, _repository = make_window(root / "visual-qa.sqlite3")
         window.resize(1600, 1000)
         window.setFont(screenshot_font)
         window.setWindowIcon(QIcon(str(Path("assets/mysql-editor.ico").resolve())))
-        window._set_theme("dark")
+        window._set_theme(theme_name)
 
         editor = window._current_editor()
         if editor is None:
@@ -226,7 +234,8 @@ def main():
                 os.environ.get("QT_SCALE_FACTOR", "1"),
             )
         )
-        capture_screenshot(Path(capture_path), scale)
+        theme_name = os.environ.get("MYSQL_EDITOR_EXPECTED_THEME", "dark").strip().lower()
+        capture_screenshot(Path(capture_path), scale, theme_name)
         return
     with tempfile.TemporaryDirectory(prefix="mysql-editor-ui-smoke-") as temporary:
         root = Path(temporary)
