@@ -14,7 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
-from mysql_editor.core import redact_secrets, safe_identifier, split_sql_statements
+from mysql_editor.core import (\n    redact_secrets, safe_identifier, split_sql_statements, unsupported_delimiter_message,\n)
 
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
@@ -346,6 +346,15 @@ class DatabaseWorker(QThread):
         self._spool.commit()
 
     def _execute_script(self, source: str) -> dict[str, Any]:
+        unsupported = unsupported_delimiter_message(source)
+        if unsupported:
+            return {
+                "ok": False,
+                "error": unsupported,
+                "results": [],
+                "duration_ms": 0,
+                "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            }
         statements = split_sql_statements(source)
         if not statements:
             return {

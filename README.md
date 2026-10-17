@@ -362,8 +362,8 @@ Confirm that Remember this connection was selected and Windows Credential Manage
 ### Query results look incomplete
 The grid previews up to 2,000 rows per result; table preview is capped at 1,000 rows. CSV export is intended to contain all rows fetched into the current result spool and is not reduced by the quick filter. Ensure the query completed and the correct result entry is selected.
 
-### A procedure script does not run as expected
-The statement splitter does not implement MySQL client DELIMITER directives or full compound stored-program parsing. Scripts relying on those directives may need a MySQL client that supports them until this feature is implemented.
+### A procedure script uses DELIMITER
+MySQL Editor does not interpret MySQL client `DELIMITER` commands or fully parse compound stored-program bodies. When a standalone `DELIMITER` directive is detected, the app rejects the entire submitted script before sending any statement to MySQL, rather than splitting it into pieces and risking partial execution. Run procedure/function/trigger scripts in a MySQL client that supports `DELIMITER`, or submit ordinary SQL without the client directive.
 
 ### Windows flags the installer or executable
 Unsigned preview packages can display unknown-publisher warnings. Verify the repository, release notes, and SHA-256 hash when available before deciding whether to run a downloaded artifact. Do not treat a successful build as proof that a file is signed.
@@ -373,7 +373,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 
 ## Known limitations
 
-- MySQL DELIMITER directives and compound stored-program parsing are not implemented in the initial statement splitter.
+- MySQL DELIMITER directives and compound stored-program parsing are not implemented. Standalone DELIMITER directives are rejected before execution; stored-program scripts still require a client that understands MySQL client commands.
 - Table preview is limited to 1,000 rows; the result grid displays up to 2,000 rows per result.
 - Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
 - Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.

@@ -17,7 +17,10 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
+from mysql_editor.core import (
+    classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets,
+    split_sql_statements, unsupported_delimiter_message,
+)
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.animations import fade_in
@@ -1133,6 +1136,13 @@ class MainWindow(QMainWindow):
     def _execute_sql(self, sql: str):
         if self._query_running:
             self._report_query_busy("submit")
+            return
+        unsupported = unsupported_delimiter_message(sql)
+        if unsupported:
+            self.status.setText(
+                "SQL not submitted · unsupported MySQL client DELIMITER directive."
+            )
+            QMessageBox.warning(self, "Unsupported MySQL client directive", unsupported)
             return
         statements = split_sql_statements(sql)
         if not statements:
