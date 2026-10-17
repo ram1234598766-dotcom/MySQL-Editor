@@ -87,7 +87,7 @@ def test_csv_export_replaces_existing_file_only_after_success(tmp_path):
     assert result["row_count"] == 2
     with destination.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
-    assert rows == [["name", "value"], ["alpha", ""], ["βeta", "42"]]
+    assert rows == [["name", "value"], ["alpha", r"\N"], ["βeta", "42"]]
     assert list(tmp_path.glob(".report.csv.*.tmp")) == []
     spool_owner._spool.close()
 
