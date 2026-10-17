@@ -322,3 +322,15 @@ def stylesheet_for_theme(value: object = "dark", system_is_dark: bool | None = N
     for dark_value, light_value in _LIGHT_COLOR_MAP.items():
         stylesheet = stylesheet.replace(dark_value, light_value)
     return stylesheet
+
+
+def color_for_theme(
+    token_name: str, value: object = "dark", system_is_dark: bool | None = None,
+) -> str:
+    """Resolve a semantic colour token for the selected concrete palette."""
+    if token_name not in TOKENS:
+        raise KeyError(f"Unknown theme colour token: {token_name}")
+    dark_color = TOKENS[token_name]
+    if resolve_theme(value, system_is_dark) == "dark":
+        return dark_color
+    return _LIGHT_COLOR_MAP.get(dark_color, dark_color)

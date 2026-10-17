@@ -31,7 +31,7 @@ from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
-from mysql_editor.ui.theme import normalize_theme, resolve_theme, stylesheet_for_theme
+from mysql_editor.ui.theme import color_for_theme, normalize_theme, resolve_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
     cell_copy_text, cell_detail_text, column_headers_tsv, column_width_samples,
     result_filter_message, result_picker_label, result_summary_message, rows_tsv,
@@ -58,10 +58,24 @@ CSV_EXPORT_SEMANTICS = (
 
 
 class ResultsModel(QAbstractTableModel):
-    def __init__(self, headers=None, rows=None, parent=None):
+    def __init__(self, headers=None, rows=None, parent=None, theme: object = "dark"):
         super().__init__(parent)
         self.headers = list(headers or [])
         self.rows = list(rows or [])
+        self._null_foreground = QColor(color_for_theme("text_muted", theme))
+
+    def set_theme(self, theme: object) -> None:
+        """Update NULL-cell contrast without resetting or reordering result data."""
+        foreground = QColor(color_for_theme("text_muted", theme))
+        if foreground == self._null_foreground:
+            return
+        self._null_foreground = foreground
+        if self.rowCount() and self.columnCount():
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self.rowCount() - 1, self.columnCount() - 1),
+                [Qt.ItemDataRole.ForegroundRole],
+            )
 
     def update(self, headers, rows):
         self.beginResetModel()
@@ -84,7 +98,7 @@ class ResultsModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return "(NULL)" if value is None else str(value)
         if role == Qt.ItemDataRole.ForegroundRole and value is None:
-            return QColor("#71839b")
+            return QColor(self._null_foreground)
         if role == Qt.ItemDataRole.TextAlignmentRole and isinstance(value, (int, float, Decimal)):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -434,7 +448,9 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.rollback_button)
         toolbar.addWidget(self.export_button)
         result_layout.addLayout(toolbar)
-        self.result_model = ResultsModel()
+        self.result_model = ResultsModel(
+            theme=resolve_theme(self._settings.value("ui/theme", "dark", type=str))
+        )
         self.result_grid = QTableView()
         self.result_grid.setObjectName("resultsGrid")
         self.result_grid.setAccessibleName("SQL query results table")
@@ -710,6 +726,9 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(stylesheet_for_theme(resolved_theme))
+        result_model = getattr(self, "result_model", None)
+        if result_model is not None:
+            result_model.set_theme(resolved_theme)
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
