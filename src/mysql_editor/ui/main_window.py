@@ -1846,7 +1846,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Uncommitted database changes",
                 "This session may contain uncommitted writes. Switching connections closes the "
-                "current session and MySQL may roll those changes back. Commit or Rollback first, "
+                "current session and MySQL may roll back those changes. Commit or Rollback first, "
                 "or continue only if you accept that risk. Cancelling this dialog leaves the current "
                 "connection and transaction unchanged.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
