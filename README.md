@@ -56,7 +56,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Up to 2,000 rows per result are shown in the grid. Fetched result rows are also stored in a temporary local SQLite spool for CSV export.
 - Atomic CSV export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
-- CI includes lint, compile checks, unit/integration tests, a Windows UI smoke test, launch tests, installer/uninstaller tests, and dependency auditing.
+- Release gating includes lint, compilation and unit/UI tests across Python 3.12–3.14, disposable MySQL integration, dependency audits, Windows UI/launch checks, silent install/uninstall verification, a per-artifact provenance manifest, SBOM/license records, and SHA-256 checksums.
 - Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
 
 ## UX and upgrade roadmap
@@ -92,6 +92,7 @@ Open the [GitHub Releases page](https://github.com/ram1234598766-dotcom/MySQL-Ed
 | **MySQLEditor-Portable.exe** | Single-file portable executable |
 | **MySQLEditor-Folder.zip** | Application-folder package for advanced users or diagnostics |
 | **SHA256SUMS** | SHA-256 hashes for the release files, when published |
+| **RELEASE-MANIFEST.json** | Exact source commit, build metadata, signing disclosure, and per-package SHA-256/size. |
 | **sbom.cdx.json** | Software dependency inventory in CycloneDX format, when published |
 | **THIRD_PARTY_LICENSES.md** | Third-party license inventory, when published |
 | **WINDOWS_SIGNING.md** | Explicit signing status for that release |
