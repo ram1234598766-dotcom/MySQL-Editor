@@ -48,6 +48,7 @@ def test_guided_tour_animation_uses_shared_duration_and_restarts_cleanly(monkeyp
     assert tour._fade.duration() == TOUR_DURATION_MS
     assert tour._opacity is not None
     assert tour.pages.graphicsEffect() is tour._opacity
+    assert tour._opacity.parent() is None
 
     tour._go(1)
     assert tour.pages.currentIndex() == 1

@@ -26,7 +26,7 @@ def fade_in(widget: QWidget, settings: QSettings | None = None, duration_ms: int
     if reduce_motion_enabled(settings) or not widget.isVisible():
         return
 
-    effect = QGraphicsOpacityEffect(widget)
+    effect = QGraphicsOpacityEffect()
     effect.setOpacity(0.72)
     widget.setGraphicsEffect(effect)
     animation = QPropertyAnimation(effect, b"opacity", widget)

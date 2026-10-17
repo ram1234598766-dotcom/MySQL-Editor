@@ -166,7 +166,7 @@ class ProductTourDialog(QDialog):
         self._opacity: QGraphicsOpacityEffect | None = None
         self._fade: QPropertyAnimation | None = None
         if not self._reduce_motion:
-            self._opacity = QGraphicsOpacityEffect(self.pages)
+            self._opacity = QGraphicsOpacityEffect()
             self._opacity.setOpacity(1.0)
             self.pages.setGraphicsEffect(self._opacity)
             self._fade = QPropertyAnimation(self._opacity, b"opacity", self)

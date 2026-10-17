@@ -41,6 +41,7 @@ def test_fade_in_restores_widget_graphics_state_after_completion():
     animation = getattr(widget, "_mysql_editor_fade_animation", None)
     assert animation is not None
     assert widget.graphicsEffect() is not None
+    assert widget.graphicsEffect().parent() is None
 
     QTest.qWait(35)
     _APP.processEvents()
