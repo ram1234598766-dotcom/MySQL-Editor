@@ -202,6 +202,9 @@ class ProductTourDialog(QDialog):
     def _finish_animation(self):
         """Stop page motion and restore full opacity before closing or reopening."""
         self._fade.stop()
+        # Detach the animation target before the dialog can be destroyed. This avoids
+        # leaving a parentless Qt animation with a dangling widget target at shutdown.
+        self._fade.setTargetObject(None)
         self.setWindowOpacity(1.0)
 
     def done(self, result: int) -> None:
