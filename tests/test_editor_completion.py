@@ -3,7 +3,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.editor import SqlEditor
@@ -105,3 +106,70 @@ def test_context_completion_falls_back_when_schema_metadata_is_unavailable():
     candidates = set(editor._context_completion_words())
     assert {"SELECT", "COUNT"} <= candidates
     assert editor.toPlainText() == "SELECT cou"
+
+
+
+def _send_key(editor, key):
+    event = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(editor, event)
+    _APP.processEvents()
+
+
+def test_enter_and_tab_accept_current_completion_without_changing_other_sql():
+    for key in (Qt.Key.Key_Return, Qt.Key.Key_Tab):
+        editor = SqlEditor()
+        editor.setPlainText("SELECT cou FROM customers")
+        cursor = editor.textCursor()
+        cursor.setPosition(len("SELECT cou"))
+        editor.setTextCursor(cursor)
+        editor._completion_model.setStringList(["COUNT", "COALESCE"])
+        editor._completer.setCompletionPrefix("CO")
+        editor._completer.popup().setCurrentIndex(editor._completer.completionModel().index(0, 0))
+        editor._completer.popup().show()
+        _send_key(editor, key)
+
+        assert editor.toPlainText() == "SELECT COUNT FROM customers"
+        assert not editor._completer.popup().isVisible()
+
+
+def test_escape_dismisses_completion_without_changing_sql():
+    editor = SqlEditor()
+    source = "SELECT cou"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len(source))
+    editor.setTextCursor(cursor)
+    editor._completion_model.setStringList(["COUNT", "COALESCE"])
+    editor._completer.setCompletionPrefix("CO")
+    editor._completer.popup().setCurrentIndex(editor._completer.completionModel().index(0, 0))
+    editor._completer.popup().show()
+
+    _send_key(editor, Qt.Key.Key_Escape)
+
+    assert editor.toPlainText() == source
+    assert not editor._completer.popup().isVisible()
+
+
+def test_enter_carries_existing_sql_indentation():
+    editor = SqlEditor()
+    editor.setPlainText("    SELECT * FROM customers")
+    cursor = editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+
+    _send_key(editor, Qt.Key.Key_Return)
+
+    assert editor.toPlainText() == "    SELECT * FROM customers\\n    "
+
+
+def test_enter_indents_after_open_parenthesis_and_begin_block():
+    for source in ("SELECT * FROM (", "BEGIN"):
+        editor = SqlEditor()
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+
+        _send_key(editor, Qt.Key.Key_Return)
+
+        assert editor.toPlainText() == source + "\\n    "

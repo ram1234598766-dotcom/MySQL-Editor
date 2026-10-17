@@ -340,6 +340,43 @@ class SqlEditor(QPlainTextEdit):
         cursor.insertText(completion)
         self.setTextCursor(cursor)
 
+    def _accept_current_completion(self) -> bool:
+        """Insert the selected suggestion, with a deterministic first-item fallback."""
+        completion_model = self._completer.completionModel()
+        index = self._completer.popup().currentIndex()
+        if not index.isValid():
+            index = completion_model.index(0, 0)
+        if not index.isValid():
+            self._completer.popup().hide()
+            return False
+        value = index.data()
+        if value is None:
+            self._completer.popup().hide()
+            return False
+        self.insert_completion(str(value))
+        self._completer.popup().hide()
+        return True
+
+    def _insert_newline_with_indentation(self) -> None:
+        """Carry leading whitespace and indent one level after common SQL block openers."""
+        cursor = self.textCursor()
+        current_line = cursor.block().text()
+        prefix = current_line[:cursor.positionInBlock()]
+        leading = re.match(r"[ \\t]*", current_line).group(0)
+        trimmed = prefix.rstrip()
+        opens_block = trimmed.endswith("(") or bool(re.search(
+            r"\\b(?:BEGIN|THEN|ELSE|CASE|LOOP|REPEAT|WHILE|DO)\\s*$",
+            trimmed,
+            re.IGNORECASE,
+        ))
+        indent = leading + ("    " if opens_block else "")
+        cursor.beginEditBlock()
+        cursor.insertText("\\n" + indent)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+        self.highlight_current_line()
+
     def line_number_area_width(self) -> int:
         digits = max(2, len(str(max(1, self.blockCount()))))
         return 18 + self.fontMetrics().horizontalAdvance("9") * digits
@@ -395,15 +432,28 @@ class SqlEditor(QPlainTextEdit):
         popup = self._completer.popup()
         if key == Qt.Key.Key_Space and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self._show_completion(force=True)
+            event.accept()
             return
         if popup.isVisible():
             if key == Qt.Key.Key_Escape:
                 popup.hide()
+                event.accept()
                 return
-            if key in (
-                Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, Qt.Key.Key_Backtab,
-            ):
+            if key in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab):
+                self._accept_current_completion()
+                event.accept()
                 return
+            if key == Qt.Key.Key_Backtab:
+                popup.hide()
+                event.accept()
+                return
+        if (
+            key in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
+            and not self.textCursor().hasSelection()
+        ):
+            self._insert_newline_with_indentation()
+            event.accept()
+            return
         super().keyPressEvent(event)
         typed = event.text()
         if typed and (typed[-1].isalnum() or typed[-1] in "_$"):
