@@ -720,6 +720,10 @@ class MainWindow(QMainWindow):
         self._set_editor_font_size(10)
 
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
+        # Keep a single SQL task active even if another entry point bypasses editor buttons.
+        if action == "query" and self._query_running:
+            self._report_query_busy("submit")
+            return None
         job_id = uuid.uuid4().hex
         self._jobs[job_id] = (action, context or {})
         self.worker.submit(action, payload, job_id)
@@ -728,11 +732,24 @@ class MainWindow(QMainWindow):
             self._query_running = True
             self.run_button.setEnabled(False)
             self.stop_button.setEnabled(True)
+            self.commit_button.setEnabled(False)
+            self.rollback_button.setEnabled(False)
             self.query_meta.setText("Queued…")
             self.status.setText("Query queued…")
         elif action == "export_csv":
             self.status.setText("CSV export queued…")
         return job_id
+
+    def _report_query_busy(self, operation: str) -> None:
+        """Explain why a conflicting operation was not started."""
+        if operation == "connection":
+            self.status.setText(
+                "Connection change blocked · a query is still active. Stop it or wait for completion."
+            )
+        else:
+            self.status.setText(
+                "SQL not submitted · a query is already active. Wait for completion or request cancellation."
+            )
 
     def _set_workspace_nav(self, destination: str):
         button = self.workspace_nav_buttons.get(destination)
@@ -963,6 +980,9 @@ class MainWindow(QMainWindow):
         self._execute_sql(self._query_for_run(whole_script=True))
 
     def _execute_sql(self, sql: str):
+        if self._query_running:
+            self._report_query_busy("submit")
+            return
         statements = split_sql_statements(sql)
         if not statements:
             QMessageBox.information(
@@ -1274,6 +1294,8 @@ class MainWindow(QMainWindow):
             self._cancellation_requested = False
             self.run_button.setEnabled(True)
             self.stop_button.setEnabled(False)
+            self.commit_button.setEnabled(True)
+            self.rollback_button.setEnabled(True)
         if action in {"query", "table_preview"}:
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
@@ -1875,6 +1897,9 @@ class MainWindow(QMainWindow):
         self.status.setText("Local query history cleared and disabled.")
 
     def open_connection_dialog(self):
+        if self._query_running:
+            self._report_query_busy("connection")
+            return
         dialog = ConnectionDialog(
             self.worker, self.repository, self.credentials, self,
             master_unlocked=True,
@@ -1883,6 +1908,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _switch_connection(self, profile: dict, config: dict, connect_result: dict):
+        if self._query_running:
+            self._report_query_busy("connection")
+            return
         self._persist_profile(profile, config)
         self.profile = profile
         self.config = config
