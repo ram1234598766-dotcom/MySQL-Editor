@@ -1,7 +1,7 @@
 """Animated, keyboard-friendly quick-start tour for MySQL Editor."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtCore import QSettings, QEasingCurve, Qt, QVariantAnimation
 from mysql_editor.ui.animations import STANDARD_DURATION_MS, reduce_motion_enabled
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
@@ -164,10 +164,14 @@ class ProductTourDialog(QDialog):
         self._opacity = QGraphicsOpacityEffect(self.pages)
         self._opacity.setOpacity(1.0)
         self.pages.setGraphicsEffect(self._opacity)
-        # Keep the animation owned by its target effect so Qt tears both down together.
-        self._fade = QPropertyAnimation(self._opacity, b"opacity", self._opacity)
+        # Animate values without binding a QObject property target to a widget-owned effect.
+        # This avoids competing Qt/Python ownership during dialog teardown.
+        self._fade = QVariantAnimation(self)
         self._fade.setDuration(STANDARD_DURATION_MS)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade.setStartValue(0.22)
+        self._fade.setEndValue(1.0)
+        self._fade.valueChanged.connect(self._set_page_opacity)
         self._render_page()
 
     def _render_page(self):
@@ -184,6 +188,9 @@ class ProductTourDialog(QDialog):
                 else "color: #4a607c; font-size: 12px;"
             )
 
+    def _set_page_opacity(self, value) -> None:
+        self._opacity.setOpacity(float(value))
+
     def _go(self, index: int):
         index = max(0, min(index, len(self._pages) - 1))
         if index == self._index:
@@ -196,8 +203,6 @@ class ProductTourDialog(QDialog):
         if reduce_motion_enabled(self._settings):
             return
         self._opacity.setOpacity(0.22)
-        self._fade.setStartValue(0.22)
-        self._fade.setEndValue(1.0)
         self._fade.start()
 
     def _finish_animation(self):
