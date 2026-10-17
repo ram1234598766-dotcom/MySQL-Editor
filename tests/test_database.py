@@ -263,9 +263,20 @@ def _fake_mysql_connection(row=("8.4.0", "analytics", "tester@localhost"), conne
             self.connection_id = connection_id
             self.cursor_instance = FakeCursor()
             self.close_calls = 0
+            self.in_transaction = False
+            self.rollback_calls = 0
+            self.commit_calls = 0
 
         def cursor(self):
             return self.cursor_instance
+
+        def commit(self):
+            self.commit_calls += 1
+            self.in_transaction = False
+
+        def rollback(self):
+            self.rollback_calls += 1
+            self.in_transaction = False
 
         def close(self):
             self.close_calls += 1
@@ -283,6 +294,7 @@ def test_new_connection_replaces_old_only_after_successful_handshake(monkeypatch
     worker._connection = previous
     worker._connection_id = 11
     worker._connection_config = old_config
+    candidate.in_transaction = True  # Simulate the handshake having opened an implicit transaction.
     monkeypatch.setattr(mysql.connector, "connect", lambda **_options: candidate)
 
     result = worker._dispatch("connect", {"config": {
@@ -294,7 +306,10 @@ def test_new_connection_replaces_old_only_after_successful_handshake(monkeypatch
         "server_version": "8.4.0",
         "database": "analytics",
         "current_user": "tester@localhost",
+        "transaction_open": False,
     }
+    assert candidate.rollback_calls == 1
+    assert not candidate.in_transaction
     assert worker._connection is candidate
     assert worker._connection_id == 22
     assert worker._connection_config["host"] == "new.example.test"
@@ -355,3 +370,30 @@ def test_connection_creation_failure_leaves_existing_connection_usable(monkeypat
     assert worker._connection_config is old_config
     assert previous.close_calls == 0
 
+
+
+
+def test_commit_and_rollback_return_updated_transaction_state():
+    worker = DatabaseWorker()
+    connection = _fake_mysql_connection()
+    worker._connection = connection
+    connection.in_transaction = True
+
+    committed = worker._dispatch("commit", {})
+    assert committed == {
+        "ok": True,
+        "message": "Transaction committed.",
+        "transaction_open": False,
+    }
+    assert connection.commit_calls == 1
+    assert not connection.in_transaction
+
+    connection.in_transaction = True
+    rolled_back = worker._dispatch("rollback", {})
+    assert rolled_back == {
+        "ok": True,
+        "message": "Transaction rolled back.",
+        "transaction_open": False,
+    }
+    assert connection.rollback_calls == 1
+    assert not connection.in_transaction

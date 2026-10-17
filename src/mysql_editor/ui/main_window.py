@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         self.profile = profile
         self.config = config
         self.connect_result = connect_result
+        self._transaction_open = bool(connect_result.get("transaction_open", False))
         self._jobs: dict[str, tuple[str, dict]] = {}
         self._deferred_export_notifications: list[dict] = []
         self._schema_request_id: str | None = None
@@ -1364,6 +1365,8 @@ class MainWindow(QMainWindow):
             return
         outcome = None
         if action == "query":
+            if "transaction_open" in result:
+                self._transaction_open = bool(result["transaction_open"])
             outcome = classify_query_outcome(result, self._cancellation_requested)
             self._query_running = False
             self._cancellation_requested = False
@@ -1436,6 +1439,8 @@ class MainWindow(QMainWindow):
                 self.status.setText(detail or "Could not load schema metadata. Use Refresh to retry.")
             return
         if action in {"commit", "rollback"}:
+            if result.get("ok"):
+                self._transaction_open = bool(result.get("transaction_open", False))
             self.status.setText(result.get("message", result.get("error", action.title())))
             if not result.get("ok"):
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
@@ -2001,13 +2006,48 @@ class MainWindow(QMainWindow):
         self.refresh_history()
         self.status.setText("Local query history cleared and disabled.")
 
+    def _confirm_connection_switch(self, config: dict) -> bool:
+        """Ask before a successful Connect replaces a session with uncommitted work."""
+        if not self._transaction_open:
+            return True
+
+        active_context = self._current_connection_context()
+        candidate_profile = {
+            "id": config.get("profile_id", ""),
+            "name": config.get("profile_name", "Connection"),
+            "host": config.get("host", "MySQL"),
+            "port": config.get("port", 3306),
+            "username": config.get("username", ""),
+        }
+        candidate_context = build_connection_context(candidate_profile, config, {})
+        active_label = connection_context_label(active_context)
+        candidate_label = connection_context_label(candidate_context)
+        answer = QMessageBox.warning(
+            self,
+            "Uncommitted transaction",
+            "The active MySQL session has an open transaction. If the replacement connection "
+            "succeeds, the current session will close and MySQL can roll back uncommitted work.\n\n"
+            f"Current session:\n{active_label}\n\n"
+            f"Requested session:\n{candidate_label}\n\n"
+            "Continue connecting? Cancel returns to the connection dialog without replacing "
+            "the active session. If the new connection fails, the current session is retained.",
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.status.setText(
+                "Connection change cancelled · the current session and its open transaction remain active."
+            )
+            return False
+        return True
+
     def open_connection_dialog(self):
         if self._query_running:
             self._report_query_busy("connection")
             return
         dialog = ConnectionDialog(
             self.worker, self.repository, self.credentials, self,
-            master_unlocked=True,
+            master_unlocked=True, before_connect=self._confirm_connection_switch,
         )
         dialog.connected.connect(self._switch_connection)
         dialog.exec()
@@ -2020,6 +2060,7 @@ class MainWindow(QMainWindow):
         self.profile = profile
         self.config = config
         self.connect_result = connect_result
+        self._transaction_open = bool(connect_result.get("transaction_open", False))
         self._update_connection_status()
         self.refresh_schema()
         editor = self._current_editor()

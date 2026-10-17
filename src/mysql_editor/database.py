@@ -204,6 +204,8 @@ class DatabaseWorker(QThread):
                     row = cursor.fetchone()
                 finally:
                     cursor.close()
+                # End any implicit transaction opened by the connection handshake.
+                candidate.rollback()
             except Exception:
                 # A failed attempt must not discard the currently usable connection.
                 if candidate is not None:
@@ -228,6 +230,7 @@ class DatabaseWorker(QThread):
                 "ok": True, "server_version": str(row[0]) if row else "Unknown",
                 "database": str(row[1] or "") if row else "",
                 "current_user": str(row[2] or "") if row else "",
+                "transaction_open": bool(getattr(candidate, "in_transaction", False)),
             }
         if action == "test":
             import mysql.connector
@@ -256,10 +259,16 @@ class DatabaseWorker(QThread):
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
         if action == "commit":
             self._connection.commit()
-            return {"ok": True, "message": "Transaction committed."}
+            return {
+                "ok": True, "message": "Transaction committed.",
+                "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            }
         if action == "rollback":
             self._connection.rollback()
-            return {"ok": True, "message": "Transaction rolled back."}
+            return {
+                "ok": True, "message": "Transaction rolled back.",
+                "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            }
         if action == "export_csv":
             return self._export_csv(str(payload["result_id"]), str(payload["path"]))
         return {"ok": False, "error": f"Unknown worker action: {action}"}
@@ -279,7 +288,10 @@ class DatabaseWorker(QThread):
     def _execute_script(self, source: str) -> dict[str, Any]:
         statements = split_sql_statements(source)
         if not statements:
-            return {"ok": False, "error": "There is no SQL statement to execute."}
+            return {
+                "ok": False, "error": "There is no SQL statement to execute.",
+                "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            }
         results: list[dict[str, Any]] = []
         started = time.perf_counter()
         with self._lock:
@@ -350,14 +362,18 @@ class DatabaseWorker(QThread):
                         "ok": False, "results": results, "error": safe_db_error(exc),
                         "interrupted": interrupted,
                         "duration_ms": int((time.perf_counter() - started) * 1000),
+                        "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
                     }
                 finally:
                     cursor.close()
         finally:
             with self._lock:
                 self._active_query = False
-        return {"ok": True, "results": results,
-                "duration_ms": int((time.perf_counter() - started) * 1000)}
+        return {
+            "ok": True, "results": results,
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+            "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+        }
 
     def _read_schema(self, schema: str) -> dict[str, Any]:
         cursor = self._connection.cursor()

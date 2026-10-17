@@ -22,10 +22,12 @@ class ConnectionDialog(QDialog):
     def __init__(
         self, worker, repository: LocalRepository, credentials: CredentialStore, parent=None,
         *, master_unlocked: bool = False, preferred_profile_id: str | None = None,
+        before_connect=None,
     ):
         super().__init__(parent)
         self.master_unlocked = master_unlocked
         self.preferred_profile_id = preferred_profile_id
+        self.before_connect = before_connect
         self.worker = worker
         self.repository = repository
         self.credentials = credentials
@@ -467,14 +469,16 @@ class ConnectionDialog(QDialog):
         config = self._validate()
         if config is None:
             return
+        profile_id = self._profile_id or new_profile_id()
+        config["profile_id"] = profile_id
+        if self.before_connect is not None and not self.before_connect(config):
+            return
         if not self.repository.has_master_password:
             try:
                 self.master.create(self.master_password.text(), self.master_confirm.text())
             except ValueError as exc:
                 QMessageBox.warning(self, "Master password", str(exc))
                 return
-        profile_id = self._profile_id or new_profile_id()
-        config["profile_id"] = profile_id
         self._queue("connect", config)
 
     def _set_busy(self, busy: bool, message: str):
