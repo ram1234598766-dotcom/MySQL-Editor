@@ -45,6 +45,21 @@ def test_database_errors_are_bounded_and_not_raw_multiline_traces():
     assert len(value) <= 1601
 
 
+def test_database_errors_redact_echoed_mysql_account_password_syntax():
+    echoed_fragments = (
+        "syntax error near \"IDENTIFIED BY 'account-password-echo'\"",
+        "server rejected SET PASSWORD = 'set-password-echo'",
+        "authentication failed: AUTHENTICATION_STRING='auth-string-echo'",
+    )
+
+    for fragment in echoed_fragments:
+        message = safe_db_error(RuntimeError(fragment))
+        assert "[REDACTED]" in message
+        assert "account-password-echo" not in message
+        assert "set-password-echo" not in message
+        assert "auth-string-echo" not in message
+
+
 def _csv_spool():
     import sqlite3
     from types import SimpleNamespace

@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
 from mysql_editor.core import (
-    redact_secrets, safe_identifier, split_sql_statements, unsupported_delimiter_message,
+    redact_secrets, redact_sql_secrets, safe_identifier, split_sql_statements,
+    unsupported_delimiter_message,
 )
 
 MAX_PREVIEW_ROWS = 2000
@@ -45,7 +46,9 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 def safe_db_error(error: BaseException) -> str:
-    message = redact_secrets(str(error)).strip().replace("\x00", "")
+    # Server/driver errors can echo fragments of submitted SQL. Redact common MySQL
+    # account/password syntax as well as conventional key=value secret assignments.
+    message = redact_sql_secrets(str(error)).strip().replace("\x00", "")
     if len(message) > 1600:
         message = message[:1600] + "…"
     return message or "The database operation failed. Check the connection and server logs."
