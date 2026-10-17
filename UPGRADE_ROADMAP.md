@@ -579,3 +579,8 @@ Standalone MySQL client `DELIMITER` directives are detected after masking string
 ### Automated theme and SQL syntax contrast gates — 17 October 2026
 
 Added WCAG AA (4.5:1) regression thresholds for selected normal, muted, disabled, status, selection, and SQL syntax text states in both themes. Focus boundaries use a 3:1 non-text threshold. The checks cover the custom syntax highlighter and line-number gutter as well as shared application chrome. These are targeted palette regression tests, not a claim that every widget/state or every Windows display has completed a full accessibility audit.
+
+
+### Performance regression budgets — 17 October 2026
+
+Added generous CI time budgets for main-window construction, editing a 1,500-line SQL buffer, loading a 2,000-row/16-column result preview, processing 10,001 schema-column records (while enforcing the 10,000-column cap), and exporting 25,000 disk-spooled rows. These smoke budgets detect severe regressions without presenting CI timings as production benchmarks. Real-server network latency and cold Windows launch time still need measurement in the target environment.
