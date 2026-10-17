@@ -207,31 +207,42 @@ class DatabaseWorker(QThread):
             try:
                 import mysql.connector
 
-                # Revalidate after the control thread starts. Hold the same lock while
-                # KILL QUERY is sent so the worker cannot advance to another statement
-                # on the same MySQL session between validation and the server command.
-                with self._lock:
-                    still_targeting_statement = (
+                def targets_current_statement() -> bool:
+                    return (
                         self._active_query
                         and self._active_query_task_id == active_task_id
                         and self._active_query_generation == active_generation
                         and self._connection_id == connection_id
                     )
-                    if not still_targeting_statement:
-                        stale = True
-                    else:
-                        stale = False
-                        control = mysql.connector.connect(**config)
-                        try:
+
+                # Do not hold the worker-state lock during network connection setup.
+                # A query may finish while the control connection is opening, so validate
+                # both before connecting and immediately before issuing KILL QUERY.
+                with self._lock:
+                    current_before_connect = targets_current_statement()
+                if not current_before_connect:
+                    self._report_task_activity(
+                        active_task_id,
+                        "Cancellation skipped because the SQL statement changed or finished.",
+                    )
+                    return
+
+                control = mysql.connector.connect(**config)
+                try:
+                    # Serialize the final identity check and KILL with worker state
+                    # transitions so a delayed request cannot cancel the next statement.
+                    with self._lock:
+                        still_targeting_statement = targets_current_statement()
+                        if still_targeting_statement:
                             cursor = control.cursor()
                             try:
                                 cursor.execute(f"KILL QUERY {int(connection_id)}")
                             finally:
                                 cursor.close()
-                        finally:
-                            control.close()
+                finally:
+                    control.close()
 
-                if stale:
+                if not still_targeting_statement:
                     self._report_task_activity(
                         active_task_id,
                         "Cancellation skipped because the SQL statement changed or finished.",
