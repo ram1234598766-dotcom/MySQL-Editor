@@ -4,7 +4,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import QDialog, QProgressDialog
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -18,14 +18,15 @@ from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.main_window import MainWindow
 
-from mysql_editor.ui.theme import STYLESHEET
+from mysql_editor.ui.theme import stylesheet_for_theme
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("MySQL Editor")
     app.setOrganizationName("MySQL Editor")
     app.setStyle("Fusion")
-    app.setStyleSheet(STYLESHEET)
+    theme_preference = QSettings().value("ui/theme", "dark", type=str)
+    app.setStyleSheet(stylesheet_for_theme(theme_preference))
     for base in (Path(__file__).resolve().parents[2], Path(getattr(sys, "_MEIPASS", "."))):
         icon_path = base / "assets" / "mysql-editor.ico"
         if icon_path.is_file():
