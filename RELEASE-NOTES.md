@@ -1,56 +1,66 @@
-# MySQL Editor 0.1.0-alpha.1 — Release notes
+# MySQL Editor — Windows Preview Release Notes
 
-**Status: pre-release. Windows packages are unsigned.** This is an initial clean-room desktop validation build, not a publisher-signed production release.
+**Release channel:** Preview / pre-release  
+**Platform:** Windows 10/11 x64  
+**Signing status:** Unsigned — no trusted Authenticode publisher signature is included.
 
-## Included
+This is a clean-room Windows desktop SQL editor for MySQL. It is a preview build, not a publisher-signed production release. The Windows build workflow validates expected output files, launches packaged executables, and exercises installation/uninstallation before publishing the preview assets.
 
-- New Windows-only PySide6 desktop SQL editor; Android/mobile project is excluded.
-- MySQL connection dialog, SQL tabs/highlighting, background statement execution, schema browser and result grid.
-- SQL formatting, Explain SELECT, result selection, sortable previews, CSV export, commit/rollback controls and saved SQL snippets.
-- Local Argon2id master-password verifier, opt-in local query history, and Windows Credential Manager-only persistent database password saving.
-- PyInstaller application-folder and portable packages, Inno Setup installer, and SHA-256 checksums.
-- CI checks for Python 3.12–3.14, unit tests, a disposable MySQL 8.4 integration service, dependency audit, a CycloneDX SBOM, a third-party license inventory, and Windows startup/install/uninstall smoke checks.
+## Downloadable Windows packages
 
-## Quality improvements in the latest Windows preview
+The release workflow attaches the following files when the package job succeeds:
 
-- Fixed the SQL editor's Qt import so `QTextEdit` is imported from `PySide6.QtWidgets`; Windows CI now imports the full application module before packaging.
-- Added local persistence for window geometry, split-pane sizing, inspector selection, and SQL-editor font size.
-- SQL file read/write failures now show recoverable dialogs and preserve the current editor buffer.
-- Replaced modal Find/Replace prompts with an inline bar featuring match counts, case-sensitive search, previous/next navigation, Replace, and Replace all.
-- Added a live editor status indicator for line, column, and selected character count.
-- Dark, light and system appearance update SQL syntax highlighting, the line-number gutter, active-line shading and bracket matching without changing editor content or selection.
-- CSV exports are written to a temporary sibling file and atomically moved into place after a complete successful write; a failed export no longer truncates an existing destination.
+- **`MySQLEditor-Setup.exe`** — standard Windows installer, Start Menu/desktop shortcut and uninstaller.
+- **`MySQLEditor-Portable.exe`** — portable single-file executable.
+- **`MySQLEditor-Folder.zip`** — application-folder distribution for diagnostics or users who prefer the onedir package.
+- **`SHA256SUMS`** — SHA-256 hashes for the published packages and supporting release documents.
+- **`sbom.cdx.json`** — CycloneDX dependency inventory.
+- **`THIRD_PARTY_LICENSES.md`** — third-party license inventory.
+- **`WINDOWS_SIGNING.md`** — current signing status and instructions.
 
-## SQL editor font preference
+The Windows workflow also uploads the complete package folder and a simulated display-scale UI evidence artifact to GitHub Actions. These are useful for diagnostics; artifacts expire, while release assets remain available with the GitHub Release.
 
-- Added a Settings → Editor font-family picker restricted to installed monospace fonts. Changes apply to every open query tab, are persisted locally, and carry over to new tabs and future launches.
-- Font size remains a separate preference, and changing appearance does not discard the selected editor font family.
+## Highlights in this preview
 
-## Known limitations
+### SQL editor
+- Multiple SQL tabs, syntax highlighting, line numbers, current-line highlighting, bracket matching, formatting, SQL-file open/save, and configurable editor font/tab width.
+- Inline Find/Replace with match count, case-sensitive search, next/previous navigation, Replace, and Replace all.
+- Live line/column and selection-length status.
+- Keyboard-first completion for MySQL keywords/functions and schema-scoped table, view and column identifiers, including common qualified, alias and backtick-quoted contexts.
+- Completion is a bounded editing aid, not a full MySQL grammar or type-checking engine. It should not change SQL unless a completion item is accepted.
 
-- MySQL DELIMITER directives and compound stored-program parsing are not implemented.
-- Query safety checks are advisory; database permissions remain authoritative.
-- Automatic TLS can encrypt traffic without authenticating the server. Use strict identity verification for remote/untrusted environments.
-- The app has not been signed by a trusted publisher certificate. Windows SmartScreen may show an unknown-publisher warning.
-- Manual testing on user Windows systems is still needed for high-DPI scaling, installer upgrades, remote-server TLS, and real credential-manager behavior.
+### Connections and schema navigation
+- Direct local-to-server MySQL connections, saved profiles, duplicate/delete profile actions, and saved database passwords stored through Windows Credential Manager rather than plaintext application storage.
+- Explicit Automatic TLS, Verify server identity, and Disabled TLS policies; strict verification can use a supplied CA file.
+- Schema Explorer supports database/table/view navigation, refresh, safe identifier copying, limited table preview, and generating a SELECT in a new tab.
+- The active connection and schema context are visible in the workspace. Query execution is blocked when a query is already running or a disconnect is pending.
 
-## Install
+### Results and query feedback
+- Multiple statement results, sortable preview grid, case-insensitive visible-row filter, row/column copy actions, and a cell-details view with **Copy full value**.
+- CSV export writes atomically, uses fetched rows rather than only visible filtered rows, and preserves server-fetch order after grid sorting.
+- CSV uses an unquoted `\\N` token for SQL NULL; empty text stays an empty field. Backslash-leading text is escaped so it remains distinguishable from NULL.
+- Query lifecycle feedback distinguishes execution, fetching, cancellation requests, confirmed interruption, partial script failure, and export progress where the worker can report it.
+- Unsupported standalone MySQL client `DELIMITER` scripts are rejected before execution rather than silently split incorrectly.
 
-Download MySQLEditor-Setup.exe for normal installation, or MySQLEditor-Portable.exe to launch without installing. Verify SHA-256 checksums before use. Create a local master password on first launch, then enter the host, port, username and MySQL password for the target database.
+### Presentation, preferences and reliability
+- Shared semantic dark-theme styling, System/Light/Dark appearance selection, editor font and tab-width preferences, result-row sizing, and a persistent Reduce Motion option.
+- Contrast regression checks cover selected application states and SQL syntax colours; performance smoke budgets cover editing, result previews, schema metadata and spooled CSV export.
+- Installer tests confirm the app executable and uninstaller are installed, the desktop shortcut is created, and uninstall removes the shortcut.
+- Packaging checks verify and launch both EXE variants before release publication.
 
-This pre-release contains no APK/AAB files or cross-device password synchronization.
+## Important limitations and safety notes
 
+- **Unsigned binary:** Windows may show SmartScreen or unknown-publisher warnings. Do not bypass a warning solely because the file is hosted on GitHub. Review the repository and release, and compare a package's SHA-256 hash against `SHA256SUMS`. A matching hash detects file mismatches; it does not prove software safety.
+- **Manual Windows QA remains necessary:** automated/offscreen and runner-based tests cannot certify every display scale, hardware configuration, real Windows Credential Manager state, installer-upgrade path, or remote MySQL/TLS environment.
+- **MySQL server required:** MySQL Editor is a client and does not install or automatically start the database server.
+- **TLS:** Automatic TLS can encrypt traffic without verifying server identity. Prefer Verify server identity for remote or untrusted networks. Disabled TLS should only be used when its lack of transport encryption is understood and accepted.
+- **Cancellation:** stopping a query is best-effort and depends on server state, permissions and network conditions.
+- **Safety prompts and redaction:** mutation warnings and query-history redaction are heuristic aids, not security boundaries. Use least-privilege database accounts and avoid putting secrets in SQL text.
+- **Stored-program scripts:** MySQL client `DELIMITER` directives and compound stored-program parsing are not implemented; the app rejects unsupported delimiter scripts instead of attempting to execute them.
+- **Local unlock:** the master password unlocks this installation only. It is not an online account and does not synchronize to another device.
+- **Scope:** Android APK/AAB, cloud relay, cross-device synchronization, analytics, ads and telemetry are not included.
 
-## Workspace and onboarding refresh
+## Verification record
 
-- Replaced the fixed vertical left navigation with a horizontal workspace bar for SQL Editor, Connections, Schema Explorer, Query History, and Saved Queries.
-- The editor/results boundary is a draggable vertical splitter and its ratio is remembered between launches. The schema inspector remains a separately resizable side panel.
-- Added an animated multi-step guided tour (workspace header, connection form and Help → Guided tour / F1). The tour can insert an actual sample SELECT into the editor.
-- After the first setup, startup asks for only the local master password and automatically reconnects to the last remembered profile when the password is available in Windows Credential Manager. If vault data is missing or MySQL rejects the saved password, the connection form is shown.
-- The branded icon and UI assets now use an alpha-bearing PNG created by removing only edge-connected near-white matte pixels from the original artwork. Enclosed white artwork is preserved, and the tracked source logo remains unchanged.
+The Windows release workflow builds the onedir application, portable EXE, and installer from one commit; checks their output paths and non-trivial size; launches the packaged EXEs; and runs silent install/uninstall smoke checks. The desktop CI and dependency-security workflows run independently for the same push. Review the linked GitHub Actions runs for the exact commit before using a preview build. Manual QA on a physical Windows machine remains **not verified by CI**.
 
-
-## CSV export NULL semantics
-
-- CSV export now distinguishes SQL NULL from empty text: SQL NULL is written as the unquoted `\N` token while empty text stays an empty field.
-- Text values beginning with a backslash are escaped by adding one leading backslash, so literal `\N` and path-like strings remain distinguishable from the NULL token. Export remains atomic and preserves MySQL fetch order.
