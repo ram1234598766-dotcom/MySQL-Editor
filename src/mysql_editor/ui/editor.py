@@ -432,15 +432,15 @@ class SqlEditor(QPlainTextEdit):
             "UNION", "EXCEPT", "INTERSECT", "SET", "VALUES", "FOR", "LOCK",
         }
         table_pattern = re.compile(
-            r"\\b(?:FROM|JOIN)\\s+"
-            r"((?:`?[A-Za-z_$][A-Za-z0-9_$]*`?\\s*\\.\\s*)?"
+            r"\b(?:FROM|JOIN)\s+"
+            r"((?:`?[A-Za-z_$][A-Za-z0-9_$]*`?\s*\.\s*)?"
             r"`?[A-Za-z_$][A-Za-z0-9_$]*`?)"
-            r"(?:\\s+(?:AS\\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
+            r"(?:\s+(?:AS\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
             re.IGNORECASE,
         )
         resolved: set[str] = set()
         for match in table_pattern.finditer(statement):
-            table_ref = re.sub(r"\\s", "", match.group(1))
+            table_ref = re.sub(r"\s", "", match.group(1))
             table_name = table_ref.split(".")[-1].strip("`")
             table = known_tables.get(table_name.casefold())
             if table is None:
