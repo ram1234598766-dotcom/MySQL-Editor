@@ -83,7 +83,7 @@ def test_context_completion_suggests_columns_for_table_alias_without_mutating_sq
     )
     editor.setPlainText(source)
     cursor = editor.textCursor()
-    cursor.setPosition(source.index("order_i") + "order_i".length)
+    cursor.setPosition(source.index("order_i") + len("order_i"))
     editor.setTextCursor(cursor)
 
     candidates = set(editor._context_completion_words())
