@@ -578,6 +578,38 @@ def test_pasted_multiline_sql_is_preserved_without_auto_pairing():
         _APP.processEvents()
 
 
+def test_typing_remains_available_while_schema_metadata_is_loading():
+    editor = SqlEditor()
+    # A schema refresh clears the old context until worker metadata arrives.
+    editor.set_completion_context()
+    editor.setPlainText("SELECT ")
+    cursor = editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+
+    for key, character in (
+        (Qt.Key.Key_C, "c"),
+        (Qt.Key.Key_O, "o"),
+        (Qt.Key.Key_U, "u"),
+    ):
+        _send_text_key(editor, key, character)
+
+    source = "SELECT cou"
+    assert editor.toPlainText() == source
+    assert "COUNT" in set(editor._context_completion_words())
+
+    # Receiving schema metadata updates suggestions, but never rewrites the query.
+    cursor_position = editor.textCursor().position()
+    editor.set_completion_context(
+        tables={"customers"},
+        columns_by_table={"customers": ["customer_id"]},
+        active_schema="app_db",
+    )
+    assert editor.toPlainText() == source
+    assert editor.textCursor().position() == cursor_position
+    assert "customers" in set(editor.completion_words())
+
+
 def test_context_completion_falls_back_when_schema_metadata_is_unavailable():
     editor = SqlEditor()
     editor.setPlainText("SELECT cou")
