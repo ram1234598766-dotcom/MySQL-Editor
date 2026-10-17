@@ -429,7 +429,7 @@ class SqlEditor(QPlainTextEdit):
         before scanning so their contents cannot introduce false table references.
         """
         sql = self.toPlainText()
-        cursor_position = self.textCursor().position()
+        cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
         code_mask = _sql_code_mask(sql)
         code_sql = "".join(
             char if code_mask[position] else " "
@@ -475,8 +475,12 @@ class SqlEditor(QPlainTextEdit):
 
     def _context_completion_words(self) -> tuple[str, ...]:
         """Choose suggestions for the SQL clause around the cursor without parsing all MySQL."""
+        sql = self.toPlainText()
+        python_position = _python_index_from_utf16(sql, self.textCursor().position())
+        if not _cursor_is_in_sql_code(sql, python_position):
+            return ()
         all_words = self._all_completion_words()
-        before = self.toPlainText()[:self.textCursor().position()]
+        before = sql[:python_position]
         database_context = re.search(r"\bUSE\s+[A-Za-z_$0-9]*$", before, re.IGNORECASE)
         if database_context:
             return tuple(sorted(self._completion_databases or all_words, key=str.casefold))

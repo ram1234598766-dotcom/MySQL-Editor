@@ -30,6 +30,61 @@ def test_sql_editor_exposes_accessible_identity_and_keyboard_help():
     assert "matching brackets" in editor.accessibleDescription()
 
 
+
+def test_completion_is_suppressed_inside_sql_strings_and_comments(monkeypatch):
+    editor = SqlEditor()
+    calls = []
+    monkeypatch.setattr(editor._completer, "complete", lambda *_args: calls.append(True))
+
+    for sql, marker in (
+        ("SELECT 'customers';", "customer"),
+        ("SELECT 1 -- customer", "customer"),
+        ("/* SELECT customers */", "customers"),
+    ):
+        editor.setPlainText(sql)
+        cursor = editor.textCursor()
+        cursor.setPosition(sql.index(marker) + len(marker) - 1)
+        editor.setTextCursor(cursor)
+        editor._show_completion(force=True)
+        assert editor._context_completion_words() == ()
+
+    assert calls == []
+    assert not editor._completer.popup().isVisible()
+
+
+def test_completion_remains_available_in_sql_code(monkeypatch):
+    editor = SqlEditor()
+    editor.set_completion_context(tables={"customers"}, active_schema="app_db")
+    editor.setPlainText("SELECT * FROM cus")
+    cursor = editor.textCursor()
+    cursor.setPosition(len(editor.toPlainText()))
+    editor.setTextCursor(cursor)
+    calls = []
+    monkeypatch.setattr(editor._completer, "complete", lambda *_args: calls.append(True))
+
+    editor._show_completion(force=True)
+
+    assert calls == [True]
+
+
+def test_completion_context_handles_unicode_before_cursor():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={"orders": ["order_id"], "customers": ["display_name"]},
+        active_schema="app_db",
+    )
+    sql = "SELECT '😀'; SELECT o.displ FROM customers AS c JOIN orders AS o ON c.id = o.id"
+    editor.setPlainText(sql)
+    target = sql.index("displ") + len("displ")
+    cursor = editor.textCursor()
+    cursor.setPosition(target + 1)  # Qt cursor offsets count UTF-16 code units.
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+    assert "order_id" in candidates
+    assert "display_name" not in candidates
+
 def test_result_filter_is_case_insensitive_and_does_not_mutate_source_rows():
     source = ResultsModel(
         headers=["id", "customer"],
