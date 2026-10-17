@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 from mysql_editor.core import redact_secrets
 from mysql_editor.storage import (
@@ -70,6 +70,10 @@ class ConnectionDialog(QDialog):
         root.addWidget(divider)
 
         self.profile = QComboBox()
+        self.profile.setAccessibleName("Saved MySQL connection profile")
+        self.profile.setAccessibleDescription(
+            "Select an existing connection or choose New connection to enter server details."
+        )
         self.profile.addItem("+ New connection", "")
         self.profile.currentIndexChanged.connect(self._profile_selected)
         profile_row = QHBoxLayout()
@@ -91,35 +95,57 @@ class ConnectionDialog(QDialog):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(9)
         self.profile_name = QLineEdit("Local MySQL")
+        self.profile_name.setAccessibleName("Connection profile name")
         self.host = QLineEdit("127.0.0.1")
+        self.host.setAccessibleName("MySQL server hostname or IP address")
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
         self.port.setValue(3306)
+        self.port.setAccessibleName("MySQL server port")
         self.username = QLineEdit("root")
+        self.username.setAccessibleName("MySQL database username")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.setPlaceholderText("Database account password")
+        self.password.setAccessibleName("MySQL database account password")
+        self.password.setAccessibleDescription(
+            "Password for the database account. It is not the local master password."
+        )
         self.schema = QLineEdit()
         self.schema.setPlaceholderText("Optional default database")
+        self.schema.setAccessibleName("Default MySQL schema, optional")
         self.tls = QComboBox()
         self.tls.addItems(self.TLS_OPTIONS)
+        self.tls.setAccessibleName("MySQL transport security policy")
+        self.tls.setAccessibleDescription(
+            "Automatic TLS, strict server-identity verification, or disabled TLS."
+        )
         self.tls_hint = QLabel()
         self.tls_hint.setWordWrap(True)
         self.tls_hint.setObjectName("noticeText")
+        self.tls_hint.setAccessibleName("TLS policy explanation")
         self.tls.currentTextChanged.connect(self._update_tls_hint)
         self.ca_file = QLineEdit()
         self.ca_file.setPlaceholderText("Optional CA file for strict verification")
+        self.ca_file.setAccessibleName("CA certificate file path")
+        self.ca_file.setAccessibleDescription(
+            "Optional certificate authority file used by strict server verification."
+        )
         ca_row = QHBoxLayout()
         ca_row.addWidget(self.ca_file, 1)
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self._browse_ca)
-        ca_row.addWidget(browse)
+        self.browse_ca_button = QPushButton("Browse…")
+        self.browse_ca_button.setAccessibleName("Browse for CA certificate file")
+        self.browse_ca_button.setToolTip("Choose the CA certificate file used for TLS verification.")
+        self.browse_ca_button.clicked.connect(self._browse_ca)
+        ca_row.addWidget(self.browse_ca_button)
         self.read_timeout = QSpinBox()
         self.read_timeout.setRange(5, 3600)
         self.read_timeout.setValue(60)
+        self.read_timeout.setAccessibleName("MySQL read timeout in seconds")
         self.write_timeout = QSpinBox()
         self.write_timeout.setRange(5, 3600)
         self.write_timeout.setValue(30)
+        self.write_timeout.setAccessibleName("MySQL write timeout in seconds")
         form.addRow("Profile name", self.profile_name)
         form.addRow("Host / IP address", self.host)
         form.addRow("Port", self.port)
@@ -146,10 +172,15 @@ class ConnectionDialog(QDialog):
         self.master_password = QLineEdit()
         self.master_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.master_password.setPlaceholderText("At least 10 characters")
+        self.master_password.setAccessibleName("Create local master password")
+        self.master_password.setAccessibleDescription(
+            "Unlocks MySQL Editor on this PC; it is separate from the database password."
+        )
         self.confirm_label = QLabel("Confirm master password")
         self.master_confirm = QLineEdit()
         self.master_confirm.setEchoMode(QLineEdit.EchoMode.Password)
         self.master_confirm.setPlaceholderText("Type it again to confirm")
+        self.master_confirm.setAccessibleName("Confirm local master password")
         security_form.addRow(self.master_label, self.master_password)
         security_form.addRow(self.confirm_label, self.master_confirm)
         self.security_card = security
@@ -158,23 +189,39 @@ class ConnectionDialog(QDialog):
             "Remember this connection and save its password in Windows Credential Manager"
         )
         self.save_profile_check.setChecked(True)
+        self.save_profile_check.setAccessibleName("Remember this connection profile")
+        self.save_profile_check.setAccessibleDescription(
+            "Stores profile settings locally and saves the database password in Windows Credential Manager."
+        )
         root.addWidget(self.save_profile_check)
         self.status = QLabel("The local master password unlocks this app on this PC. It is not your MySQL password.")
         self.status.setObjectName("mutedText")
         self.status.setWordWrap(True)
+        self.status.setAccessibleName("Connection and master-password status")
+        self.status.setAccessibleDescription(
+            "Reports connection validation, master-password setup, and recovery instructions."
+        )
         root.addWidget(self.status)
         buttons = QHBoxLayout()
         self.tour_button = QPushButton("Guided tour")
+        self.tour_button.setAccessibleName("Open MySQL Editor guided tour")
         self.tour_button.clicked.connect(self._show_product_tour)
         self.test_button = QPushButton("Test connection")
+        self.test_button.setAccessibleName("Test MySQL connection")
         self.test_button.clicked.connect(self._test_connection)
         self.save_profile_button = QPushButton("Save profile")
+        self.save_profile_button.setAccessibleName("Save connection profile")
         self.save_profile_button.setToolTip("Save profile settings without connecting to the MySQL server.")
         self.save_profile_button.clicked.connect(self._save_profile)
         self.connect_button = QPushButton("Connect")
         self.connect_button.setObjectName("primaryButton")
+        self.connect_button.setAccessibleName("Connect to the selected MySQL server")
+        self.connect_button.setAccessibleDescription(
+            "Connect using the selected profile, or the server settings entered in this form."
+        )
         self.connect_button.clicked.connect(self._connect)
         self.exit_button = QPushButton("Exit")
+        self.exit_button.setAccessibleName("Close connection dialog")
         self.exit_button.clicked.connect(self.reject)
         buttons.addWidget(self.tour_button)
         buttons.addWidget(self.test_button)
@@ -184,6 +231,36 @@ class ConnectionDialog(QDialog):
         buttons.addWidget(self.connect_button)
         root.addLayout(buttons)
         self._update_tls_hint()
+        self._configure_keyboard_focus_order()
+
+    def _configure_keyboard_focus_order(self) -> None:
+        """Keep keyboard traversal aligned with the form's visual workflow."""
+        controls = (
+            self.profile,
+            self.duplicate_profile_button,
+            self.delete_profile_button,
+            self.profile_name,
+            self.host,
+            self.port,
+            self.username,
+            self.password,
+            self.schema,
+            self.tls,
+            self.ca_file,
+            self.browse_ca_button,
+            self.read_timeout,
+            self.write_timeout,
+            self.master_password,
+            self.master_confirm,
+            self.save_profile_check,
+            self.tour_button,
+            self.test_button,
+            self.save_profile_button,
+            self.exit_button,
+            self.connect_button,
+        )
+        for first, second in zip(controls, controls[1:]):
+            QWidget.setTabOrder(first, second)
 
     @staticmethod
     def _logo_candidates() -> list[Path]:

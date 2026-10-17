@@ -4,11 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from mysql_editor.storage import ConnectionProfile, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.connection_dialog import ConnectionDialog
+from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
 
 
 class StubWorker(QObject):
@@ -122,3 +124,85 @@ def test_cancel_delete_leaves_saved_profile_and_credential(dialog_context, monke
     assert len(repository.profiles()) == 1
     assert credentials.passwords["analytics-profile"] == "sample-secret"
     assert credentials.deleted == []
+
+
+
+def test_connection_dialog_controls_have_accessible_names_and_visual_keyboard_order(
+    dialog_context, app,
+):
+    dialog, _repository, _credentials = dialog_context
+    controls = (
+        dialog.profile,
+        dialog.duplicate_profile_button,
+        dialog.delete_profile_button,
+        dialog.profile_name,
+        dialog.host,
+        dialog.port,
+        dialog.username,
+        dialog.password,
+        dialog.schema,
+        dialog.tls,
+        dialog.ca_file,
+        dialog.browse_ca_button,
+        dialog.read_timeout,
+        dialog.write_timeout,
+        dialog.master_password,
+        dialog.master_confirm,
+        dialog.save_profile_check,
+        dialog.tour_button,
+        dialog.test_button,
+        dialog.save_profile_button,
+        dialog.exit_button,
+        dialog.connect_button,
+    )
+    missing = [
+        type(control).__name__
+        for control in controls
+        if not control.accessibleName().strip()
+    ]
+    assert not missing, f"Interactive connection controls need accessible names: {missing}"
+
+    dialog.show()
+    app.processEvents()
+    visible_controls = [
+        control for control in controls
+        if control.isVisible() and control.isEnabled()
+    ]
+    assert visible_controls
+    first = visible_controls[0]
+    first.setFocus(Qt.FocusReason.OtherFocusReason)
+    app.processEvents()
+    assert app.focusWidget() is first
+    for current, expected in zip(visible_controls, visible_controls[1:]):
+        QTest.keyClick(current, Qt.Key.Key_Tab)
+        app.processEvents()
+        assert app.focusWidget() is expected, (
+            f"Tab from {current.accessibleName()!r} should focus "
+            f"{expected.accessibleName()!r}"
+        )
+
+
+def test_unlock_dialog_controls_have_accessible_names_and_keyboard_order(tmp_path, app):
+    repository = LocalRepository(tmp_path / "unlock-accessibility.sqlite3")
+    dialog = MasterUnlockDialog(repository)
+    try:
+        assert dialog.accessibleName() == "Unlock MySQL Editor"
+        assert dialog.password.accessibleName() == "Local master password"
+        assert dialog.status.accessibleName() == "Master password verification status"
+        assert dialog.exit_button.accessibleName() == "Exit MySQL Editor"
+        assert dialog.unlock_button.accessibleName() == "Unlock MySQL Editor"
+
+        dialog.show()
+        app.processEvents()
+        dialog.password.setFocus(Qt.FocusReason.OtherFocusReason)
+        app.processEvents()
+        assert app.focusWidget() is dialog.password
+        QTest.keyClick(dialog.password, Qt.Key.Key_Tab)
+        app.processEvents()
+        assert app.focusWidget() is dialog.exit_button
+        QTest.keyClick(dialog.exit_button, Qt.Key.Key_Tab)
+        app.processEvents()
+        assert app.focusWidget() is dialog.unlock_button
+    finally:
+        dialog.close()
+        repository.close()
