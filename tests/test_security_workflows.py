@@ -88,6 +88,6 @@ def test_ci_actions_are_pinned_to_immutable_shas_and_dependabot_updates_them():
             )
 
     dependabot = _read_workflow(".github/dependabot.yml")
-    assert '"package-ecosystem": "github-actions"' in dependabot
+    assert 'package-ecosystem: "github-actions"' in dependabot
     assert 'directory: "/"' in dependabot
     assert 'interval: "weekly"' in dependabot
