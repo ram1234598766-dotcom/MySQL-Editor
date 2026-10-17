@@ -86,7 +86,6 @@ def test_repeated_tour_navigation_and_close_interrupt_cleanly():
         assert dialog._fade is None
         assert dialog._fade_effect is None
         assert dialog.pages.graphicsEffect() is None
-        assert second.state() == QAbstractAnimation.State.Stopped
     finally:
         dialog.close()
         dialog.deleteLater()

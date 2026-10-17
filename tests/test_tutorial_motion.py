@@ -3,9 +3,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEvent, QEventLoop, QTimer
+from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from mysql_editor.ui.animations import TOUR_DURATION_MS
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
@@ -31,39 +33,39 @@ class SettingsStub:
 
 def test_guided_tour_skips_fade_when_reduce_motion_is_enabled():
     tour = ProductTourDialog(settings=SettingsStub(True))
-
-    tour._go(1)
-
-    assert tour.pages.currentIndex() == 1
-    assert tour._fade.state() == QAbstractAnimation.State.Stopped
-    assert tour.windowOpacity() == 1.0
-    _dispose_tour(tour)
+    try:
+        tour._go(1)
+        assert tour.pages.currentIndex() == 1
+        assert tour._fade is None
+        assert tour._fade_effect is None
+        assert tour.pages.graphicsEffect() is None
+        assert tour.windowOpacity() == 1.0
+    finally:
+        _dispose_tour(tour)
 
 
 def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
     tour = ProductTourDialog(settings=SettingsStub(False))
-    tour.show()
-    _APP.processEvents()
+    try:
+        tour.show()
+        _APP.processEvents()
 
-    tour._go(1)
-    assert tour.pages.currentIndex() == 1
-    assert tour._fade.state() == QAbstractAnimation.State.Running
+        tour._go(1)
+        assert tour.pages.currentIndex() == 1
+        assert tour._fade is not None
+        assert tour._fade.state() == QAbstractAnimation.State.Running
+        assert tour._fade.duration() == TOUR_DURATION_MS
+        assert tour._fade_effect is not None
+        assert tour.pages.graphicsEffect() is tour._fade_effect
 
-    # Let Qt complete the top-level window animation before deleting the dialog.
-    # The reduced-motion case above verifies the immediate state path.
-    loop = QEventLoop()
-    tour._fade.finished.connect(loop.quit)
-    QTimer.singleShot(500, loop.quit)
-    loop.exec()
-
-    assert tour._fade.state() == QAbstractAnimation.State.Stopped
-    assert tour.windowOpacity() == 1.0
-
-    tour.close()
-    assert tour._fade.state() == QAbstractAnimation.State.Stopped
-    assert tour._fade.targetObject() is None
-    assert tour.windowOpacity() == 1.0
-    _dispose_tour(tour)
+        QTest.qWait(TOUR_DURATION_MS + 80)
+        _APP.processEvents()
+        assert tour._fade is None
+        assert tour._fade_effect is None
+        assert tour.pages.graphicsEffect() is None
+        assert tour.windowOpacity() == 1.0
+    finally:
+        _dispose_tour(tour)
 
 
 
