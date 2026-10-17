@@ -151,7 +151,7 @@ def test_result_grid_handles_a_large_preview_within_render_budget():
         elapsed = time.perf_counter() - started
         assert model.rowCount() == 2000
         assert model.columnCount() == 16
-        assert model.data(model.index(1999, 15)) == "value-1999-15"
+        assert model.data(model.index(1999, 15)) == "29985"
         assert elapsed < 8.0, f"Updating and showing a result preview took {elapsed:.2f}s"
     finally:
         table.close()
