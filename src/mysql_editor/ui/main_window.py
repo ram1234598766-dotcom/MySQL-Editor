@@ -38,7 +38,8 @@ from mysql_editor.ui.result_tools import (
     selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import (
-    normalize_editor_font_family, normalize_result_row_height, normalize_tab_width,
+    normalize_boolean_preference, normalize_editor_font_family,
+    normalize_result_row_height, normalize_tab_width,
 )
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
@@ -200,6 +201,12 @@ class MainWindow(QMainWindow):
         self._last_saved_paths: dict[int, str] = {}
         self._settings = QSettings()
         self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
+        self._show_editor_line_numbers = normalize_boolean_preference(
+            self._settings.value("ui/showLineNumbers", True), True
+        )
+        self._highlight_current_line = normalize_boolean_preference(
+            self._settings.value("ui/currentLineHighlight", True), True
+        )
         self._editor_font_family = normalize_editor_font_family(
             self._settings.value("ui/editorFontFamily", "Cascadia Code")
         )
@@ -687,6 +694,23 @@ class MainWindow(QMainWindow):
             tab_width_group.addAction(action)
             tab_width_menu.addAction(action)
 
+        editor_preferences.addSeparator()
+        line_numbers_action = QAction("Show line numbers", self)
+        line_numbers_action.setCheckable(True)
+        line_numbers_action.setChecked(self._show_editor_line_numbers)
+        line_numbers_action.setToolTip("Show or hide the SQL editor line-number gutter.")
+        line_numbers_action.toggled.connect(self._set_editor_line_numbers_visible)
+        editor_preferences.addAction(line_numbers_action)
+
+        current_line_action = QAction("Highlight current line", self)
+        current_line_action.setCheckable(True)
+        current_line_action.setChecked(self._highlight_current_line)
+        current_line_action.setToolTip(
+            "Highlight the active SQL line without hiding bracket matches."
+        )
+        current_line_action.toggled.connect(self._set_current_line_highlight_enabled)
+        editor_preferences.addAction(current_line_action)
+
         results_preferences = settings_menu.addMenu("Results")
         density_menu = results_preferences.addMenu("Row height")
         density_group = QActionGroup(self)
@@ -739,9 +763,7 @@ class MainWindow(QMainWindow):
                 font.setStyleHint(QFont.StyleHint.Monospace)
                 font.setPointSize(self._editor_font_size)
                 editor.setFont(font)
-                editor.setTabStopDistance(
-                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
-                )
+                editor.set_tab_width(self._editor_tab_width)
                 editor.set_editor_theme(resolved_theme)
         label = {"system": "System", "light": "Light", "dark": "Dark"}[theme]
         self.status.setText(
@@ -793,9 +815,7 @@ class MainWindow(QMainWindow):
                 font.setStyleHint(QFont.StyleHint.Monospace)
                 font.setPointSize(size)
                 editor.setFont(font)
-                editor.setTabStopDistance(
-                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
-                )
+                editor.set_tab_width(self._editor_tab_width)
         self._settings.setValue("ui/editorFontSize", size)
         self.status.setText(f"SQL editor font size: {size} pt")
 
@@ -826,9 +846,7 @@ class MainWindow(QMainWindow):
                 font.setStyleHint(QFont.StyleHint.Monospace)
                 font.setPointSize(self._editor_font_size)
                 editor.setFont(font)
-                editor.setTabStopDistance(
-                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
-                )
+                editor.set_tab_width(self._editor_tab_width)
         self._settings.setValue("ui/editorFontFamily", family)
         self.status.setText(f"SQL editor font family: {family}")
 
@@ -838,11 +856,32 @@ class MainWindow(QMainWindow):
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
-                editor.setTabStopDistance(
-                    editor.fontMetrics().horizontalAdvance(" ") * width
-                )
+                editor.set_tab_width(width)
         self._settings.setValue("ui/tabWidth", width)
         self.status.setText(f"SQL editor tab width: {width} spaces")
+
+    def _set_editor_line_numbers_visible(self, visible: bool) -> None:
+        """Persist and apply the line-number gutter preference to every open query tab."""
+        enabled = bool(visible)
+        self._show_editor_line_numbers = enabled
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                editor.set_line_numbers_visible(enabled)
+        self._settings.setValue("ui/showLineNumbers", enabled)
+        state = "shown" if enabled else "hidden"
+        self.status.setText(f"SQL editor line numbers {state}.")
+
+    def _set_current_line_highlight_enabled(self, enabled: bool) -> None:
+        """Persist and apply current-line highlighting to every open query tab."""
+        self._highlight_current_line = bool(enabled)
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                editor.set_current_line_highlight_enabled(self._highlight_current_line)
+        self._settings.setValue("ui/currentLineHighlight", self._highlight_current_line)
+        state = "enabled" if self._highlight_current_line else "disabled"
+        self.status.setText(f"Current-line highlighting {state}.")
 
     def _set_result_row_height(self, height: int):
         height = normalize_result_row_height(height)
@@ -1035,9 +1074,9 @@ class MainWindow(QMainWindow):
         font.setStyleHint(QFont.StyleHint.Monospace)
         font.setPointSize(self._editor_font_size)
         editor.setFont(font)
-        editor.setTabStopDistance(
-            editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
-        )
+        editor.set_tab_width(self._editor_tab_width)
+        editor.set_line_numbers_visible(self._show_editor_line_numbers)
+        editor.set_current_line_highlight_enabled(self._highlight_current_line)
         if text:
             editor.setPlainText(text)
         index = self.editors.addTab(editor, Path(path).name if path else "untitled.sql")
