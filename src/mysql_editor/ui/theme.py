@@ -91,4 +91,8 @@ QCheckBox { spacing: 8px; }
 QCheckBox::indicator { width: 16px; height: 16px; }
 QCheckBox::indicator:unchecked { background: #080e17; border: 1px solid #6b829e; border-radius: 3px; }
 QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; border-radius: 3px; }
+QLabel#statusSuccess { color: #4CC7A3; }
+QLabel#statusWarning { color: #F2BE6B; }
+QLabel#statusDanger { color: #F07886; }
+QPushButton#accentSecondary { border-color: #8D91FF; }
 '''
