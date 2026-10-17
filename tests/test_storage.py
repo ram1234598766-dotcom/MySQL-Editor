@@ -95,3 +95,13 @@ def test_last_profile_setting_is_persisted_without_database_password(tmp_path: P
     assert reopened.get_setting("last_profile_id") == "recent-profile"
     assert "password" not in {row[1] for row in reopened._db.execute("PRAGMA table_info(profiles)")}
     reopened.close()
+
+
+
+def test_duplicate_profile_names_are_unique_case_insensitively():
+    from mysql_editor.storage import duplicate_profile_name
+
+    assert duplicate_profile_name("Analytics", ["Production"]) == "Analytics copy"
+    assert duplicate_profile_name("Analytics", ["Analytics copy"]) == "Analytics copy 2"
+    assert duplicate_profile_name("Analytics", ["analytics COPY", "ANALYTICS copy 2"]) == "Analytics copy 3"
+    assert duplicate_profile_name("   ", []) == "MySQL connection copy"

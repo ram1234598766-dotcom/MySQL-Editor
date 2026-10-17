@@ -234,3 +234,15 @@ class CredentialStore:
 
 def new_profile_id() -> str:
     return secrets.token_hex(12)
+
+
+def duplicate_profile_name(name: str, existing_names: list[str]) -> str:
+    """Choose a readable copy name that does not collide with saved profile names."""
+    stem = (str(name).strip() or "MySQL connection") + " copy"
+    existing = {str(item).strip().casefold() for item in existing_names}
+    if stem.casefold() not in existing:
+        return stem
+    index = 2
+    while f"{stem} {index}".casefold() in existing:
+        index += 1
+    return f"{stem} {index}"

@@ -8,7 +8,11 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
-from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore, new_profile_id
+from mysql_editor.core import redact_secrets
+from mysql_editor.storage import (
+    ConnectionProfile, CredentialStore, LocalRepository, MasterPasswordStore,
+    duplicate_profile_name, new_profile_id,
+)
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 class ConnectionDialog(QDialog):
@@ -69,6 +73,16 @@ class ConnectionDialog(QDialog):
         profile_row = QHBoxLayout()
         profile_row.addWidget(QLabel("Saved profile"))
         profile_row.addWidget(self.profile, 1)
+        self.duplicate_profile_button = QPushButton("Duplicate")
+        self.duplicate_profile_button.setAccessibleName("Duplicate saved connection profile")
+        self.duplicate_profile_button.setToolTip("Copy the selected profile into a new unsaved connection.")
+        self.duplicate_profile_button.clicked.connect(self._duplicate_profile)
+        self.delete_profile_button = QPushButton("Delete")
+        self.delete_profile_button.setAccessibleName("Delete saved connection profile")
+        self.delete_profile_button.setToolTip("Delete the selected profile and its stored database password.")
+        self.delete_profile_button.clicked.connect(self._delete_profile)
+        profile_row.addWidget(self.duplicate_profile_button)
+        profile_row.addWidget(self.delete_profile_button)
         root.addLayout(profile_row)
 
         form = QFormLayout()
@@ -152,6 +166,9 @@ class ConnectionDialog(QDialog):
         self.tour_button.clicked.connect(self._show_product_tour)
         self.test_button = QPushButton("Test connection")
         self.test_button.clicked.connect(self._test_connection)
+        self.save_profile_button = QPushButton("Save profile")
+        self.save_profile_button.setToolTip("Save profile settings without connecting to the MySQL server.")
+        self.save_profile_button.clicked.connect(self._save_profile)
         self.connect_button = QPushButton("Connect")
         self.connect_button.setObjectName("primaryButton")
         self.connect_button.clicked.connect(self._connect)
@@ -159,6 +176,7 @@ class ConnectionDialog(QDialog):
         self.exit_button.clicked.connect(self.reject)
         buttons.addWidget(self.tour_button)
         buttons.addWidget(self.test_button)
+        buttons.addWidget(self.save_profile_button)
         buttons.addStretch(1)
         buttons.addWidget(self.exit_button)
         buttons.addWidget(self.connect_button)
@@ -187,14 +205,161 @@ class ConnectionDialog(QDialog):
                     return
 
     def _load_profiles(self):
-        for item in self.repository.profiles():
-            self.profile.addItem(f"{item.name} — {item.username}@{item.host}:{item.port}", item.id)
         preferred = self.preferred_profile_id or self.repository.get_setting("last_profile_id")
-        if preferred:
-            index = self.profile.findData(preferred)
-            if index >= 0:
-                self.profile.setCurrentIndex(index)
-                self._profile_selected(index)
+        self._reload_profiles(preferred)
+
+    def _reload_profiles(self, selected_profile_id: str | None = None, *, apply_selection: bool = True):
+        self.profile.blockSignals(True)
+        self.profile.clear()
+        self.profile.addItem("+ New connection", "")
+        profiles = self.repository.profiles()
+        for item in profiles:
+            self.profile.addItem(
+                f"{item.name} — {item.username}@{item.host}:{item.port}", item.id
+            )
+        index = self.profile.findData(selected_profile_id) if selected_profile_id else 0
+        if index < 0:
+            index = 0
+        self.profile.setCurrentIndex(index)
+        self.profile.blockSignals(False)
+        if apply_selection:
+            self._profile_selected(index)
+
+    def _reset_profile_fields(self):
+        self._profile_id = None
+        self.profile_name.setText("Local MySQL")
+        self.host.setText("127.0.0.1")
+        self.port.setValue(3306)
+        self.username.setText("root")
+        self.password.clear()
+        self.schema.clear()
+        self.tls.setCurrentText("Automatic TLS")
+        self.ca_file.clear()
+        self.read_timeout.setValue(60)
+        self.write_timeout.setValue(30)
+        self.save_profile_check.setChecked(True)
+        self._update_profile_action_buttons()
+
+    def _update_profile_action_buttons(self):
+        has_saved_profile = bool(self._profile_id)
+        self.duplicate_profile_button.setEnabled(has_saved_profile)
+        self.delete_profile_button.setEnabled(has_saved_profile)
+
+    def _duplicate_profile(self):
+        if not self._profile_id:
+            return
+        existing = [profile.name for profile in self.repository.profiles()]
+        new_name = duplicate_profile_name(self.profile_name.text(), existing)
+        self.profile.blockSignals(True)
+        self.profile.setCurrentIndex(0)
+        self.profile.blockSignals(False)
+        self._profile_id = None
+        self.profile_name.setText(new_name)
+        self._update_profile_action_buttons()
+        self.status.setText(
+            "Profile copied into a new connection draft. Save profile to keep it, "
+            "or Connect to test and use it."
+        )
+
+    def _delete_profile(self):
+        profile_id = self._profile_id
+        if not profile_id:
+            return
+        profile_name = self.profile_name.text().strip() or "this profile"
+        answer = QMessageBox.question(
+            self,
+            "Delete saved profile",
+            f"Delete '{profile_name}' and its saved database password from Windows Credential Manager? "
+            "This cannot be undone. An existing connected session will not be disconnected.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.credentials.delete(profile_id)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Profile not deleted",
+                "The saved password could not be removed securely, so the profile metadata was kept. "
+                "No plaintext fallback was used.\n\n" + redact_secrets(str(exc)),
+            )
+            return
+        try:
+            self.repository.delete_profile(profile_id)
+            if self.repository.get_setting("last_profile_id") == profile_id:
+                self.repository.set_setting("last_profile_id", "")
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Profile metadata not deleted",
+                "The credential entry was removed, but the local profile metadata could not be deleted.\n\n"
+                + redact_secrets(str(exc)),
+            )
+            return
+
+        self._reload_profiles(None)
+        self.status.setText(
+            f"Deleted saved profile '{profile_name}' and its Credential Manager entry. "
+            "Any active connection remains open."
+        )
+
+    def _save_profile(self):
+        config = self._validate()
+        if config is None:
+            return
+        if not self.repository.has_master_password:
+            try:
+                self.master.create(self.master_password.text(), self.master_confirm.text())
+            except ValueError as exc:
+                QMessageBox.warning(self, "Master password", str(exc))
+                return
+
+        profile_id = self._profile_id or new_profile_id()
+        profile = ConnectionProfile(
+            id=profile_id,
+            name=config["profile_name"],
+            host=config["host"],
+            port=config["port"],
+            username=config["username"],
+            default_schema=config["default_schema"],
+            tls_mode=config["tls_mode"],
+            ca_file=config["ca_file"],
+            read_timeout=config["read_timeout"],
+            write_timeout=config["write_timeout"],
+        )
+        try:
+            self.repository.save_profile(profile)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Profile not saved",
+                "Profile metadata could not be saved locally.\n\n" + redact_secrets(str(exc)),
+            )
+            return
+
+        credential_error = ""
+        if config["save_profile"]:
+            try:
+                self.credentials.save(profile_id, config["password"])
+            except Exception as exc:
+                credential_error = redact_secrets(str(exc))
+        self._profile_id = profile_id
+        self._reload_profiles(profile_id, apply_selection=False)
+        if credential_error:
+            message = (
+                "Profile details were saved locally, but the database password was not saved in "
+                "Windows Credential Manager. Enter it manually next time. No plaintext fallback was used.\n\n"
+                + credential_error
+            )
+            self.status.setText("Profile saved · password not saved securely.")
+            QMessageBox.warning(self, "Password not saved", message)
+        elif config["save_profile"]:
+            self.status.setText("Profile and database password saved securely in Windows Credential Manager.")
+        else:
+            self.status.setText(
+                "Profile metadata saved locally. Password saving is unchecked; this action did not "
+                "change any existing Credential Manager entry."
+            )
+        self._update_profile_action_buttons()
 
     def _update_master_mode(self):
         first = not self.repository.has_master_password
@@ -228,14 +393,13 @@ class ConnectionDialog(QDialog):
     def _profile_selected(self, index: int):
         profile_id = self.profile.itemData(index)
         if not profile_id:
-            self._profile_id = None
-            if hasattr(self, "profile_name"):
-                self.profile_name.setText("Local MySQL")
+            self._reset_profile_fields()
             return
         saved = next((p for p in self.repository.profiles() if p.id == profile_id), None)
         if not saved:
             return
         self._profile_id = saved.id
+        self._update_profile_action_buttons()
         self.profile_name.setText(saved.name)
         self.host.setText(saved.host)
         self.port.setValue(saved.port)
