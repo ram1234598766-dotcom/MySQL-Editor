@@ -96,6 +96,27 @@ def main():
         assert first.font().pointSize() >= 0
         assert editor.font().pointSize() == 10
 
+        # Theme changes update SQL syntax and custom editor surfaces without losing work.
+        themed_sql = "SELECT current_col FROM sample_table;"
+        editor.setPlainText(themed_sql)
+        themed_cursor = editor.textCursor()
+        themed_start = themed_sql.index("current_col")
+        themed_cursor.setPosition(themed_start)
+        themed_cursor.setPosition(
+            themed_start + len("current_col"), QTextCursor.MoveMode.KeepAnchor
+        )
+        editor.setTextCursor(themed_cursor)
+        first._set_theme("light")
+        assert editor.theme_name == "light"
+        assert editor.highlighter.theme_name == "light"
+        assert editor.toPlainText() == themed_sql
+        assert editor.textCursor().selectedText() == "current_col"
+        assert editor.theme_palette["current_line_background"] == "#EFF6FC"
+        first._set_theme("dark")
+        assert editor.theme_name == "dark"
+        assert editor.toPlainText() == themed_sql
+        settings.setValue("ui/theme", "dark")
+
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
         first._set_editor_tab_width(8)
