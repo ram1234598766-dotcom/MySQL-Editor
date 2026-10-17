@@ -463,3 +463,36 @@ def test_schema_objects_fetch_is_scoped_and_returns_table_columns():
     }
     assert queries[0] == ("SHOW FULL TABLES FROM `analytics`", None)
     assert queries[1][1] == ("analytics",)
+
+
+
+def test_csv_export_preserves_fetch_order_for_unsorted_rows(tmp_path):
+    import csv
+    import json
+
+    spool_owner = _csv_spool()
+    result_id = "fetch-order"
+    spool_owner._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["name", "rank"]), "SELECT", 3),
+    )
+    # Deliberately differs from both ascending and descending lexical order.
+    fetched_rows = [
+        ["zeta", 30],
+        ["Alpha", 10],
+        ["beta", 20],
+    ]
+    spool_owner._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [(result_id, index, json.dumps(row)) for index, row in enumerate(fetched_rows)],
+    )
+    destination = tmp_path / "fetch-order.csv"
+
+    result = DatabaseWorker._export_csv(spool_owner, result_id, str(destination))
+
+    assert result["ok"] is True
+    assert result["row_count"] == 3
+    with destination.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    assert rows == [["name", "rank"], ["zeta", "30"], ["Alpha", "10"], ["beta", "20"]]
+    spool_owner._spool.close()
