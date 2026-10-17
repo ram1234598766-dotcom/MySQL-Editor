@@ -10,11 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal, Qt
-from PySide6.QtGui import QIcon, QTextCursor
+from PySide6.QtGui import QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.main_window import MainWindow
+from mysql_editor.ui.theme import TYPOGRAPHY, stylesheet_for_theme
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
 
@@ -71,6 +72,10 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
         app = QApplication.instance() or QApplication([])
         app.setOrganizationName("MySQL Editor Visual QA")
         app.setApplicationName("MySQL Editor Visual QA")
+        # Match app.py startup: offscreen Qt does not automatically invoke the entry point.
+        app.setStyle("Fusion")
+        app.setFont(QFont(TYPOGRAPHY["app_family"], TYPOGRAPHY["app_size_pt"]))
+        app.setStyleSheet(stylesheet_for_theme("dark"))
         QSettings().clear()
 
         window, _repository = make_window(root / "visual-qa.sqlite3")
