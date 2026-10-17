@@ -72,12 +72,25 @@ _BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
 _CLOSING_BRACKETS = {close: open_ for open_, close in _BRACKET_PAIRS.items()}
 
 
-def _sql_code_mask(text: str) -> bytearray:
-    """Mark SQL code positions, excluding quotes and comments from bracket matching."""
+def _sql_code_mask(text: str, *, preserve_backtick_identifiers: bool = False) -> bytearray:
+    """Mask strings/comments; optionally keep backtick-quoted identifiers as SQL code."""
     mask = bytearray(b"\x01" * len(text))
     index = 0
     while index < len(text):
         char = text[index]
+        if preserve_backtick_identifiers and char == chr(96):
+            # Backticks quote identifiers in MySQL. Keep these positions available for
+            # metadata completion while correctly skipping escaped double backticks.
+            index += 1
+            while index < len(text):
+                if text[index] == chr(96):
+                    if index + 1 < len(text) and text[index + 1] == chr(96):
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
         if char in ("'", '"', chr(96)):
             quote = char
             mask[index] = 0
@@ -408,7 +421,7 @@ class SqlEditor(QPlainTextEdit):
 
         sql = self.toPlainText()
         cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
-        code_mask = _sql_code_mask(sql)
+        code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
         code_sql = "".join(
             char if code_mask[position] else " "
             for position, char in enumerate(sql)
