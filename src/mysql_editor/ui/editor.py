@@ -610,7 +610,66 @@ class SqlEditor(QPlainTextEdit):
             before,
             re.IGNORECASE,
         )
-        if column_context:
+
+        # Keep column suggestions useful after comma-separated expressions such
+        # as SELECT a, b; GROUP BY a, b; ORDER BY a, b; and UPDATE ... SET a=1, b.
+        # This is intentionally a lightweight context heuristic, not a full parser.
+        comma_column_context = False
+        if not column_context:
+            code_mask = _sql_code_mask(sql[:python_position])
+            code_before = "".join(
+                character if code_mask[position] else " "
+                for position, character in enumerate(sql[:python_position])
+            )
+            statement_prefix = code_before[code_before.rfind(";") + 1:]
+            comma_match = re.search(r",\s*[A-Za-z_$0-9]*$", statement_prefix)
+            if comma_match:
+                clause_prefix = statement_prefix[:comma_match.start()]
+                last_select = max(
+                    (
+                        match.start()
+                        for match in re.finditer(
+                            r"\bSELECT\b", clause_prefix, re.IGNORECASE
+                        )
+                    ),
+                    default=-1,
+                )
+                last_from = max(
+                    (
+                        match.start()
+                        for match in re.finditer(
+                            r"\bFROM\b", clause_prefix, re.IGNORECASE
+                        )
+                    ),
+                    default=-1,
+                )
+                if last_select > last_from:
+                    comma_column_context = True
+                else:
+                    sort_clauses = [
+                        match.start()
+                        for match in re.finditer(
+                            r"\b(?:GROUP|ORDER)\s+BY\b", clause_prefix, re.IGNORECASE
+                        )
+                    ]
+                    last_sort_clause = max(sort_clauses, default=-1)
+                    if last_sort_clause > last_from:
+                        comma_column_context = True
+                    else:
+                        set_clauses = [
+                            match.start()
+                            for match in re.finditer(r"\bSET\b", clause_prefix, re.IGNORECASE)
+                        ]
+                        last_set = max(set_clauses, default=-1)
+                        where_after_set = (
+                            last_set >= 0
+                            and re.search(r"\bWHERE\b", clause_prefix[last_set:], re.IGNORECASE)
+                            is not None
+                        )
+                        if last_set >= 0 and not where_after_set:
+                            comma_column_context = True
+
+        if column_context or comma_column_context:
             columns = set(self._extra_completion_words)
             referenced_tables = self._referenced_tables_in_current_statement()
             for table, table_columns in self._completion_columns_by_table.items():

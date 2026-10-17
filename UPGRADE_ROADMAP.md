@@ -559,3 +559,8 @@ The worker now emits running/fetch progress and CSV export progress; the UI dist
 ### Appearance preference work — 17 October 2026
 
 System/Light/Dark theme selection is now implemented in the desktop Settings menu. The selected preference is stored in QSettings, applied during startup, and can be changed immediately without rebuilding the main window or clearing editor/result state. Windows System mode reads the Windows app-colour preference; other platforms fall back to the Qt application palette. Regression tests cover invalid stored values, System resolution, and important light-theme widget states. High-DPI contrast and visual consistency still require manual review on real Windows displays before a release claim.
+
+
+### SQL completion refinement — 17 October 2026
+
+Contextual column completion now remains scoped to the relevant schema tables after commas in common `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Regression coverage verifies that unrelated table columns are not introduced and SQL text is not changed while suggestions are computed. This remains a bounded heuristic rather than a complete MySQL grammar parser.
