@@ -39,3 +39,29 @@ def test_windows_release_audits_build_environment_before_packaging_and_keeps_run
         "--output dist/sbom.cdx.json"
     ) in workflow
     assert "python -m pip_audit --format cyclonedx-json --output dist/sbom.cdx.json" not in workflow
+
+def test_windows_build_uses_read_only_permissions_and_isolates_release_write_access():
+    workflow = _read_workflow(".github/workflows/windows-release.yml")
+
+    assert "permissions:\n  contents: read\n" in workflow
+    assert "permissions:\n      contents: read" in workflow
+    assert "permissions:\n      contents: write" in workflow
+
+    build_job = workflow.split("  build:\n", 1)[1].split("  publish:\n", 1)[0]
+    publish_job = workflow.split("  publish:\n", 1)[1]
+    assert "Publish Windows packages to GitHub Releases" not in build_job
+    assert "uses: actions/download-artifact@v7" in publish_job
+    assert "needs: build" in publish_job
+    assert "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in publish_job
+    assert "contents: write" not in build_job
+
+    upload_at = build_job.index("Upload Windows packages")
+    upload_end = build_job.index("if-no-files-found: error", upload_at)
+    upload_config = build_job[upload_at:upload_end]
+    for required_asset in (
+        "dist/sbom.cdx.json",
+        "dist/RELEASE-NOTES.md",
+        "dist/WINDOWS_SIGNING.md",
+        "dist/THIRD_PARTY_LICENSES.md",
+    ):
+        assert required_asset in upload_config

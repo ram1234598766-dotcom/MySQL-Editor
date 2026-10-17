@@ -7,11 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -141,37 +143,53 @@ jobs:
             dist/installer/MySQLEditor-Setup.exe
             dist/MySQLEditor-Folder.zip
             dist/SHA256SUMS
+            dist/sbom.cdx.json
+            dist/RELEASE-NOTES.md
+            dist/WINDOWS_SIGNING.md
+            dist/THIRD_PARTY_LICENSES.md
           if-no-files-found: error
+  publish:
+    name: Publish Windows preview or release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-windows-preview]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated Windows packages
+        uses: actions/download-artifact@v7
+        with:
+          name: MySQLEditor-Windows
+          path: dist
       - name: Publish Windows packages to GitHub Releases
-        if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-windows-preview]'))
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
+        shell: bash
         run: |
-          if ($env:GITHUB_REF -eq "refs/heads/main") {
-            $releaseTag = "windows-preview-$($env:GITHUB_RUN_ID)"
-            $releaseTitle = "MySQL Editor Windows Preview (Build $($env:GITHUB_RUN_NUMBER))"
-          } else {
-            $releaseTag = $env:GITHUB_REF_NAME
-            $releaseTitle = "MySQL Editor $env:GITHUB_REF_NAME"
-          }
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            releaseTag="windows-preview-${GITHUB_RUN_ID}"
+            releaseTitle="MySQL Editor Windows Preview (Build ${GITHUB_RUN_NUMBER})"
+          else
+            releaseTag="$GITHUB_REF_NAME"
+            releaseTitle="MySQL Editor $GITHUB_REF_NAME"
+          fi
 
-          $releaseArgs = @(
-            "release", "create", $releaseTag,
-            "dist/MySQLEditor-Portable.exe",
-            "dist/installer/MySQLEditor-Setup.exe",
-            "dist/MySQLEditor-Folder.zip",
-            "dist/SHA256SUMS",
-            "dist/sbom.cdx.json",
-            "dist/RELEASE-NOTES.md",
-            "dist/WINDOWS_SIGNING.md",
-            "dist/THIRD_PARTY_LICENSES.md",
-            "--title", $releaseTitle,
-            "--notes-file", "dist/RELEASE-NOTES.md"
+          releaseArgs=(
+            release create "$releaseTag"
+            dist/MySQLEditor-Portable.exe
+            dist/installer/MySQLEditor-Setup.exe
+            dist/MySQLEditor-Folder.zip
+            dist/SHA256SUMS
+            dist/sbom.cdx.json
+            dist/RELEASE-NOTES.md
+            dist/WINDOWS_SIGNING.md
+            dist/THIRD_PARTY_LICENSES.md
+            --title "$releaseTitle"
+            --notes-file dist/RELEASE-NOTES.md
           )
-          if ($env:GITHUB_REF -eq "refs/heads/main") {
-            $releaseArgs += @("--target", $env:GITHUB_SHA, "--prerelease")
-          } elseif ($releaseTag -match "-(alpha|beta|rc|preview)") {
-            $releaseArgs += "--prerelease"
-          }
-          gh @releaseArgs
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            releaseArgs+=(--target "$GITHUB_SHA" --prerelease)
+          elif [[ "$releaseTag" =~ -(alpha|beta|rc|preview) ]]; then
+            releaseArgs+=(--prerelease)
+          fi
+          gh "${releaseArgs[@]}"
