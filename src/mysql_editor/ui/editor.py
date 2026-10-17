@@ -122,16 +122,17 @@ def _sql_code_mask(text: str) -> bytearray:
 
 def _matching_bracket_positions(text: str, cursor_position: int) -> tuple[int, int] | None:
     """Return the opening/closing bracket positions adjacent to the cursor, if paired."""
-    candidate = next(
-        (
-            position
-            for position in (cursor_position, cursor_position - 1)
-            if 0 <= position < len(text)
-            and text[position] in {*_BRACKET_PAIRS, *_CLOSING_BRACKETS}
-        ),
-        None,
-    )
-    if candidate is None:
+    left = cursor_position - 1
+    right = cursor_position
+    if 0 <= left < len(text) and text[left] in _BRACKET_PAIRS:
+        candidate = left
+    elif 0 <= right < len(text) and text[right] in _CLOSING_BRACKETS:
+        candidate = right
+    elif 0 <= right < len(text) and text[right] in _BRACKET_PAIRS:
+        candidate = right
+    elif 0 <= left < len(text) and text[left] in _CLOSING_BRACKETS:
+        candidate = left
+    else:
         return None
 
     code_mask = _sql_code_mask(text)
