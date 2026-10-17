@@ -116,6 +116,8 @@ QLabel#tourCardTitle { color: #edf5ff; font-weight: 650; font-size: 12px; }
 QLabel#tourCardBody { color: #adc0d5; font-size: 11px; }
 QWidget#tourPage { background: transparent; }
 QLabel#tourProgress { padding: 0 2px; }
+QLabel#tourProgress[current="true"] { color: #58dcec; font-size: 14px; }
+QLabel#tourProgress[current="false"] { color: #7187a3; font-size: 12px; }
 QTabWidget::pane { background: #090f19; border: 1px solid #405675; border-radius: 7px; top: -1px; }
 QTabBar::tab { background: #172235; color: #b6c5d9; padding: 9px 12px; border: 1px solid #354760; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 3px; }
 QTabBar::tab:selected { background: #090f19; color: #e8f1ff; border-bottom-color: #090f19; }
