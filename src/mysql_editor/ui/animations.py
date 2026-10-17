@@ -4,8 +4,45 @@ from __future__ import annotations
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSettings
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
-MICRO_DURATION_MS = 120
-STANDARD_DURATION_MS = 180
+# Keep motion timing centralized so widgets share a predictable interaction rhythm.
+# A None duration means progress is driven by real work, never by a fake time estimate.
+MOTION_TOKENS = {
+    "micro": {
+        "duration_ms": 120,
+        "easing": "OutCubic",
+        "purpose": "Small control and disclosure feedback",
+    },
+    "standard": {
+        "duration_ms": 180,
+        "easing": "OutCubic",
+        "purpose": "Small workspace-panel transitions",
+    },
+    "dialog": {
+        "duration_ms": 200,
+        "easing": "OutCubic",
+        "purpose": "Short dialog-content transition where supported",
+    },
+    "panel": {
+        "duration_ms": 220,
+        "easing": "InOutCubic",
+        "purpose": "Compact inspector-panel transition",
+    },
+    "tour": {
+        "duration_ms": 260,
+        "easing": "OutCubic",
+        "purpose": "Guided-tour page transition",
+    },
+    "progress": {
+        "duration_ms": None,
+        "easing": "Linear",
+        "purpose": "State-based progress only; show real status text",
+    },
+}
+MICRO_DURATION_MS = MOTION_TOKENS["micro"]["duration_ms"]
+STANDARD_DURATION_MS = MOTION_TOKENS["standard"]["duration_ms"]
+DIALOG_DURATION_MS = MOTION_TOKENS["dialog"]["duration_ms"]
+PANEL_DURATION_MS = MOTION_TOKENS["panel"]["duration_ms"]
+TOUR_DURATION_MS = MOTION_TOKENS["tour"]["duration_ms"]
 
 
 def reduce_motion_enabled(settings: QSettings | None = None) -> bool:

@@ -39,7 +39,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - MySQL keyword/function completion plus context-aware schema columns and tables, including comma-separated `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Use **Ctrl+Space** to open completion on demand; completion remains a lightweight aid rather than a full MySQL parser.
 - SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
 - Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, editor font family, and font size are stored locally.
-- Animated five-step guided tour that can insert a sample SELECT into the editor.
+- Five-step guided tour with a short, interruptible content transition that respects Reduce Motion; it can insert a sample SELECT into the editor.
 
 ### Database work
 - Execute the statement under the cursor, highlighted SQL, or the whole script.

@@ -10,6 +10,10 @@ from PySide6.QtWidgets import QApplication, QWidget
 from mysql_editor.ui.animations import (
     MICRO_DURATION_MS,
     STANDARD_DURATION_MS,
+    DIALOG_DURATION_MS,
+    PANEL_DURATION_MS,
+    TOUR_DURATION_MS,
+    MOTION_TOKENS,
     fade_in,
     reduce_motion_enabled,
 )
@@ -36,7 +40,12 @@ def test_reduce_motion_setting_is_respected():
 
 
 def test_animation_durations_are_short_and_bounded():
-    assert 0 < MICRO_DURATION_MS <= STANDARD_DURATION_MS <= 220
+    assert 0 < MICRO_DURATION_MS <= STANDARD_DURATION_MS <= DIALOG_DURATION_MS
+    assert DIALOG_DURATION_MS < PANEL_DURATION_MS < TOUR_DURATION_MS <= 280
+    assert MOTION_TOKENS["micro"]["easing"] == "OutCubic"
+    assert MOTION_TOKENS["panel"]["easing"] == "InOutCubic"
+    assert MOTION_TOKENS["progress"]["duration_ms"] is None
+    assert "real status text" in MOTION_TOKENS["progress"]["purpose"]
 
 
 def test_fade_in_skips_effect_when_reduce_motion_is_enabled():

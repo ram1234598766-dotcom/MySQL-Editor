@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSettings, QEasingCurve, QPropertyAnimation, Qt
-from mysql_editor.ui.animations import STANDARD_DURATION_MS, reduce_motion_enabled
+from mysql_editor.ui.animations import TOUR_DURATION_MS, reduce_motion_enabled
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -161,13 +161,10 @@ class ProductTourDialog(QDialog):
         footer.addWidget(self.next_button)
         root.addLayout(footer)
 
-        # The dialog is the animation target and owner. This avoids a separate
-        # widget-owned graphics effect and keeps interruption/teardown straightforward.
-        self._fade = QPropertyAnimation(self, b"windowOpacity")
-        self._fade.setDuration(STANDARD_DURATION_MS)
-        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._fade.setStartValue(0.92)
-        self._fade.setEndValue(1.0)
+        # Animate the compact content stack, not the top-level native window.
+        # This is more predictable across Windows window managers and easy to detach.
+        self._fade: QPropertyAnimation | None = None
+        self._fade_effect: QGraphicsOpacityEffect | None = None
         self._render_page()
 
     def _render_page(self):
@@ -190,24 +187,58 @@ class ProductTourDialog(QDialog):
         index = max(0, min(index, len(self._pages) - 1))
         if index == self._index:
             return
+        self._stop_page_transition()
         self._index = index
         self.pages.setCurrentIndex(index)
         self._render_page()
-        self._fade.stop()
-        self.setWindowOpacity(1.0)
         if reduce_motion_enabled(self._settings):
             return
-        self._fade.setStartValue(0.92)
-        self._fade.setEndValue(1.0)
-        self._fade.start()
+
+        effect = QGraphicsOpacityEffect(self.pages)
+        effect.setOpacity(0.84)
+        self.pages.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(TOUR_DURATION_MS)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.setStartValue(0.84)
+        animation.setEndValue(1.0)
+        animation.finished.connect(
+            lambda: self._complete_page_transition(animation, effect)
+        )
+        self._fade_effect = effect
+        self._fade = animation
+        animation.start()
+
+    def _complete_page_transition(
+        self, animation: QPropertyAnimation, effect: QGraphicsOpacityEffect
+    ) -> None:
+        """Restore the page stack and detach an animation that reached its final state."""
+        if self._fade is not animation:
+            return
+        self._fade = None
+        if self._fade_effect is effect:
+            animation.stop()
+            animation.setTargetObject(None)
+            self.pages.setGraphicsEffect(None)
+            self._fade_effect = None
+        animation.deleteLater()
+
+    def _stop_page_transition(self) -> None:
+        """Interrupt an active transition without leaving an opacity effect attached."""
+        animation = self._fade
+        effect = self._fade_effect
+        self._fade = None
+        self._fade_effect = None
+        if animation is not None:
+            animation.stop()
+            animation.setTargetObject(None)
+            animation.deleteLater()
+        if effect is not None:
+            self.pages.setGraphicsEffect(None)
 
     def _finish_animation(self):
-        """Stop page motion and restore full opacity before closing or reopening."""
-        self._fade.stop()
-        # Detach the animation target before the dialog can be destroyed. This avoids
-        # leaving a parentless Qt animation with a dangling widget target at shutdown.
-        self._fade.setTargetObject(None)
-        self.setWindowOpacity(1.0)
+        """Stop page motion and restore the content stack before closing."""
+        self._stop_page_transition()
 
     def done(self, result: int) -> None:
         self._finish_animation()
