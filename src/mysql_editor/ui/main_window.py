@@ -6,12 +6,13 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
+from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
-    QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter,
-    QTabWidget, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QShortcut, QSplitter, QTabWidget, QTableView, QToolButton,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
@@ -22,6 +23,7 @@ from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
+from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
 
 
 class ResultsModel(QAbstractTableModel):
@@ -341,8 +343,15 @@ class MainWindow(QMainWindow):
         self.result_grid.setModel(self.result_proxy)
         self.result_grid.setSortingEnabled(True)
         self.result_grid.setAlternatingRowColors(True)
-        self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
         self.result_grid.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
+        self.result_grid.setToolTip(
+            "Select cells to copy. Double-click a cell for full-value details; right-click for result actions."
+        )
+        self.result_grid.doubleClicked.connect(self.show_cell_details)
+        self.copy_cells_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.result_grid)
+        self.copy_cells_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.copy_cells_shortcut.activated.connect(self.copy_selected_cells)
         self.result_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.result_grid.horizontalHeader().setStretchLastSection(True)
         self.result_grid.verticalHeader().setDefaultSectionSize(28)
@@ -970,31 +979,112 @@ class MainWindow(QMainWindow):
             self._dispatch("export_csv", {"result_id": self._current_result_id, "path": path})
 
     def _show_result_context(self, point):
+        clicked = self.result_grid.indexAt(point)
+        selection = self.result_grid.selectionModel()
+        if clicked.isValid() and clicked not in self.result_grid.selectedIndexes():
+            selection.select(clicked, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+
         menu = QMenu(self)
-        copy_action = menu.addAction("Copy selected cells")
+        details_action = menu.addAction("View cell details")
+        details_action.setEnabled(clicked.isValid())
+        menu.addSeparator()
+        copy_cells_action = menu.addAction("Copy selected cells")
+        copy_rows_action = menu.addAction("Copy selected rows")
+        copy_headers_action = menu.addAction("Copy column headers")
+        menu.addSeparator()
         export_action = menu.addAction("Export result to CSV")
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
-        if chosen == copy_action:
+        if chosen == details_action:
+            self.show_cell_details(clicked)
+        elif chosen == copy_cells_action:
             self.copy_selected_cells()
+        elif chosen == copy_rows_action:
+            self.copy_selected_rows()
+        elif chosen == copy_headers_action:
+            self.copy_column_headers()
         elif chosen == export_action:
             self.export_results()
+
+    def _selected_view_rows(self) -> list[int]:
+        return sorted({index.row() for index in self.result_grid.selectedIndexes()})
 
     def copy_selected_cells(self):
         indexes = self.result_grid.selectedIndexes()
         if not indexes:
+            self.status.setText("Select one or more result cells to copy.")
             return
-        by_row: dict[int, list[tuple[int, str]]] = {}
+        cells = {}
         for index in indexes:
             source_index = self.result_proxy.mapToSource(index)
             value = self.result_model.rows[source_index.row()][source_index.column()]
-            by_row.setdefault(index.row(), []).append((index.column(), "" if value is None else str(value)))
-        lines = [
-            "\t".join(value for _, value in sorted(items))
-            for _, items in sorted(by_row.items())
-        ]
+            cells[(index.row(), index.column())] = value
         from PySide6.QtWidgets import QApplication
-        QApplication.clipboard().setText("\n".join(lines))
-        self.status.setText(f"Copied {len(indexes)} selected cell(s).")
+        QApplication.clipboard().setText(selected_cells_tsv(cells))
+        self.status.setText(f"Copied {len(indexes):,} selected cell(s). SQL NULL is copied as NULL.")
+
+    def copy_selected_rows(self):
+        view_rows = self._selected_view_rows()
+        if not view_rows:
+            self.status.setText("Select one or more result rows to copy.")
+            return
+        rows = []
+        for view_row in view_rows:
+            values = []
+            for column in range(self.result_proxy.columnCount()):
+                view_index = self.result_proxy.index(view_row, column)
+                source_index = self.result_proxy.mapToSource(view_index)
+                values.append(self.result_model.rows[source_index.row()][source_index.column()])
+            rows.append(values)
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(rows_tsv(rows))
+        self.status.setText(f"Copied {len(rows):,} selected row(s).")
+
+    def copy_column_headers(self):
+        selected_columns = sorted({index.column() for index in self.result_grid.selectedIndexes()})
+        columns = selected_columns or list(range(len(self.result_model.headers)))
+        headers = [
+            self.result_model.headers[column] for column in columns
+            if 0 <= column < len(self.result_model.headers)
+        ]
+        if not headers:
+            self.status.setText("There are no result column headers to copy.")
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(column_headers_tsv(headers))
+        self.status.setText(f"Copied {len(headers):,} column header(s).")
+
+    def show_cell_details(self, index=None):
+        if index is None or not index.isValid():
+            index = self.result_grid.currentIndex()
+        if not index.isValid():
+            return
+        source_index = self.result_proxy.mapToSource(index)
+        value = self.result_model.rows[source_index.row()][source_index.column()]
+        column_name = (
+            self.result_model.headers[source_index.column()]
+            if source_index.column() < len(self.result_model.headers) else "Value"
+        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Cell details · {column_name}")
+        dialog.setMinimumSize(560, 340)
+        layout = QVBoxLayout(dialog)
+        state = QLabel(
+            f"Row {source_index.row() + 1:,} · Column {column_name} · "
+            + ("SQL NULL (no value)" if value is None else ("Empty text value" if value == "" else "Value"))
+        )
+        state.setWordWrap(True)
+        layout.addWidget(state)
+        detail = QPlainTextEdit(dialog)
+        detail.setObjectName("cellDetailValue")
+        detail.setReadOnly(True)
+        detail.setPlainText(cell_detail_text(value))
+        detail.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        detail.setAccessibleName(f"Full value for column {column_name}")
+        layout.addWidget(detail, 1)
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        dialog.exec()
 
     def _set_history_enabled(self, enabled: bool):
         self.repository.set_history_enabled(enabled)

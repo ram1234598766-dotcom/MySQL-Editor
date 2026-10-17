@@ -167,11 +167,13 @@ Commit and Rollback act on the active connection. Some MySQL statements, particu
 
 A multi-statement script can create several result entries. Use the result picker to switch among them. The grid displays column headers and rows along with row-count and duration information where available.
 
-- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison.
+- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. CSV export preserves the original server-fetch order, not the grid's current sort order.
 - **Quick filter** searches visible row cells case-insensitively. Clear the filter to show all rows in the current preview.
-- **Copy selected cells** puts the selected values on the clipboard as tab-separated text.
-- **CSV export** uses rows fetched into the current session result spool, not just the visible grid. The 2,000-row display preview and active quick filter do not limit the exported fetched result set.
-- **NULL** appears as **(NULL)** in the display. Review it carefully if downstream tools distinguish NULL from an empty string.
+- **Copy selected cells** copies a tab-separated rectangular selection; tabs and newlines inside values are quoted so copied data stays parseable.
+- **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.
+- **Cell details** opens a read-only view for long values, showing the column, row, and whether the value is SQL NULL, empty text, or non-empty text.
+- **CSV export** uses rows fetched into the current session result spool, not just the visible grid. The 2,000-row display preview and active quick filter do not limit the exported fetched result set. CSV export retains fetch order even after sorting and filtering.
+- **NULL** appears as **(NULL)** in the display and copies as the marker **NULL**. CSV follows standard empty-field output here: SQL NULL and an empty string both produce an empty field, so inspect cell details before exporting if this distinction matters to downstream processing.
 
 The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
 
