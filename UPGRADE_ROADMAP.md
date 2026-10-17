@@ -574,3 +574,8 @@ The cell-details dialog now offers an explicit **Copy full value** action for lo
 ### Fail-closed handling for unsupported DELIMITER scripts — 17 October 2026
 
 Standalone MySQL client `DELIMITER` directives are detected after masking strings and comments. The SQL Editor warns before queueing the script, and the database worker repeats the guard for non-UI callers. Rejection returns no result entries, preserves the current transaction state, and occurs before opening a statement cursor. Regression tests cover comment/literal false positives and ensure a submitted script is rejected as a whole.
+
+
+### Automated theme and SQL syntax contrast gates — 17 October 2026
+
+Added WCAG AA (4.5:1) regression thresholds for selected normal, muted, disabled, status, selection, and SQL syntax text states in both themes. Focus boundaries use a 3:1 non-text threshold. The checks cover the custom syntax highlighter and line-number gutter as well as shared application chrome. These are targeted palette regression tests, not a claim that every widget/state or every Windows display has completed a full accessibility audit.
