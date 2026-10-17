@@ -28,6 +28,9 @@ def _set_label_color(widget: QWidget, color: QColor) -> None:
 
 
 def _find_animation(widget: QWidget) -> QVariantAnimation | None:
+    animation = getattr(widget, "_mysql_editor_color_transition", None)
+    if animation is not None:
+        return animation
     return widget.findChild(QVariantAnimation, _COLOR_ANIMATION_OBJECT_NAME)
 
 
@@ -69,6 +72,10 @@ def _ensure_animation(widget: QWidget) -> QVariantAnimation:
 
     animation.valueChanged.connect(update_color)
     animation.finished.connect(finish)
+    # Retain the wrapper for the full lifetime of the widget. Qt owns the
+    # underlying QObject as a child; dropping its only Python wrapper while the
+    # parent is still alive can crash PySide during interpreter shutdown.
+    widget._mysql_editor_color_transition = animation
     return animation
 
 
