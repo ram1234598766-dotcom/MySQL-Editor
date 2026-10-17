@@ -95,6 +95,11 @@ def test_confirmed_connection_dialog_can_open_but_state_clears_only_after_switch
     window._persist_profile = lambda _profile, _config: None
     window._update_connection_status = lambda: None
     window.refresh_schema = lambda: None
+    window._switch_connection = (
+        lambda profile, config, result: MainWindow._switch_connection(
+            window, profile, config, result
+        )
+    )
 
     MainWindow.open_connection_dialog(window)
 
