@@ -166,6 +166,7 @@ def test_schema_switch_is_blocked_while_query_is_running(tmp_path):
         window.close()
         repository.close()
 
+
 def test_schema_switch_respects_disabled_profile_saving(tmp_path):
     window, repository, worker = _make_window(tmp_path)
     try:
