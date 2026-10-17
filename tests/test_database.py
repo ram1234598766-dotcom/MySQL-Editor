@@ -415,3 +415,51 @@ def test_worker_progress_emits_the_task_id_that_caused_it():
     worker._current_task_id = None
     worker._report_activity("No cancellable query is currently active.")
     assert untagged == ["No cancellable query is currently active."]
+
+
+
+def test_schema_objects_fetch_is_scoped_and_returns_table_columns():
+    from mysql_editor.database import DatabaseWorker
+
+    queries = []
+
+    class Cursor:
+        def __init__(self):
+            self.rows = []
+
+        def execute(self, query, params=None):
+            queries.append((query, params))
+            if query.startswith("SHOW FULL TABLES"):
+                self.rows = [("teams", "BASE TABLE"), ("team_view", "VIEW")]
+            elif "information_schema.COLUMNS" in query:
+                self.rows = [("teams", "team_id"), ("teams", "team_name")]
+            else:
+                raise AssertionError(f"Unexpected schema query: {query}")
+
+        def fetchall(self):
+            return list(self.rows)
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    worker = DatabaseWorker()
+    worker._connection = Connection()
+
+    result = worker._read_schema_objects("analytics")
+
+    assert result == {
+        "ok": True,
+        "schema": "analytics",
+        "objects": [
+            {"name": "teams", "type": "BASE TABLE"},
+            {"name": "team_view", "type": "VIEW"},
+        ],
+        "columns_by_table": {"teams": ["team_id", "team_name"]},
+        "column_metadata_truncated": False,
+    }
+    assert queries[0] == ("SHOW FULL TABLES FROM `analytics`", None)
+    assert queries[1][1] == ("analytics",)
