@@ -237,6 +237,94 @@ def test_qualified_completion_resolves_schema_qualified_backtick_alias():
     assert editor.toPlainText() == source
 
 
+def test_schema_qualified_table_completion_is_limited_to_the_requested_schema():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        databases={"app_db", "analytics"},
+        tables={"customers", "orders"},
+        columns_by_table={"customers": ["customer_id"], "orders": ["app_order_id"]},
+        active_schema="app_db",
+        tables_by_schema={
+            "app_db": {"customers", "orders"},
+            "analytics": {"events", "orders"},
+        },
+        columns_by_schema_and_table={
+            "app_db": {"customers": ["customer_id"], "orders": ["app_order_id"]},
+            "analytics": {"events": ["event_id"], "orders": ["analytics_order_id"]},
+        },
+    )
+    source = "SELECT * FROM `analytics`.`eve"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len(source))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"events", "orders"} <= candidates
+    assert "customers" not in candidates
+    assert "customer_id" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_schema_qualified_column_completion_does_not_leak_same_named_table_columns():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        databases={"app_db", "analytics"},
+        tables={"orders"},
+        columns_by_table={"orders": ["app_order_id"]},
+        active_schema="app_db",
+        tables_by_schema={
+            "app_db": {"orders"},
+            "analytics": {"orders"},
+        },
+        columns_by_schema_and_table={
+            "app_db": {"orders": ["app_order_id"]},
+            "analytics": {"orders": ["analytics_order_id"]},
+        },
+    )
+    source = "SELECT analytics.orders.analytics_ FROM `analytics`.`orders`"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("analytics_") + len("analytics_"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert "analytics_order_id" in candidates
+    assert "app_order_id" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_alias_of_schema_qualified_table_uses_its_own_schema_columns():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        databases={"app_db", "analytics"},
+        tables={"orders"},
+        columns_by_table={"orders": ["app_order_id"]},
+        active_schema="app_db",
+        tables_by_schema={
+            "app_db": {"orders"},
+            "analytics": {"orders"},
+        },
+        columns_by_schema_and_table={
+            "app_db": {"orders": ["app_order_id"]},
+            "analytics": {"orders": ["analytics_order_id"]},
+        },
+    )
+    source = "SELECT o.analytics_ FROM `analytics`.`orders` AS o"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("analytics_") + len("analytics_"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert "analytics_order_id" in candidates
+    assert "app_order_id" not in candidates
+    assert editor.toPlainText() == source
+
+
 def test_table_completion_is_available_while_typing_backtick_identifier():
     editor = SqlEditor()
     editor.set_completion_context(

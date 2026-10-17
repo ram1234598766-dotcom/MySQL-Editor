@@ -588,3 +588,7 @@ Added generous CI time budgets for main-window construction, editing a 1,500-lin
 ### Backtick-quoted completion — 17 October 2026
 
 Contextual completion is now available while typing a partial MySQL backtick-quoted identifier, including table names after `FROM` and columns after a known table alias. The completion scanner treats backticks as identifier delimiters only in the completion path; ordinary string/comment suppression and the stricter bracket auto-pair path remain unchanged. Regression coverage verifies that suggestions preserve SQL text, quoted table names remain scoped during unqualified completion, and accepting a suggestion changes only the intended identifier token. This remains a bounded editing heuristic, not a complete MySQL grammar parser.
+
+### Schema-scoped completion — 17 October 2026
+
+Completion now keeps table/view and column metadata associated with each schema as lazy-loaded schema nodes are expanded. `schema.table.column` and aliases of schema-qualified tables resolve against that schema's cached columns; `schema.` offers only the loaded table/view names for that schema. When a schema has not been loaded or its column metadata is unavailable, completion returns no scoped object suggestions rather than leaking similarly named columns from the active schema. Refresh clears these caches before new metadata arrives.

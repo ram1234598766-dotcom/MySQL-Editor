@@ -171,6 +171,8 @@ class MainWindow(QMainWindow):
         self._schema_databases: set[str] = set()
         self._schema_tables: set[str] = set()
         self._schema_columns_by_table: dict[str, list[str]] = {}
+        self._schema_tables_by_schema: dict[str, set[str]] = {}
+        self._schema_columns_by_schema_and_table: dict[str, dict[str, list[str]]] = {}
         self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
@@ -1006,6 +1008,8 @@ class MainWindow(QMainWindow):
             columns_by_table=self._schema_columns_by_table,
             extra_words=self._result_completion_words,
             active_schema=self._active_schema_name,
+            tables_by_schema=self._schema_tables_by_schema,
+            columns_by_schema_and_table=self._schema_columns_by_schema_and_table,
         )
         font = editor.font()
         font.setFamily(self._editor_font_family)
@@ -1309,6 +1313,8 @@ class MainWindow(QMainWindow):
         self._schema_databases.clear()
         self._schema_tables.clear()
         self._schema_columns_by_table.clear()
+        self._schema_tables_by_schema.clear()
+        self._schema_columns_by_schema_and_table.clear()
         self._schema_completion_words.clear()
         self._active_schema_name = ""
         self._update_all_editor_completions()
@@ -1357,6 +1363,12 @@ class MainWindow(QMainWindow):
             str(table): [str(column) for column in columns]
             for table, columns in (result.get("columns_by_table") or {}).items()
         }
+        if self._active_schema_name:
+            self._schema_tables_by_schema[self._active_schema_name] = set(self._schema_tables)
+            self._schema_columns_by_schema_and_table[self._active_schema_name] = {
+                table: list(columns)
+                for table, columns in self._schema_columns_by_table.items()
+            }
         self._update_all_editor_completions()
         self.schema_state_label.setText(schema_status_message(result))
         status = f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)"
@@ -1442,6 +1454,16 @@ class MainWindow(QMainWindow):
         data["metadata_loaded"] = True
         data["metadata_loading"] = False
         item.setData(0, Qt.ItemDataRole.UserRole, data)
+        self._schema_tables_by_schema[schema] = {
+            str(record.get("name", "") or "")
+            for record in result.get("objects", [])
+            if str(record.get("name", "") or "")
+        }
+        self._schema_columns_by_schema_and_table[schema] = {
+            str(table): [str(column) for column in columns]
+            for table, columns in (result.get("columns_by_table") or {}).items()
+        }
+        self._update_all_editor_completions()
         table_count = len(result.get("objects", []))
         self.status.setText(f"Loaded {table_count:,} table/view object(s) from schema {schema}.")
 
@@ -1455,6 +1477,8 @@ class MainWindow(QMainWindow):
                     columns_by_table=self._schema_columns_by_table,
                     extra_words=self._result_completion_words,
                     active_schema=self._active_schema_name,
+                    tables_by_schema=self._schema_tables_by_schema,
+                    columns_by_schema_and_table=self._schema_columns_by_schema_and_table,
                 )
 
     def _set_result_completion_words(self, headers) -> None:
