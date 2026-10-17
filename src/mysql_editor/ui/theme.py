@@ -323,6 +323,7 @@ def stylesheet_for_theme(value: object = "dark", system_is_dark: bool | None = N
         stylesheet = stylesheet.replace(dark_value, light_value)
     return stylesheet
 
+
 def color_for_theme(
     token_name: str, value: object = "dark", system_is_dark: bool | None = None,
 ) -> str:
