@@ -601,3 +601,8 @@ Completion metadata now fails closed when optional maps are malformed, and a str
 ### SQL editor preference completion — 17 October 2026
 
 The Settings > Editor tab-width preference now affects actual Tab insertion and automatic indentation after common SQL block openers, not only the visual tab stop. Added persisted toggles for line-number visibility and current-line highlighting; changes apply to open tabs and new tabs. Bracket-matching feedback remains available when current-line highlighting is disabled. Regression checks cover invalid stored boolean values, all supported indentation widths, and the independent gutter/highlight controls. Automated Windows packaging does not replace manual high-DPI visual review on a physical PC.
+
+
+### Dependency audit scope — 17 October 2026
+
+Expanded the dependency security gate beyond `requirements.txt`: CI installs the declared project/test extras plus PyInstaller and the license inventory tool, audits the compatible runtime requirement set, then audits the actually installed test and packaging environment. The Windows packaging workflow now performs the same installed-environment audit before packaging begins. The release CycloneDX SBOM stays deliberately runtime-focused; the separate audit gates catch known advisories in test/build tooling too. CI results for this change are pending until the pull request checks complete.
