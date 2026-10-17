@@ -61,12 +61,18 @@ def test_context_completion_suggests_tables_after_from_and_databases_after_use()
     )
 
     editor.setPlainText("SELECT * FROM ")
+    cursor = editor.textCursor()
+    cursor.setPosition(len(editor.toPlainText()))
+    editor.setTextCursor(cursor)
     table_candidates = set(editor._context_completion_words())
     assert {"customers", "orders"} <= table_candidates
     assert "customer_id" not in table_candidates
     assert "COUNT" not in table_candidates
 
     editor.setPlainText("USE ")
+    cursor = editor.textCursor()
+    cursor.setPosition(len(editor.toPlainText()))
+    editor.setTextCursor(cursor)
     database_candidates = set(editor._context_completion_words())
     assert {"analytics", "app_db"} <= database_candidates
     assert "customers" not in database_candidates
