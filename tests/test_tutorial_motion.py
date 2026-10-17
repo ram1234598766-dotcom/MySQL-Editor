@@ -64,3 +64,22 @@ def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
     assert tour._fade.targetObject() is None
     assert tour.windowOpacity() == 1.0
     _dispose_tour(tour)
+
+
+
+def test_tour_progress_state_uses_shared_stylesheet_not_widget_local_colors():
+    tour = ProductTourDialog(settings=SettingsStub(True))
+    try:
+        assert all(label.styleSheet() == "" for label in tour.progress_labels)
+        assert [label.property("current") for label in tour.progress_labels] == [
+            True, False, False, False, False
+        ]
+
+        tour._go(1)
+
+        assert [label.property("current") for label in tour.progress_labels] == [
+            False, True, False, False, False
+        ]
+        assert all(label.styleSheet() == "" for label in tour.progress_labels)
+    finally:
+        _dispose_tour(tour)
