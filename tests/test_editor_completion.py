@@ -484,3 +484,36 @@ def test_bracket_auto_pairing_uses_qt_utf16_cursor_offsets_with_unicode():
     assert editor.toPlainText() == "SELECT '🧡'; SELECT ()"
     assert editor.textCursor().position() == editor.document().characterCount() - 2
     editor.deleteLater()
+
+
+
+def test_comma_separated_column_completion_scopes_to_the_active_clause():
+    cases = [
+        "SELECT display_name, customer_ FROM customers AS c",
+        "SELECT * FROM customers c ORDER BY display_name, customer_",
+        "SELECT * FROM customers c GROUP BY display_name, customer_",
+        "UPDATE customers SET display_name = 'x', customer_",
+    ]
+    for source in cases:
+        editor = SqlEditor()
+        try:
+            editor.set_completion_context(
+                tables={"customers", "orders"},
+                columns_by_table={
+                    "customers": ["customer_id", "display_name", "created_at"],
+                    "orders": ["order_id", "order_total"],
+                },
+                active_schema="app_db",
+            )
+            editor.setPlainText(source)
+            cursor = editor.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            editor.setTextCursor(cursor)
+
+            candidates = set(editor._context_completion_words())
+            assert {"customer_id", "display_name", "created_at"} <= candidates, source
+            assert "order_id" not in candidates, source
+            assert editor.toPlainText() == source
+        finally:
+            editor.deleteLater()
+            _APP.processEvents()
