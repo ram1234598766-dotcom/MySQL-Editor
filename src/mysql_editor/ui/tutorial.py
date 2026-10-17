@@ -1,10 +1,12 @@
 """Animated, keyboard-friendly quick-start tour for MySQL Editor."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
-from mysql_editor.ui.animations import TOUR_DURATION_MS, reduce_motion_enabled
+from PySide6.QtCore import Qt
+from mysql_editor.ui.animations import (
+    TOUR_DURATION_MS, animate_label_color, stop_color_animation,
+)
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -160,33 +162,30 @@ class ProductTourDialog(QDialog):
         footer.addWidget(self.next_button)
         root.addLayout(footer)
 
-        # Honour the same persisted Reduce Motion setting as workspace transitions.
-        # In immediate mode, don't attach an opacity effect at all.
-        self._reduce_motion = reduce_motion_enabled()
-        self._opacity: QGraphicsOpacityEffect | None = None
-        self._fade: QPropertyAnimation | None = None
-        if not self._reduce_motion:
-            self._opacity = QGraphicsOpacityEffect()
-            self._opacity.setOpacity(1.0)
-            self.pages.setGraphicsEffect(self._opacity)
-            self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
-            self._fade.setDuration(TOUR_DURATION_MS)
-            self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # A small progress-label color transition avoids graphics effects on the
+        # stacked page widget, whose effect ownership is otherwise tricky in Qt.
         self._render_page()
 
-    def _render_page(self):
+    def _render_page(self, *, animate_active: bool = False):
         title, intro, _items = self._pages[self._index]
         self.heading.setText(title)
         self.intro.setText(intro)
         self.step_label.setText(f"STEP {self._index + 1} OF {len(self._pages)}")
         self.back_button.setEnabled(self._index > 0)
         self.next_button.setText("Finish tour  ✓" if self._index == len(self._pages) - 1 else "Next step  →")
+        active = self.progress_labels[self._index]
         for index, label in enumerate(self.progress_labels):
             label.setProperty("current", index == self._index)
-            label.setStyleSheet(
-                "color: #50d9ee; font-size: 14px;" if index == self._index
-                else "color: #4a607c; font-size: 12px;"
-            )
+            stop_color_animation(label)
+            if index == self._index and animate_active:
+                label.setStyleSheet("color: #4a607c; font-size: 14px;")
+            else:
+                label.setStyleSheet(
+                    "color: #50d9ee; font-size: 14px;" if index == self._index
+                    else "color: #4a607c; font-size: 12px;"
+                )
+        if animate_active:
+            animate_label_color(active, duration_ms=TOUR_DURATION_MS)
 
     def _go(self, index: int):
         index = max(0, min(index, len(self._pages) - 1))
@@ -194,21 +193,12 @@ class ProductTourDialog(QDialog):
             return
         self._index = index
         self.pages.setCurrentIndex(index)
-        self._render_page()
-        if self._fade is None or self._opacity is None:
-            return
-        self._fade.stop()
-        self._opacity.setOpacity(0.22)
-        self._fade.setStartValue(0.22)
-        self._fade.setEndValue(1.0)
-        self._fade.start()
+        self._render_page(animate_active=True)
 
     def done(self, result: int) -> None:
-        """Stop any active transition when the dialog closes or finishes."""
-        if self._fade is not None:
-            self._fade.stop()
-        if self._opacity is not None:
-            self._opacity.setOpacity(1.0)
+        """Stop active progress feedback when the dialog closes or finishes."""
+        for label in self.progress_labels:
+            stop_color_animation(label)
         super().done(result)
 
     def _next(self):
