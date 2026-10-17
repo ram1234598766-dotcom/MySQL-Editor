@@ -192,21 +192,38 @@ class DatabaseWorker(QThread):
 
     def _dispatch(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "connect":
-            self._close_connection()
             import mysql.connector
             config = dict(payload["config"])
             options = self._connect_options(config)
-            connection = mysql.connector.connect(**options)
-            cursor = connection.cursor()
+            candidate = None
             try:
-                cursor.execute("SELECT VERSION(), DATABASE(), CURRENT_USER()")
-                row = cursor.fetchone()
-            finally:
-                cursor.close()
+                candidate = mysql.connector.connect(**options)
+                cursor = candidate.cursor()
+                try:
+                    cursor.execute("SELECT VERSION(), DATABASE(), CURRENT_USER()")
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
+            except Exception:
+                # A failed attempt must not discard the currently usable connection.
+                if candidate is not None:
+                    try:
+                        candidate.close()
+                    except Exception:
+                        pass
+                raise
+
+            # Only make the candidate active after both connect and the handshake succeed.
             with self._lock:
-                self._connection = connection
-                self._connection_id = int(getattr(connection, "connection_id", 0) or 0)
+                previous = self._connection
+                self._connection = candidate
+                self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
+            if previous is not None and previous is not candidate:
+                try:
+                    previous.close()
+                except Exception:
+                    pass
             return {
                 "ok": True, "server_version": str(row[0]) if row else "Unknown",
                 "database": str(row[1] or "") if row else "",

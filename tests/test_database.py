@@ -243,3 +243,115 @@ def test_worker_recovers_from_task_exception_and_completes_following_tasks(monke
     assert worker._spool is None
     assert not spool_dir.exists()
 
+def _fake_mysql_connection(row=("8.4.0", "analytics", "tester@localhost"), connection_id=17, execute_error=None):
+    class FakeCursor:
+        def __init__(self):
+            self.close_calls = 0
+
+        def execute(self, _statement):
+            if execute_error is not None:
+                raise execute_error
+
+        def fetchone(self):
+            return row
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeConnection:
+        def __init__(self):
+            self.connection_id = connection_id
+            self.cursor_instance = FakeCursor()
+            self.close_calls = 0
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def close(self):
+            self.close_calls += 1
+
+    return FakeConnection()
+
+
+def test_new_connection_replaces_old_only_after_successful_handshake(monkeypatch):
+    import mysql.connector
+
+    worker = DatabaseWorker()
+    previous = _fake_mysql_connection(connection_id=11)
+    candidate = _fake_mysql_connection(connection_id=22)
+    old_config = {"host": "old.example.test", "password": "old-secret"}
+    worker._connection = previous
+    worker._connection_id = 11
+    worker._connection_config = old_config
+    monkeypatch.setattr(mysql.connector, "connect", lambda **_options: candidate)
+
+    result = worker._dispatch("connect", {"config": {
+        "host": "new.example.test", "username": "reporter", "password": "new-secret",
+    }})
+
+    assert result == {
+        "ok": True,
+        "server_version": "8.4.0",
+        "database": "analytics",
+        "current_user": "tester@localhost",
+    }
+    assert worker._connection is candidate
+    assert worker._connection_id == 22
+    assert worker._connection_config["host"] == "new.example.test"
+    assert previous.close_calls == 1
+    assert candidate.close_calls == 0
+    assert candidate.cursor_instance.close_calls == 1
+
+
+def test_failed_new_connection_handshake_preserves_old_and_closes_candidate(monkeypatch):
+    import mysql.connector
+    import pytest
+
+    worker = DatabaseWorker()
+    previous = _fake_mysql_connection(connection_id=11)
+    failure = RuntimeError("new server rejected connection")
+    candidate = _fake_mysql_connection(connection_id=22, execute_error=failure)
+    old_config = {"host": "old.example.test", "password": "old-secret"}
+    worker._connection = previous
+    worker._connection_id = 11
+    worker._connection_config = old_config
+    monkeypatch.setattr(mysql.connector, "connect", lambda **_options: candidate)
+
+    with pytest.raises(RuntimeError, match="rejected connection"):
+        worker._dispatch("connect", {"config": {
+            "host": "new.example.test", "username": "reporter", "password": "new-secret",
+        }})
+
+    assert worker._connection is previous
+    assert worker._connection_id == 11
+    assert worker._connection_config is old_config
+    assert previous.close_calls == 0
+    assert candidate.close_calls == 1
+    assert candidate.cursor_instance.close_calls == 1
+
+
+def test_connection_creation_failure_leaves_existing_connection_usable(monkeypatch):
+    import mysql.connector
+    import pytest
+
+    worker = DatabaseWorker()
+    previous = _fake_mysql_connection(connection_id=11)
+    old_config = {"host": "old.example.test", "password": "old-secret"}
+    worker._connection = previous
+    worker._connection_id = 11
+    worker._connection_config = old_config
+
+    def fail_connect(**_options):
+        raise RuntimeError("authentication rejected")
+
+    monkeypatch.setattr(mysql.connector, "connect", fail_connect)
+    with pytest.raises(RuntimeError, match="authentication rejected"):
+        worker._dispatch("connect", {"config": {
+            "host": "new.example.test", "username": "reporter", "password": "new-secret",
+        }})
+
+    assert worker._connection is previous
+    assert worker._connection_id == 11
+    assert worker._connection_config is old_config
+    assert previous.close_calls == 0
+
