@@ -237,6 +237,79 @@ def test_qualified_completion_resolves_schema_qualified_backtick_alias():
     assert editor.toPlainText() == source
 
 
+def test_table_completion_is_available_while_typing_backtick_identifier():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders"},
+        columns_by_table={"customers": ["customer_id"], "orders": ["order_id"]},
+    )
+    source = "SELECT * FROM `cust"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len(source))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"customers", "orders"} <= candidates
+    assert "customer_id" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_backtick_quoted_column_completion_scopes_to_the_qualified_table_and_inserts_token_only():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={
+            "orders": ["order_id", "order_total"],
+            "customers": ["customer_id", "display_name"],
+            "inventory": ["warehouse_code"],
+        },
+    )
+    source = (
+        "SELECT o.`order_i` FROM `orders` AS o "
+        "JOIN `customers` AS c ON c.customer_id = o.order_id"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("order_i") + len("order_i"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"order_id", "order_total"} <= candidates
+    assert "customer_id" not in candidates
+    assert "display_name" not in candidates
+    assert "warehouse_code" not in candidates
+    assert editor.toPlainText() == source
+
+    editor.insert_completion("order_total")
+    assert editor.toPlainText() == source.replace("order_i", "order_total", 1)
+
+
+def test_unqualified_completion_scopes_tables_with_backtick_quoted_names():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders", "inventory"},
+        columns_by_table={
+            "customers": ["customer_id", "display_name"],
+            "orders": ["order_id", "order_total"],
+            "inventory": ["warehouse_code"],
+        },
+    )
+    source = "SELECT cust_ FROM `customers` AS c JOIN `orders` AS o ON c.customer_id = o.order_id"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("cust_") + len("cust_"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"customer_id", "display_name", "order_id", "order_total"} <= candidates
+    assert "warehouse_code" not in candidates
+    assert editor.toPlainText() == source
+
+
 def test_unqualified_column_completion_scopes_to_current_statement_tables():
     editor = SqlEditor()
     editor.set_completion_context(

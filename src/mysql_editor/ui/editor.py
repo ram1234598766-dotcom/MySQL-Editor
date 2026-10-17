@@ -145,8 +145,15 @@ def _python_index_from_utf16(text: str, utf16_position: int) -> int:
     return len(text)
 
 
-def _cursor_is_in_sql_code(text: str, cursor_position: int) -> bool:
-    """Return whether the insertion point is outside SQL strings and comments."""
+def _cursor_is_in_sql_code(
+    text: str, cursor_position: int, *, allow_backtick_identifier: bool = False
+) -> bool:
+    """Return whether the caret is in SQL code, with an optional identifier-aware backtick path.
+
+    Completion can run inside an open backtick-quoted identifier because users often type
+    those names incrementally. Other callers (such as bracket auto-pairing) retain the
+    stricter default, where quoted text is not treated as code.
+    """
     prefix = text[:max(0, min(cursor_position, len(text)))]
     quote: str | None = None
     line_comment = False
@@ -176,6 +183,19 @@ def _cursor_is_in_sql_code(text: str, cursor_position: int) -> bool:
                     continue
                 quote = None
             index += 1
+            continue
+        if char == chr(96) and allow_backtick_identifier:
+            # A doubled backtick escapes a backtick in a MySQL quoted identifier.
+            # An unfinished identifier is still a valid place to offer completion.
+            index += 1
+            while index < len(prefix):
+                if prefix[index] == chr(96):
+                    if index + 1 < len(prefix) and prefix[index + 1] == chr(96):
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
             continue
         if char in ("'", '"', chr(96)):
             quote = char
@@ -455,7 +475,7 @@ class SqlEditor(QPlainTextEdit):
         String/comment contents and previous statements are intentionally excluded so
         an unrelated identifier cannot pollute column suggestions.
         """
-        key = qualifier.casefold()
+        key = qualifier.strip("`").replace("``", "`").casefold()
         known_tables = {
             name.casefold(): name for name in self._completion_columns_by_table
         }
@@ -518,7 +538,7 @@ class SqlEditor(QPlainTextEdit):
         """
         sql = self.toPlainText()
         cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
-        code_mask = _sql_code_mask(sql)
+        code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
         code_sql = "".join(
             char if code_mask[position] else " "
             for position, char in enumerate(sql)
@@ -565,20 +585,24 @@ class SqlEditor(QPlainTextEdit):
         """Choose suggestions for the SQL clause around the cursor without parsing all MySQL."""
         sql = self.toPlainText()
         python_position = _python_index_from_utf16(sql, self.textCursor().position())
-        if not _cursor_is_in_sql_code(sql, python_position):
+        if not _cursor_is_in_sql_code(
+            sql, python_position, allow_backtick_identifier=True
+        ):
             return ()
         all_words = self._all_completion_words()
         before = sql[:python_position]
-        database_context = re.search(r"\bUSE\s+[A-Za-z_$0-9]*$", before, re.IGNORECASE)
+        database_context = re.search(
+            r"\bUSE\s+`?[A-Za-z_$0-9]*$", before, re.IGNORECASE
+        )
         if database_context:
             return tuple(sorted(self._completion_databases or all_words, key=str.casefold))
 
         qualified = re.search(
-            r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*[A-Za-z0-9_$]*$",
+            r"(`?[A-Za-z_$][A-Za-z0-9_$]*`?)\s*\.\s*`?[A-Za-z_$0-9]*$",
             before,
         )
         if qualified:
-            qualifier = qualified.group(1)
+            qualifier = qualified.group(1).strip("`").replace("``", "`")
             table = self._table_for_qualifier(qualifier)
             if table:
                 columns = next(
@@ -597,7 +621,8 @@ class SqlEditor(QPlainTextEdit):
             return ()
 
         table_context = re.search(
-            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+(?:[A-Za-z_$][A-Za-z0-9_$]*)?$",
+            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+"
+            r"(?:`?[A-Za-z_$][A-Za-z0-9_$]*`?)?$",
             before,
             re.IGNORECASE,
         )
