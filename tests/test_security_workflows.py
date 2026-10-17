@@ -91,3 +91,16 @@ def test_ci_actions_are_pinned_to_immutable_shas_and_dependabot_updates_them():
     assert 'package-ecosystem: "github-actions"' in dependabot
     assert 'directory: "/"' in dependabot
     assert 'interval: "weekly"' in dependabot
+
+
+def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration():
+    workflow = _read_workflow(".github/workflows/windows-release.yml")
+
+    assert "pull_request:" in workflow
+    assert 'python-version: ["3.12", "3.13", "3.14"]' in workflow
+    assert "python -m pytest --ignore=tests/test_mysql_integration.py" in workflow
+    assert "run: python -m pytest tests/test_mysql_integration.py -v" in workflow
+    assert "needs: [release-tests, mysql-integration]" in workflow
+    assert "python tools/create_release_manifest.py --dist dist --commit $env:GITHUB_SHA" in workflow
+    assert "dist/RELEASE-MANIFEST.json" in workflow
+    assert "dist/MySQLEditor/MySQLEditor.exe" in workflow
