@@ -184,7 +184,7 @@ def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes(
 
     assert "QPushButton#primaryButton:disabled {" in dark
     assert (
-        "background: #121a26; color: #8293a9; border-color: #35465c;"
+        "background: #121a26; color: #A6B6CB; border-color: #35465c;"
         in dark
     )
     assert "QPushButton#primaryButton:disabled:hover {" in dark
@@ -196,5 +196,5 @@ def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes(
     )
     assert "QPushButton#primaryButton:disabled:hover {" in light
 
-    assert _contrast_ratio("#8293A9", "#121A26") >= 4.5
-    assert _contrast_ratio("#64748B", "#F2F5F9") >= 4.5
+    assert _contrast_ratio("#A6B6CB", "#121A26") >= 4.5
+    assert _contrast_ratio("#526174", "#F2F5F9") >= 4.5
