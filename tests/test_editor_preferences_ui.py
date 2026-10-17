@@ -32,6 +32,10 @@ class SettingsStub:
     def setValue(self, key, value):
         self.values[key] = value
 
+    def sync(self):
+        """Match QSettings' close-time synchronization API for this in-memory test double."""
+        pass
+
 
 class StubWorker(QObject):
     completed = Signal(str, str, object)
