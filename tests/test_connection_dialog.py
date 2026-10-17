@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from mysql_editor.storage import ConnectionProfile, LocalRepository
+from mysql_editor.storage import ConnectionProfile, LocalRepository, MasterPasswordStore
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 
 
@@ -52,6 +52,7 @@ def dialog_context(tmp_path: Path, app):
         default_schema="analytics",
     )
     repository.save_profile(profile)
+    MasterPasswordStore(repository).create("valid master password", "valid master password")
     credentials.save(profile.id, "sample-secret")
     worker = StubWorker()
     dialog = ConnectionDialog(
