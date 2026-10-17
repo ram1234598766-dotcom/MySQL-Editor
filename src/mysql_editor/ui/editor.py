@@ -145,8 +145,21 @@ def _python_index_from_utf16(text: str, utf16_position: int) -> int:
     return len(text)
 
 
-def _cursor_is_in_sql_code(text: str, cursor_position: int) -> bool:
-    """Return whether the insertion point is outside SQL strings and comments."""
+def _qt_position_from_python_index(text: str, python_index: int) -> int:
+    """Translate a Python string index to a Qt cursor offset in UTF-16 code units."""
+    bounded_index = max(0, min(python_index, len(text)))
+    return sum(2 if ord(char) > 0xFFFF else 1 for char in text[:bounded_index])
+
+
+def _cursor_is_in_sql_code(
+    text: str, cursor_position: int, *, allow_backtick_identifier: bool = False
+) -> bool:
+    """Return whether the caret is in SQL code, with an optional identifier-aware backtick path.
+
+    Completion can run inside an open backtick-quoted identifier because users often type
+    those names incrementally. Other callers (such as bracket auto-pairing) retain the
+    stricter default, where quoted text is not treated as code.
+    """
     prefix = text[:max(0, min(cursor_position, len(text)))]
     quote: str | None = None
     line_comment = False
@@ -176,6 +189,19 @@ def _cursor_is_in_sql_code(text: str, cursor_position: int) -> bool:
                     continue
                 quote = None
             index += 1
+            continue
+        if char == chr(96) and allow_backtick_identifier:
+            # A doubled backtick escapes a backtick in a MySQL quoted identifier.
+            # An unfinished identifier is still a valid place to offer completion.
+            index += 1
+            while index < len(prefix):
+                if prefix[index] == chr(96):
+                    if index + 1 < len(prefix) and prefix[index + 1] == chr(96):
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
             continue
         if char in ("'", '"', chr(96)):
             quote = char
@@ -373,6 +399,8 @@ class SqlEditor(QPlainTextEdit):
         self._completion_databases: set[str] = set()
         self._completion_tables: set[str] = set()
         self._completion_columns_by_table: dict[str, set[str]] = {}
+        self._completion_tables_by_schema: dict[str, set[str]] = {}
+        self._completion_columns_by_schema_and_table: dict[str, dict[str, set[str]]] = {}
         self._completion_active_schema = ""
         self._completion_model = QStringListModel(self)
         self._completer = QCompleter(self._completion_model, self)
@@ -382,6 +410,9 @@ class SqlEditor(QPlainTextEdit):
         self._completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         self._completer.setMaxVisibleItems(14)
         self._completer.setWrapAround(False)
+        self._completer.popup().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # The editor must retain strong keyboard focus while the popup is visible.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._completer.activated.connect(self.insert_completion)
         self._refresh_completions()
 
@@ -410,10 +441,26 @@ class SqlEditor(QPlainTextEdit):
 
     @staticmethod
     def _safe_identifiers(words) -> set[str]:
-        return {
-            str(word) for word in (words or ())
-            if _IDENTIFIER_COMPLETION.fullmatch(str(word))
-        }
+        """Normalize optional metadata without treating strings as character iterables."""
+        if words is None:
+            return set()
+        if isinstance(words, (str, bytes)):
+            candidates = (words,)
+        else:
+            try:
+                candidates = iter(words)
+            except TypeError:
+                return set()
+
+        safe: set[str] = set()
+        for word in candidates:
+            # Database identifiers are text. Do not turn malformed values such as
+            # None into plausible names like "None" by stringifying arbitrary objects.
+            if not isinstance(word, str):
+                continue
+            if _IDENTIFIER_COMPLETION.fullmatch(word):
+                safe.add(word)
+        return safe
 
     def set_completion_words(self, words) -> None:
         """Backwards-compatible setter for safe schema/result identifiers."""
@@ -422,19 +469,97 @@ class SqlEditor(QPlainTextEdit):
 
     def set_completion_context(
         self, *, databases=(), tables=(), columns_by_table=None,
-        extra_words=(), active_schema: str = "",
+        extra_words=(), active_schema: str = "", tables_by_schema=None,
+        columns_by_schema_and_table=None,
     ) -> None:
         """Set bounded schema metadata used for context-sensitive suggestions."""
         self._completion_databases = self._safe_identifiers(databases)
         self._completion_tables = self._safe_identifiers(tables)
+        raw_columns_by_table = (
+            columns_by_table if isinstance(columns_by_table, dict) else {}
+        )
         self._completion_columns_by_table = {
             str(table): self._safe_identifiers(columns)
-            for table, columns in (columns_by_table or {}).items()
+            for table, columns in raw_columns_by_table.items()
             if _IDENTIFIER_COMPLETION.fullmatch(str(table))
         }
         self._completion_active_schema = str(active_schema or "")
+        self._completion_tables_by_schema = {}
+        if isinstance(tables_by_schema, dict):
+            for schema, schema_tables in tables_by_schema.items():
+                schema_name = str(schema)
+                if _IDENTIFIER_COMPLETION.fullmatch(schema_name):
+                    self._completion_tables_by_schema[schema_name] = self._safe_identifiers(
+                        schema_tables
+                    )
+        self._completion_columns_by_schema_and_table = {}
+        if isinstance(columns_by_schema_and_table, dict):
+            for schema, schema_columns in columns_by_schema_and_table.items():
+                schema_name = str(schema)
+                if not _IDENTIFIER_COMPLETION.fullmatch(schema_name):
+                    continue
+                if not isinstance(schema_columns, dict):
+                    continue
+                self._completion_columns_by_schema_and_table[schema_name] = {
+                    str(table): self._safe_identifiers(columns)
+                    for table, columns in schema_columns.items()
+                    if _IDENTIFIER_COMPLETION.fullmatch(str(table))
+                }
         self._extra_completion_words = self._safe_identifiers(extra_words)
         self._refresh_completions()
+
+    def _tables_for_schema(self, schema: str) -> set[str]:
+        """Return only the table/view names cached for this exact schema."""
+        key = str(schema or "").casefold()
+        if key == self._completion_active_schema.casefold():
+            return set(self._completion_tables)
+        for known_schema, tables in self._completion_tables_by_schema.items():
+            if known_schema.casefold() == key:
+                return set(tables)
+        return set()
+
+    def _columns_for_schema_table(self, schema: str, table: str) -> set[str]:
+        """Resolve columns for a schema/table pair without crossing schema boundaries."""
+        schema_key = str(schema or "").casefold()
+        table_key = str(table or "").casefold()
+        for known_schema, tables in self._completion_columns_by_schema_and_table.items():
+            if known_schema.casefold() != schema_key:
+                continue
+            for known_table, columns in tables.items():
+                if known_table.casefold() == table_key:
+                    return set(columns)
+            # The schema was loaded, but column metadata for this object is unavailable.
+            return set()
+
+        active_schema = self._completion_active_schema.casefold()
+        if schema_key and active_schema and schema_key != active_schema:
+            return set()
+        for known_table, columns in self._completion_columns_by_table.items():
+            if known_table.casefold() == table_key:
+                return set(columns)
+        return set()
+
+    def _schema_table_available(self, schema: str, table: str) -> bool:
+        """Check a table against metadata for the requested schema, not a name collision."""
+        schema_key = str(schema or "").casefold()
+        table_key = str(table or "").casefold()
+        known_schemas = (
+            set(self._completion_tables_by_schema)
+            | set(self._completion_columns_by_schema_and_table)
+        )
+        for known_schema in known_schemas:
+            if known_schema.casefold() != schema_key:
+                continue
+            names = set(self._completion_tables_by_schema.get(known_schema, set()))
+            names.update(self._completion_columns_by_schema_and_table.get(known_schema, {}))
+            return any(name.casefold() == table_key for name in names)
+
+        active_schema = self._completion_active_schema.casefold()
+        if schema_key and active_schema and schema_key != active_schema:
+            return False
+        names = set(self._completion_tables)
+        names.update(self._completion_columns_by_table)
+        return any(name.casefold() == table_key for name in names)
 
     def _all_completion_words(self) -> set[str]:
         words = set(SQL_COMPLETIONS)
@@ -449,29 +574,19 @@ class SqlEditor(QPlainTextEdit):
         """Expose all available suggestions for regression tests and diagnostics."""
         return tuple(sorted(self._all_completion_words(), key=str.casefold))
 
-    def _table_for_qualifier(self, qualifier: str) -> str | None:
-        """Resolve a table name or alias in the current statement only.
-
-        String/comment contents and previous statements are intentionally excluded so
-        an unrelated identifier cannot pollute column suggestions.
-        """
-        key = qualifier.casefold()
-        known_tables = {
-            name.casefold(): name for name in self._completion_columns_by_table
-        }
-        direct = known_tables.get(key)
-        if direct is not None:
-            return direct
-
+    def _table_for_qualifier(self, qualifier: str) -> tuple[str, str] | None:
+        """Resolve a table name or alias to its schema/table in the current statement."""
+        key = qualifier.strip("`").replace("``", "`").casefold()
         sql = self.toPlainText()
-        cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
+        cursor_position = min(
+            _python_index_from_utf16(sql, self.textCursor().position()), len(sql)
+        )
         code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
         code_sql = "".join(
             char if code_mask[position] else " "
             for position, char in enumerate(sql)
         )
 
-        cursor_position = min(cursor_position, len(sql))
         start = 0
         for position in range(cursor_position):
             if sql[position] == ";" and code_mask[position]:
@@ -495,18 +610,35 @@ class SqlEditor(QPlainTextEdit):
             r"(?:\s+(?:AS\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
             re.IGNORECASE,
         )
-        resolved: set[str] = set()
+        resolved: set[tuple[str, str]] = set()
         for match in table_pattern.finditer(statement):
             table_ref = re.sub(r"\s", "", match.group(1))
-            table_name = table_ref.split(".")[-1].strip("`")
-            table = known_tables.get(table_name.casefold())
-            if table is None:
+            parts = table_ref.split(".")
+            schema = (
+                parts[-2].strip("`")
+                if len(parts) > 1
+                else self._completion_active_schema
+            )
+            table = parts[-1].strip("`")
+            if not self._schema_table_available(schema, table):
                 continue
+
             alias = match.group(2)
-            if alias and alias.upper() not in reserved and alias.casefold() == key:
-                resolved.add(table)
+            if alias and alias.upper() not in reserved:
+                if alias.casefold() == key:
+                    resolved.add((schema, table))
+            elif table.casefold() == key:
+                resolved.add((schema, table))
+
         if len(resolved) == 1:
             return next(iter(resolved))
+        if len(resolved) > 1:
+            # Duplicate aliases across joined sources are ambiguous; never guess.
+            return None
+
+        active_schema = self._completion_active_schema
+        if self._schema_table_available(active_schema, qualifier):
+            return (active_schema, qualifier.strip("`").replace("``", "`"))
         return None
 
     def _referenced_tables_in_current_statement(self) -> set[str]:
@@ -518,7 +650,7 @@ class SqlEditor(QPlainTextEdit):
         """
         sql = self.toPlainText()
         cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
-        code_mask = _sql_code_mask(sql)
+        code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
         code_sql = "".join(
             char if code_mask[position] else " "
             for position, char in enumerate(sql)
@@ -565,39 +697,55 @@ class SqlEditor(QPlainTextEdit):
         """Choose suggestions for the SQL clause around the cursor without parsing all MySQL."""
         sql = self.toPlainText()
         python_position = _python_index_from_utf16(sql, self.textCursor().position())
-        if not _cursor_is_in_sql_code(sql, python_position):
+        if not _cursor_is_in_sql_code(
+            sql, python_position, allow_backtick_identifier=True
+        ):
             return ()
         all_words = self._all_completion_words()
         before = sql[:python_position]
-        database_context = re.search(r"\bUSE\s+[A-Za-z_$0-9]*$", before, re.IGNORECASE)
+        database_context = re.search(
+            r"\bUSE\s+`?[A-Za-z_$0-9]*$", before, re.IGNORECASE
+        )
         if database_context:
             return tuple(sorted(self._completion_databases or all_words, key=str.casefold))
 
+        schema_qualified = re.search(
+            r"(`?[A-Za-z_$][A-Za-z0-9_$]*`?)\s*\.\s*"
+            r"(`?[A-Za-z_$][A-Za-z0-9_$]*`?)\s*\.\s*`?[A-Za-z_$0-9]*$",
+            before,
+        )
+        if schema_qualified:
+            schema = schema_qualified.group(1).strip("`").replace("``", "`")
+            table = schema_qualified.group(2).strip("`").replace("``", "`")
+            columns = self._columns_for_schema_table(schema, table)
+            return tuple(sorted(columns, key=str.casefold))
+
         qualified = re.search(
-            r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*[A-Za-z0-9_$]*$",
+            r"(`?[A-Za-z_$][A-Za-z0-9_$]*`?)\s*\.\s*`?[A-Za-z_$0-9]*$",
             before,
         )
         if qualified:
-            qualifier = qualified.group(1)
-            table = self._table_for_qualifier(qualifier)
-            if table:
-                columns = next(
-                    (value for name, value in self._completion_columns_by_table.items()
-                     if name.casefold() == table.casefold()),
-                    set(),
-                )
-                if columns:
-                    return tuple(sorted(columns, key=str.casefold))
-            if (self._completion_active_schema and
-                    qualifier.casefold() == self._completion_active_schema.casefold()):
-                return tuple(sorted(self._completion_tables or all_words, key=str.casefold))
+            qualifier = qualified.group(1).strip("`").replace("``", "`")
+            resolved_table = self._table_for_qualifier(qualifier)
+            if resolved_table is not None:
+                schema, table = resolved_table
+                columns = self._columns_for_schema_table(schema, table)
+                return tuple(sorted(columns, key=str.casefold))
+            if (
+                self._completion_active_schema
+                and qualifier.casefold() == self._completion_active_schema.casefold()
+            ):
+                return tuple(sorted(self._tables_for_schema(qualifier), key=str.casefold))
             if any(db.casefold() == qualifier.casefold() for db in self._completion_databases):
-                return tuple(sorted(all_words, key=str.casefold))
+                # The requested schema may not be loaded yet. Do not suggest the
+                # active schema's unrelated tables or columns as a fallback.
+                return tuple(sorted(self._tables_for_schema(qualifier), key=str.casefold))
             # An unknown qualifier must not fall through to unrelated global words.
             return ()
 
         table_context = re.search(
-            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+(?:[A-Za-z_$][A-Za-z0-9_$]*)?$",
+            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+"
+            r"(?:`?[A-Za-z_$][A-Za-z0-9_$]*`?)?$",
             before,
             re.IGNORECASE,
         )
@@ -711,7 +859,25 @@ class SqlEditor(QPlainTextEdit):
         if self._completer.widget() is not self:
             return
         cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        text = self.toPlainText()
+        python_position = _python_index_from_utf16(text, cursor.position())
+
+        # Select the identifier token explicitly instead of relying on Qt's
+        # WordUnderCursor at punctuation boundaries such as a closing backtick.
+        start = end = python_position
+        while start > 0 and re.fullmatch(r"[A-Za-z0-9_$]", text[start - 1]):
+            start -= 1
+        while end < len(text) and re.fullmatch(r"[A-Za-z0-9_$]", text[end]):
+            end += 1
+
+        if start < end:
+            cursor.setPosition(_qt_position_from_python_index(text, start))
+            cursor.setPosition(
+                _qt_position_from_python_index(text, end),
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+        else:
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
         cursor.insertText(completion)
         self.setTextCursor(cursor)
 
@@ -897,6 +1063,16 @@ class SqlEditor(QPlainTextEdit):
         if popup.isVisible():
             if key == Qt.Key.Key_Escape:
                 popup.hide()
+                event.accept()
+                return
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                model = self._completer.completionModel()
+                count = model.rowCount()
+                if count:
+                    current = popup.currentIndex()
+                    row = current.row() if current.isValid() else 0
+                    delta = -1 if key == Qt.Key.Key_Up else 1
+                    popup.setCurrentIndex(model.index(max(0, min(count - 1, row + delta)), 0))
                 event.accept()
                 return
             if key in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab):
