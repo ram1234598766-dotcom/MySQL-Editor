@@ -73,6 +73,38 @@ def result_filter_message(
     )
 
 
+def result_picker_label(item: dict, result_index: int) -> str:
+    """Label a result with its script statement and warning count when available."""
+    try:
+        display_index = max(1, int(result_index))
+    except (TypeError, ValueError, OverflowError):
+        display_index = 1
+    try:
+        row_count = max(0, int(item.get("row_count", 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        row_count = 0
+    kind = str(item.get("kind", "result") or "result").title()
+    prefix = ""
+    try:
+        statement_index = int(item.get("statement_index", 0) or 0)
+        statement_count = int(item.get("statement_count", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        statement_index, statement_count = 0, 0
+    if statement_index > 0:
+        if statement_count >= statement_index:
+            prefix = f"Statement {statement_index} of {statement_count} · "
+        else:
+            prefix = f"Statement {statement_index} · "
+    label = f"{prefix}Result {display_index} · {kind} · {row_count:,} row(s)"
+    try:
+        warning_count = max(0, int(item.get("warning_count", 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        warning_count = 0
+    if warning_count:
+        label += f" · {warning_count:,} warning(s)"
+    return label
+
+
 def result_summary_message(item: dict, preview_rows: int, fetched_rows: int) -> str:
     """Describe a row result, status result, or error without confusing their meanings."""
     kind = str(item.get("kind", "result")).casefold()

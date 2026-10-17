@@ -30,8 +30,8 @@ from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.theme import normalize_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
-    cell_detail_text, column_headers_tsv, result_filter_message, result_summary_message,
-    rows_tsv, selected_cells_tsv,
+    cell_detail_text, column_headers_tsv, result_filter_message, result_picker_label,
+    result_summary_message, rows_tsv, selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
@@ -1491,10 +1491,7 @@ class MainWindow(QMainWindow):
                 self.result_picker.blockSignals(True)
                 self.result_picker.clear()
                 for index, item in enumerate(self._query_results, start=1):
-                    label = (
-                        f"Result {index} · {item.get('kind', 'result')} · "
-                        f"{item.get('row_count', 0):,} row(s)"
-                    )
+                    label = result_picker_label(item, index)
                     self.result_picker.addItem(label, index - 1)
                 self.result_picker.setCurrentIndex(len(self._query_results) - 1)
                 self.result_picker.blockSignals(False)

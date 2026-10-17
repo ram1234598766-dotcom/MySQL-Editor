@@ -129,3 +129,24 @@ def test_result_summary_explains_preview_truncation_and_failure():
     assert result_summary_message({"kind": "error", "row_count": 1}, 1, 1) == (
         "Statement failed. Review the error details in this result."
     )
+
+
+def test_result_picker_label_identifies_script_statement_and_warnings():
+    from mysql_editor.ui.result_tools import result_picker_label
+
+    assert result_picker_label({
+        "kind": "rows", "row_count": 12, "statement_index": 2,
+        "statement_count": 3, "warning_count": 1,
+    }, 2) == "Statement 2 of 3 · Result 2 · Rows · 12 row(s) · 1 warning(s)"
+    assert result_picker_label({"kind": "status", "row_count": 1}, 1) == (
+        "Result 1 · Status · 1 row(s)"
+    )
+
+
+def test_result_picker_label_handles_malformed_metadata_safely():
+    from mysql_editor.ui.result_tools import result_picker_label
+
+    assert result_picker_label({
+        "kind": "error", "row_count": "invalid", "statement_index": 4,
+        "statement_count": 2, "warning_count": -2,
+    }, 0) == "Statement 4 · Result 1 · Error · 0 row(s)"
