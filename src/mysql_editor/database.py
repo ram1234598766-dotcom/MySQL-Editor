@@ -93,6 +93,8 @@ class DatabaseWorker(QThread):
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
+        # Monotonic token prevents a delayed cancellation from targeting a later statement.
+        self._active_query_generation = 0
         self._current_task_id: str | None = None
         self._spool_dir = Path(tempfile.mkdtemp(prefix="mysql-editor-results-"))
         self._spool_path = self._spool_dir / "results.sqlite3"
@@ -188,30 +190,59 @@ class DatabaseWorker(QThread):
         self._tasks.put(None)
 
     def cancel_current_query(self) -> None:
-        """Send best-effort KILL QUERY on a separate control connection."""
+        """Send best-effort KILL QUERY without allowing it to hit the next statement."""
         with self._lock:
             config = dict(self._connection_config or {})
             connection_id = self._connection_id
             active = self._active_query
             active_task_id = self._active_query_task_id
+            active_generation = self._active_query_generation
         if not active or not config or not connection_id:
             self.activity.emit("No cancellable query is currently active.")
             return
+
         def cancel() -> None:
             try:
                 import mysql.connector
-                control = mysql.connector.connect(**config)
-                try:
-                    cursor = control.cursor()
-                    cursor.execute(f"KILL QUERY {int(connection_id)}")
-                    cursor.close()
-                    self._report_task_activity(active_task_id, "Cancellation request sent to MySQL.")
-                finally:
-                    control.close()
+
+                # Revalidate after the control thread starts. Hold the same lock while
+                # KILL QUERY is sent so the worker cannot advance to another statement
+                # on the same MySQL session between validation and the server command.
+                with self._lock:
+                    still_targeting_statement = (
+                        self._active_query
+                        and self._active_query_task_id == active_task_id
+                        and self._active_query_generation == active_generation
+                        and self._connection_id == connection_id
+                    )
+                    if not still_targeting_statement:
+                        stale = True
+                    else:
+                        stale = False
+                        control = mysql.connector.connect(**config)
+                        try:
+                            cursor = control.cursor()
+                            try:
+                                cursor.execute(f"KILL QUERY {int(connection_id)}")
+                            finally:
+                                cursor.close()
+                        finally:
+                            control.close()
+
+                if stale:
+                    self._report_task_activity(
+                        active_task_id,
+                        "Cancellation skipped because the SQL statement changed or finished.",
+                    )
+                else:
+                    self._report_task_activity(
+                        active_task_id, "Cancellation request sent to MySQL."
+                    )
             except Exception as exc:
                 self._report_task_activity(
                     active_task_id, "Cancellation could not be confirmed: " + safe_db_error(exc)
                 )
+
         threading.Thread(target=cancel, name="mysql-editor-cancel", daemon=True).start()
 
     @staticmethod
@@ -394,6 +425,11 @@ class DatabaseWorker(QThread):
                 statement_start = time.perf_counter()
                 connection_lost = False
                 result_id: str | None = None
+                # Each statement gets its own cancellation generation. The cancel
+                # thread holds _lock while sending KILL QUERY; acquiring it here prevents
+                # that delayed request from striking the next statement in a script.
+                with self._lock:
+                    self._active_query_generation += 1
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)

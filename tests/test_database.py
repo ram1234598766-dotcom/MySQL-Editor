@@ -245,6 +245,91 @@ def test_worker_recovers_from_task_exception_and_completes_following_tasks(monke
     assert worker._spool is None
     assert not spool_dir.exists()
 
+
+def test_cancel_current_query_skips_a_stale_statement_generation(monkeypatch):
+    import mysql.connector
+    import mysql_editor.database as database_module
+
+    worker = DatabaseWorker()
+    worker._connection_config = {"host": "localhost", "user": "tester", "password": "test"}
+    worker._connection_id = 17
+    worker._active_query = True
+    worker._active_query_task_id = "script-task"
+    worker._active_query_generation = 4
+    messages = []
+    connection_attempts = []
+    worker.task_activity.connect(lambda task_id, message: messages.append((task_id, message)))
+
+    def unexpected_connect(**kwargs):
+        connection_attempts.append(kwargs)
+        raise AssertionError("stale cancellation must not open a control connection")
+
+    monkeypatch.setattr(mysql.connector, "connect", unexpected_connect)
+
+    class DelayedThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            # Simulate the worker starting the next statement before the cancellation
+            # thread gets CPU time. The generation changes but the script task ID does not.
+            with worker._lock:
+                worker._active_query_generation += 1
+            self.target()
+
+    monkeypatch.setattr(database_module.threading, "Thread", DelayedThread)
+    worker.cancel_current_query()
+
+    assert connection_attempts == []
+    assert messages == [
+        ("script-task", "Cancellation skipped because the SQL statement changed or finished.")
+    ]
+
+
+def test_cancel_current_query_serializes_kill_against_statement_transition(monkeypatch):
+    import mysql.connector
+    import mysql_editor.database as database_module
+
+    worker = DatabaseWorker()
+    worker._connection_config = {"host": "localhost", "user": "tester", "password": "test"}
+    worker._connection_id = 17
+    worker._active_query = True
+    worker._active_query_task_id = "script-task"
+    worker._active_query_generation = 5
+    messages = []
+    executed = []
+    worker.task_activity.connect(lambda task_id, message: messages.append((task_id, message)))
+
+    class FakeCursor:
+        def execute(self, statement):
+            assert worker._lock.locked(), "KILL QUERY must be serialized with statement changes"
+            executed.append(statement)
+
+        def close(self):
+            pass
+
+    class FakeControlConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mysql.connector, "connect", lambda **_kwargs: FakeControlConnection())
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(database_module.threading, "Thread", ImmediateThread)
+    worker.cancel_current_query()
+
+    assert executed == ["KILL QUERY 17"]
+    assert messages == [("script-task", "Cancellation request sent to MySQL.")]
+
 def _fake_mysql_connection(row=("8.4.0", "analytics", "tester@localhost"), connection_id=17, execute_error=None):
     class FakeCursor:
         def __init__(self):
