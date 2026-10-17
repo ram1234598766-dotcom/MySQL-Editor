@@ -120,7 +120,8 @@ def main():
         private_sql = "SELECT 'query body is not stored in settings';"
         recent_source.write_text(private_sql, encoding="utf-8")
         assert first._open_sql_path(recent_source) is True
-        normalized_recent = str(recent_source.resolve())
+        # Match the application's absolute-but-not-symlink-resolved path normalization.
+        normalized_recent = os.path.abspath(recent_source)
         stored_recent_paths = first._recent_sql_paths()
         assert len(stored_recent_paths) == 1
         assert os.path.normcase(stored_recent_paths[0]) == os.path.normcase(normalized_recent)
