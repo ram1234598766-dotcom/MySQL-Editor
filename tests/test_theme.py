@@ -47,6 +47,14 @@ def test_light_theme_translates_shared_component_styles_and_preserves_contrast()
     assert "#080e17" not in light
 
 
+def test_keyboard_focus_indicators_cover_primary_interactive_surfaces():
+    for selector in (
+        "QPushButton:focus", "QToolButton:focus", "QTableView:focus", "QTabBar::tab:focus"
+    ):
+        assert selector in STYLESHEET
+        assert selector in stylesheet_for_theme("light")
+
+
 def test_system_stylesheet_resolves_to_a_concrete_palette():
     assert stylesheet_for_theme("system", system_is_dark=True) == STYLESHEET
     assert stylesheet_for_theme("system", system_is_dark=False) == stylesheet_for_theme("light")

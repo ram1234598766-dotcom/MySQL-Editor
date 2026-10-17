@@ -251,6 +251,11 @@ class SqlEditor(QPlainTextEdit):
         self.line_number_area = LineNumberArea(self)
         self.highlighter = SqlHighlighter(self.document())
         self.setObjectName("sqlEditor")
+        self.setAccessibleName("SQL query editor")
+        self.setAccessibleDescription(
+            "Write MySQL queries here. Press Ctrl+Space to open completion; Enter preserves "
+            "indentation, and matching brackets are highlighted."
+        )
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         font = QFont("Cascadia Code")
         font.setStyleHint(QFont.StyleHint.Monospace)

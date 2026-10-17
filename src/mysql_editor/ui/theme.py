@@ -50,7 +50,8 @@ QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTreeWidget, QListWidget {
   border-radius: 6px; padding: 7px; selection-background-color: #286cc7;
   selection-color: white; min-height: 20px;
 }
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTreeWidget:focus, QListWidget:focus { border: 1px solid #4a9bff; }
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTreeWidget:focus, QListWidget:focus,
+QPushButton:focus, QToolButton:focus, QTableView:focus, QTabBar::tab:focus { border: 1px solid #4a9bff; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView { background: #101a29; color: #e8f1ff; selection-background-color: #2569cb; }
 QPushButton { background: #172235; color: #e8f1ff; border: 1px solid #405675; border-radius: 7px; padding: 8px 11px; min-height: 19px; }

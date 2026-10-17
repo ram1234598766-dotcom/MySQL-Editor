@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
         top_layout.addStretch(1)
         self.connection_badge = QLabel()
         self.connection_badge.setObjectName("connectionBadge")
+        self.connection_badge.setAccessibleName("Active MySQL connection status")
         top_layout.addWidget(self.connection_badge)
         self.connection_details = QLabel()
         self.connection_details.setObjectName("connectionDetails")
@@ -301,6 +302,10 @@ class MainWindow(QMainWindow):
 
         self.editors = QTabWidget()
         self.editors.setObjectName("editorTabs")
+        self.editors.setAccessibleName("SQL query tabs")
+        self.editors.setAccessibleDescription(
+            "Switch between open SQL query documents. Modified tabs have unsaved changes."
+        )
         self.editors.setTabsClosable(True)
         self.editors.setTabPosition(QTabWidget.TabPosition.North)
         self.editors.tabCloseRequested.connect(self.close_query_tab)
@@ -316,6 +321,10 @@ class MainWindow(QMainWindow):
         self.results_title = QLabel("Results")
         self.results_title.setObjectName("panelTitle")
         self.result_picker = QComboBox()
+        self.result_picker.setAccessibleName("Select query result set")
+        self.result_picker.setAccessibleDescription(
+            "Switch between result sets returned by the most recent script execution."
+        )
         self.result_picker.setMinimumWidth(165)
         self.result_picker.setMaximumWidth(245)
         self.result_picker.currentIndexChanged.connect(self._select_result)
@@ -332,14 +341,27 @@ class MainWindow(QMainWindow):
         self.result_filter.textChanged.connect(self._filter_results)
         self.query_meta = QLabel("Ready")
         self.query_meta.setObjectName("mutedText")
+        self.query_meta.setAccessibleName("Query execution status and row count")
         self.stop_button = QPushButton("Stop")
+        self.stop_button.setAccessibleName("Request query cancellation")
+        self.stop_button.setToolTip(
+            "Request cancellation of the current query. MySQL may take time to interrupt it."
+        )
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_query)
         self.commit_button = QPushButton("Commit")
+        self.commit_button.setAccessibleName("Commit active transaction")
+        self.commit_button.setToolTip("Commit the current transaction on the active MySQL connection.")
         self.commit_button.clicked.connect(lambda: self._dispatch("commit", {}))
         self.rollback_button = QPushButton("Rollback")
+        self.rollback_button.setAccessibleName("Roll back active transaction")
+        self.rollback_button.setToolTip("Roll back the current transaction when MySQL permits it.")
         self.rollback_button.clicked.connect(lambda: self._dispatch("rollback", {}))
         self.export_button = QPushButton("↓  Export CSV")
+        self.export_button.setAccessibleName("Export fetched result rows to CSV")
+        self.export_button.setAccessibleDescription(
+            "Export all rows fetched for the selected result. The quick filter only changes the visible preview."
+        )
         self.export_button.clicked.connect(self.export_results)
         toolbar.addWidget(self.results_title)
         toolbar.addWidget(self.result_picker)
@@ -353,6 +375,11 @@ class MainWindow(QMainWindow):
         self.result_model = ResultsModel()
         self.result_grid = QTableView()
         self.result_grid.setObjectName("resultsGrid")
+        self.result_grid.setAccessibleName("SQL query results table")
+        self.result_grid.setAccessibleDescription(
+            "Use the arrow keys to navigate cells. Double-click for full cell details. "
+            "CSV export includes every fetched row, regardless of the visible-row filter."
+        )
         self.result_proxy = ResultsFilterProxyModel(self)
         self.result_proxy.setSourceModel(self.result_model)
         self.result_proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -378,6 +405,7 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.result_grid, 1)
         self.result_message = QLabel("Ready. Run a query to view results.")
         self.result_message.setObjectName("mutedText")
+        self.result_message.setAccessibleName("Query result summary and details")
         self.result_message.setWordWrap(True)
         result_layout.addWidget(self.result_message)
         self.editor_results_split = QSplitter(Qt.Orientation.Vertical)
@@ -391,6 +419,10 @@ class MainWindow(QMainWindow):
         body.addWidget(self.center)
 
         self.inspector_tabs = QTabWidget()
+        self.inspector_tabs.setAccessibleName("Workspace inspector")
+        self.inspector_tabs.setAccessibleDescription(
+            "Browse schema metadata, opt-in query history, and saved SQL snippets."
+        )
         self.inspector_tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.inspector_tabs.setObjectName("inspectorTabs")
         self.inspector_tabs.setMinimumWidth(245)
@@ -420,9 +452,15 @@ class MainWindow(QMainWindow):
         schema_layout.addWidget(self.schema_tree, 1)
         self.inspector_tabs.addTab(schema_page, "Schema")
         self.history_list = QListWidget()
+        self.history_list.setAccessibleName("Local query history")
+        self.history_list.setAccessibleDescription(
+            "Locally stored query history, available only when history is enabled in Settings."
+        )
         self.history_list.itemDoubleClicked.connect(self._history_selected)
         self.inspector_tabs.addTab(self.history_list, "History")
         self.saved_list = QListWidget()
+        self.saved_list.setAccessibleName("Saved SQL snippets")
+        self.saved_list.setAccessibleDescription("Locally saved SQL snippets. Double-click to open one in a query tab.")
         self.saved_list.itemDoubleClicked.connect(self._saved_selected)
         self.inspector_tabs.addTab(self.saved_list, "Saved")
         body.addWidget(self.inspector_tabs)
@@ -438,6 +476,7 @@ class MainWindow(QMainWindow):
         status_layout.setSpacing(0)
         self.status = QLabel("Ready")
         self.status.setObjectName("statusBar")
+        self.status.setAccessibleName("Application status messages")
         self.editor_position = QLabel("Ln 1, Col 1")
         self.editor_position.setObjectName("editorPosition")
         self.editor_position.setAccessibleName("SQL editor cursor position and selection length")
@@ -1865,6 +1904,8 @@ class MainWindow(QMainWindow):
             f"{self.config.get('username', '')}@{host}:{self.config.get('port', 3306)} · {schema}"
         )
         self.connection_details.setToolTip(details)
+        self.connection_details.setAccessibleName("Active MySQL connection details")
+        self.connection_details.setAccessibleDescription(details)
 
     def show_safety_info(self):
         QMessageBox.information(

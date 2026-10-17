@@ -23,6 +23,13 @@ def test_completion_contains_mysql_keywords_functions_and_safe_schema_names():
     assert "table name" not in candidates
 
 
+def test_sql_editor_exposes_accessible_identity_and_keyboard_help():
+    editor = SqlEditor()
+    assert editor.accessibleName() == "SQL query editor"
+    assert "Ctrl+Space" in editor.accessibleDescription()
+    assert "matching brackets" in editor.accessibleDescription()
+
+
 def test_result_filter_is_case_insensitive_and_does_not_mutate_source_rows():
     source = ResultsModel(
         headers=["id", "customer"],

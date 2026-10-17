@@ -76,6 +76,19 @@ def main():
         app.processEvents()
         editor = first._current_editor()
         assert editor is not None
+        assert editor.accessibleName() == "SQL query editor"
+        assert first.editors.accessibleName() == "SQL query tabs"
+        assert first.result_picker.accessibleName() == "Select query result set"
+        assert first.result_grid.accessibleName() == "SQL query results table"
+        assert first.history_list.accessibleName() == "Local query history"
+        assert first.saved_list.accessibleName() == "Saved SQL snippets"
+        assert first.schema_tree.accessibleName() == "MySQL databases, tables and views"
+        assert first.result_filter.accessibleName() == "Filter result rows"
+        assert first.stop_button.accessibleName() == "Request query cancellation"
+        assert first.commit_button.accessibleName() == "Commit active transaction"
+        assert first.rollback_button.accessibleName() == "Roll back active transaction"
+        assert first.export_button.accessibleName() == "Export fetched result rows to CSV"
+        assert first.font().pointSize() >= 0
         assert editor.font().pointSize() == 10
 
         first.increase_editor_font()
