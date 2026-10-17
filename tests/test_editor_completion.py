@@ -334,7 +334,6 @@ def test_bracket_auto_pairing_wraps_selection_and_preserves_multiline_content():
     assert editor.textCursor().position() == start + len("value") + 1
 
     editor.setPlainText("SELECT value\nFROM customers")
-    editor.setTextCursor(editor.textCursor())
     pasted = "SELECT (\n  value\n)"
     editor.clear()
     editor.insertPlainText(pasted)
@@ -358,9 +357,12 @@ def test_bracket_auto_pairing_does_not_run_inside_sql_strings_or_comments():
         editor.setTextCursor(cursor)
 
         before = editor.toPlainText()
+        insertion_position = cursor.position()
         _send_text_key(editor, key, typed)
 
-        assert editor.toPlainText() == before[:cursor.position()] + typed + before[cursor.position():] if False else typed in editor.toPlainText()
+        assert editor.toPlainText() == (
+            before[:insertion_position] + typed + before[insertion_position:]
+        )
         assert editor.toPlainText().count(typed) == before.count(typed) + 1
         assert editor.toPlainText().count(")") == before.count(")")
         editor.deleteLater()
