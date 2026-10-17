@@ -159,7 +159,7 @@ def test_enter_carries_existing_sql_indentation():
 
     _send_key(editor, Qt.Key.Key_Return)
 
-    assert editor.toPlainText() == "    SELECT * FROM customers\\n    "
+    assert editor.toPlainText() == "    SELECT * FROM customers\n    "
 
 
 def test_enter_indents_after_open_parenthesis_and_begin_block():
@@ -172,4 +172,4 @@ def test_enter_indents_after_open_parenthesis_and_begin_block():
 
         _send_key(editor, Qt.Key.Key_Return)
 
-        assert editor.toPlainText() == source + "\\n    "
+        assert editor.toPlainText() == source + "\n    "
