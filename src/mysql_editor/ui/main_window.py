@@ -1416,11 +1416,12 @@ class MainWindow(QMainWindow):
             self._set_result_message(error)
             self.status.setText(error)
 
-    def _show_export_notification(self, result: dict) -> None:
+    def _show_export_notification(self, result: dict, *, update_status: bool = True) -> None:
         if result.get("ok"):
             row_count = int(result.get("row_count", 0) or 0)
             path = str(result.get("path") or "the chosen destination")
-            self.status.setText(f"CSV exported · {row_count:,} row(s)")
+            if update_status:
+                self.status.setText(f"CSV exported · {row_count:,} row(s)")
             QMessageBox.information(
                 self, "CSV export complete",
                 f"Exported {row_count:,} row(s) to:\n{path}",
@@ -1434,7 +1435,9 @@ class MainWindow(QMainWindow):
             return
         pending, self._deferred_export_notifications = self._deferred_export_notifications, []
         for notification in pending:
-            self._show_export_notification(notification)
+            # The query's final status is more recent; a modal can report the export
+            # outcome without replacing that final status line.
+            self._show_export_notification(notification, update_status=False)
 
     def _on_activity(self, message: str):
         if self._query_running and message.startswith(("Exporting CSV", "Exported ")):
