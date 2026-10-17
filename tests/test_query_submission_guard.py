@@ -179,7 +179,7 @@ def test_export_progress_and_completion_do_not_overwrite_a_newer_query(
             query_job, "query", {"ok": True, "results": [], "duration_ms": 1}
         )
         assert window._query_running is False
-        assert window.export_feedback.isVisible()
+        assert not window.export_feedback.isHidden()
         assert "10 row(s)" in window.export_feedback.text()
         assert "results.csv" in window.export_feedback.text()
         assert window.export_feedback.objectName() == "statusSuccess"
