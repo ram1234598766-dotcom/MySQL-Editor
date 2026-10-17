@@ -80,6 +80,11 @@ def main():
 
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
+        first._set_editor_tab_width(8)
+        assert first._editor_tab_width == 8
+        assert editor.tabStopDistance() == editor.fontMetrics().horizontalAdvance(" ") * 8
+        first._set_result_row_height(36)
+        assert first.result_grid.verticalHeader().defaultSectionSize() == 36
         first.main_split.setSizes([440, 320])
         first.editor_results_split.setSizes([420, 300])
         app.processEvents()
@@ -166,6 +171,8 @@ def main():
         first_repo.close()
         settings.sync()
         assert int(settings.value("ui/editorFontSize", 0)) == 11
+        assert int(settings.value("ui/tabWidth", 0)) == 8
+        assert int(settings.value("ui/resultRowHeight", 0)) == 36
         assert int(settings.value("ui/inspectorTab", -1)) == 1
         saved_sizes = settings.value("ui/mainSplitterSizes", [])
         result_sizes = settings.value("ui/editorResultsSplitterSizes", [])
@@ -177,6 +184,10 @@ def main():
         app.processEvents()
         restored = second._current_editor()
         assert restored is not None and restored.font().pointSize() == 11
+        assert second._editor_tab_width == 8
+        assert restored.tabStopDistance() == restored.fontMetrics().horizontalAdvance(" ") * 8
+        assert second._result_row_height == 36
+        assert second.result_grid.verticalHeader().defaultSectionSize() == 36
         assert second.inspector_tabs.currentIndex() == 1
         assert len(second.editor_results_split.sizes()) == 2
         assert all(size > 0 for size in second.editor_results_split.sizes())

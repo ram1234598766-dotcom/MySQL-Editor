@@ -544,3 +544,8 @@ The following editor/UX items have now been implemented on `main` with regressio
 - Live editor line/column and selection-length status in the bottom status strip.
 
 The CI workflow for each commit is the evidence source for lint, compilation, automated tests, the MySQL integration job, and Windows UI smoke. Full Windows packaging is tracked separately. High-DPI/manual visual QA on a physical Windows machine is still required; no theme-switching/light-theme, complete semantic completion, or full release-candidate milestone is implied by this progress note.
+
+
+### Preference work — 17 October 2026
+
+The Settings menu now groups Appearance, Editor, Results, and Query History. Editor tab width (2/4/8 spaces) and result-grid row height (24/28/36 px) are validated, persisted, applied to current and new editor tabs, and covered by unit/UI-smoke tests.

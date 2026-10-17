@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
@@ -24,6 +24,7 @@ from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
+from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.schema_tools import qualified_identifier, select_preview_sql
 
 
@@ -127,6 +128,8 @@ class MainWindow(QMainWindow):
         self._last_sql = ""
         self._last_saved_paths: dict[int, str] = {}
         self._settings = QSettings()
+        self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
+        self._result_row_height = normalize_result_row_height(self._settings.value("ui/resultRowHeight", 28))
         self._find_count_timer = QTimer(self)
         self._find_count_timer.setSingleShot(True)
         self._find_count_timer.setInterval(80)
@@ -355,7 +358,8 @@ class MainWindow(QMainWindow):
         self.copy_cells_shortcut.activated.connect(self.copy_selected_cells)
         self.result_grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.result_grid.horizontalHeader().setStretchLastSection(True)
-        self.result_grid.verticalHeader().setDefaultSectionSize(28)
+        self.result_grid.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.result_grid.verticalHeader().setDefaultSectionSize(self._result_row_height)
         self.result_grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.result_grid.customContextMenuRequested.connect(self._show_result_context)
         result_layout.addWidget(self.result_grid, 1)
@@ -466,11 +470,8 @@ class MainWindow(QMainWindow):
         self._action(view_menu, "Reset SQL editor font", "Ctrl+0", self.reset_editor_font)
 
         settings_menu = self.menuBar().addMenu("&Settings")
-        history_action = QAction("Enable local query history", self)
-        history_action.setCheckable(True)
-        history_action.setChecked(self.repository.history_enabled())
-        history_action.toggled.connect(self._set_history_enabled)
-        settings_menu.addAction(history_action)
+
+        appearance_menu = settings_menu.addMenu("Appearance")
         reduce_motion = QAction("Reduce motion", self)
         reduce_motion.setCheckable(True)
         reduce_motion.setChecked(self._settings.value("ui/reduceMotion", False, type=bool))
@@ -478,8 +479,49 @@ class MainWindow(QMainWindow):
         reduce_motion.toggled.connect(
             lambda enabled: self._settings.setValue("ui/reduceMotion", enabled)
         )
-        settings_menu.addAction(reduce_motion)
-        self._action(settings_menu, "Clear query history", "", self.clear_history)
+        appearance_menu.addAction(reduce_motion)
+
+        editor_preferences = settings_menu.addMenu("Editor")
+        tab_width_menu = editor_preferences.addMenu("Tab width")
+        tab_width_group = QActionGroup(self)
+        tab_width_group.setExclusive(True)
+        for width in (2, 4, 8):
+            action = QAction(f"{width} spaces", self)
+            action.setCheckable(True)
+            action.setChecked(width == self._editor_tab_width)
+            action.triggered.connect(
+                lambda checked, value=width:
+                self._set_editor_tab_width(value) if checked else None
+            )
+            tab_width_group.addAction(action)
+            tab_width_menu.addAction(action)
+
+        results_preferences = settings_menu.addMenu("Results")
+        density_menu = results_preferences.addMenu("Row height")
+        density_group = QActionGroup(self)
+        density_group.setExclusive(True)
+        for label, height in (
+            ("Compact · 24 px", 24),
+            ("Comfortable · 28 px", 28),
+            ("Spacious · 36 px", 36),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(height == self._result_row_height)
+            action.triggered.connect(
+                lambda checked, value=height:
+                self._set_result_row_height(value) if checked else None
+            )
+            density_group.addAction(action)
+            density_menu.addAction(action)
+
+        history_menu = settings_menu.addMenu("Query History")
+        history_action = QAction("Enable local query history", self)
+        history_action.setCheckable(True)
+        history_action.setChecked(self.repository.history_enabled())
+        history_action.toggled.connect(self._set_history_enabled)
+        history_menu.addAction(history_action)
+        self._action(history_menu, "Clear query history", "", self.clear_history)
         help_menu = self.menuBar().addMenu("&Help")
         self._action(help_menu, "Guided tour", "F1", self._show_product_tour)
         self._action(help_menu, "SQL safety information", "", self.show_safety_info)
@@ -528,9 +570,31 @@ class MainWindow(QMainWindow):
                 font = editor.font()
                 font.setPointSize(size)
                 editor.setFont(font)
-                editor.setTabStopDistance(editor.fontMetrics().horizontalAdvance(" ") * 4)
+                editor.setTabStopDistance(
+                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
+                )
         self._settings.setValue("ui/editorFontSize", size)
         self.status.setText(f"SQL editor font size: {size} pt")
+
+    def _set_editor_tab_width(self, width: int):
+        width = normalize_tab_width(width)
+        self._editor_tab_width = width
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                editor.setTabStopDistance(
+                    editor.fontMetrics().horizontalAdvance(" ") * width
+                )
+        self._settings.setValue("ui/tabWidth", width)
+        self.status.setText(f"SQL editor tab width: {width} spaces")
+
+    def _set_result_row_height(self, height: int):
+        height = normalize_result_row_height(height)
+        self._result_row_height = height
+        self.result_grid.verticalHeader().setDefaultSectionSize(height)
+        self._settings.setValue("ui/resultRowHeight", height)
+        density = {24: "Compact", 28: "Comfortable", 36: "Spacious"}[height]
+        self.status.setText(f"Result grid density: {density}")
 
     def increase_editor_font(self):
         self._set_editor_font_size(self._editor_font_size + 1)
@@ -619,7 +683,9 @@ class MainWindow(QMainWindow):
         font = editor.font()
         font.setPointSize(self._editor_font_size)
         editor.setFont(font)
-        editor.setTabStopDistance(editor.fontMetrics().horizontalAdvance(" ") * 4)
+        editor.setTabStopDistance(
+            editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
+        )
         if text:
             editor.setPlainText(text)
         index = self.editors.addTab(editor, Path(path).name if path else "untitled.sql")

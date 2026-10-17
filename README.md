@@ -16,6 +16,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - [Connect to MySQL](#connect-to-mysql)
 - [Work with SQL](#work-with-sql)
 - [Results and CSV export](#results-and-csv-export)
+- [Settings and preferences](#settings-and-preferences)
 - [Schema, history, and snippets](#schema-history-and-snippets)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Security and privacy](#security-and-privacy)
@@ -212,6 +213,17 @@ Shortcuts can depend on which widget has focus.
 | **F5** | Refresh schema |
 | **F1** | Open the guided tour |
 | **Alt+F4** | Exit the application |
+
+## Settings and preferences
+
+The **Settings** menu groups working preferences by purpose:
+
+- **Appearance:** Reduce motion immediately disables optional transitions while leaving status feedback intact.
+- **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
+- **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
+- **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.
+
+Tab width and result row height are validated when settings load. Missing or malformed values fall back to 4 spaces and 28 px, respectively. Editor font size remains available under **View** and is persisted separately.
 
 ## Security and privacy
 
