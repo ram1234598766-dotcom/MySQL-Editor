@@ -191,7 +191,7 @@ def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes(
 
     assert "QPushButton#primaryButton:disabled {" in light
     assert (
-        "background: #F2F5F9; color: #64748B; border-color: #D6DEE8;"
+        "background: #F2F5F9; color: #526174; border-color: #D6DEE8;"
         in light
     )
     assert "QPushButton#primaryButton:disabled:hover {" in light
