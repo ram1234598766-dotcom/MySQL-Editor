@@ -312,6 +312,8 @@ class DatabaseWorker(QThread):
             finally:
                 cursor.close()
         objects: list[dict[str, str]] = []
+        columns_by_table: dict[str, list[str]] = {}
+        column_metadata_truncated = False
         if schema and schema in databases:
             cursor = self._connection.cursor()
             try:
@@ -319,7 +321,33 @@ class DatabaseWorker(QThread):
                 objects = [{"name": str(row[0]), "type": str(row[1])} for row in cursor.fetchall()]
             finally:
                 cursor.close()
-        return {"ok": True, "databases": databases, "schema": schema, "objects": objects}
+
+            # Schema metadata is fetched on the database worker, never on the Qt UI
+            # thread. Bound the result size so a very wide schema can't flood completion.
+            column_cursor = self._connection.cursor()
+            try:
+                column_cursor.execute(
+                    "SELECT TABLE_NAME, COLUMN_NAME "
+                    "FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = %s "
+                    "ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 10001",
+                    (schema,),
+                )
+                column_rows = column_cursor.fetchall()
+                column_metadata_truncated = len(column_rows) > 10000
+                for table_name, column_name in column_rows[:10000]:
+                    columns_by_table.setdefault(str(table_name), []).append(str(column_name))
+            except Exception:
+                # Lack of optional column metadata must not break schema/table browsing.
+                columns_by_table = {}
+                column_metadata_truncated = False
+            finally:
+                column_cursor.close()
+        return {
+            "ok": True, "databases": databases, "schema": schema, "objects": objects,
+            "columns_by_table": columns_by_table,
+            "column_metadata_truncated": column_metadata_truncated,
+        }
 
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
         cursor = self._connection.cursor()

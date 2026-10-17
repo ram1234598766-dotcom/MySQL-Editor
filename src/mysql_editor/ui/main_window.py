@@ -112,6 +112,10 @@ class MainWindow(QMainWindow):
         self.connect_result = connect_result
         self._jobs: dict[str, tuple[str, dict]] = {}
         self._schema_completion_words: set[str] = set()
+        self._schema_databases: set[str] = set()
+        self._schema_tables: set[str] = set()
+        self._schema_columns_by_table: dict[str, list[str]] = {}
+        self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
         self._current_result_id: str | None = None
@@ -593,7 +597,13 @@ class MainWindow(QMainWindow):
 
     def new_query_tab(self, text: str = "", path: str | None = None):
         editor = SqlEditor()
-        editor.set_completion_words(self._schema_completion_words | self._result_completion_words)
+        editor.set_completion_context(
+            databases=self._schema_databases,
+            tables=self._schema_tables,
+            columns_by_table=self._schema_columns_by_table,
+            extra_words=self._result_completion_words,
+            active_schema=self._active_schema_name,
+        )
         font = editor.font()
         font.setPointSize(self._editor_font_size)
         editor.setFont(font)
@@ -794,21 +804,35 @@ class MainWindow(QMainWindow):
                     item.addChild(child)
                 item.setExpanded(True)
             self.schema_tree.addTopLevelItem(item)
-        self._schema_completion_words = {
-            str(database) for database in result.get("databases", [])
+        self._active_schema_name = str(active_schema or "")
+        self._schema_databases = {str(database) for database in result.get("databases", [])}
+        self._schema_tables = {
+            str(record.get("name", ""))
+            for record in result.get("objects", [])
+            if record.get("name")
         }
-        self._schema_completion_words.update(
-            str(record.get("name", "")) for record in result.get("objects", [])
-        )
+        self._schema_completion_words = self._schema_databases | self._schema_tables
+        self._schema_columns_by_table = {
+            str(table): [str(column) for column in columns]
+            for table, columns in (result.get("columns_by_table") or {}).items()
+        }
         self._update_all_editor_completions()
-        self.status.setText(f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)")
+        status = f"Schema explorer refreshed · {len(result.get('databases', []))} database(s)"
+        if result.get("column_metadata_truncated"):
+            status += " · column completion limited to 10,000 columns"
+        self.status.setText(status)
 
     def _update_all_editor_completions(self) -> None:
-        words = self._schema_completion_words | self._result_completion_words
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
-                editor.set_completion_words(words)
+                editor.set_completion_context(
+                    databases=self._schema_databases,
+                    tables=self._schema_tables,
+                    columns_by_table=self._schema_columns_by_table,
+                    extra_words=self._result_completion_words,
+                    active_schema=self._active_schema_name,
+                )
 
     def _set_result_completion_words(self, headers) -> None:
         self._result_completion_words = {str(header) for header in headers}
@@ -912,6 +936,10 @@ class MainWindow(QMainWindow):
                 self.status.setText(result.get("error", "Could not load schemas."))
                 self.schema_tree.clear()
                 self._schema_completion_words.clear()
+                self._schema_databases.clear()
+                self._schema_tables.clear()
+                self._schema_columns_by_table.clear()
+                self._active_schema_name = ""
                 self._update_all_editor_completions()
             return
         if action in {"commit", "rollback"}:

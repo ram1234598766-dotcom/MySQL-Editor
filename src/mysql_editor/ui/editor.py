@@ -162,6 +162,10 @@ class SqlEditor(QPlainTextEdit):
         )
 
         self._extra_completion_words: set[str] = set()
+        self._completion_databases: set[str] = set()
+        self._completion_tables: set[str] = set()
+        self._completion_columns_by_table: dict[str, set[str]] = {}
+        self._completion_active_schema = ""
         self._completion_model = QStringListModel(self)
         self._completer = QCompleter(self._completion_model, self)
         self._completer.setWidget(self)
@@ -179,20 +183,130 @@ class SqlEditor(QPlainTextEdit):
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
-    def set_completion_words(self, words) -> None:
-        """Add safe schema identifiers without changing source SQL or quoting arbitrary names."""
-        self._extra_completion_words = {
-            str(word) for word in words if _IDENTIFIER_COMPLETION.fullmatch(str(word))
+    @staticmethod
+    def _safe_identifiers(words) -> set[str]:
+        return {
+            str(word) for word in (words or ())
+            if _IDENTIFIER_COMPLETION.fullmatch(str(word))
         }
+
+    def set_completion_words(self, words) -> None:
+        """Backwards-compatible setter for safe schema/result identifiers."""
+        self._extra_completion_words = self._safe_identifiers(words)
         self._refresh_completions()
 
+    def set_completion_context(
+        self, *, databases=(), tables=(), columns_by_table=None,
+        extra_words=(), active_schema: str = "",
+    ) -> None:
+        """Set bounded schema metadata used for context-sensitive suggestions."""
+        self._completion_databases = self._safe_identifiers(databases)
+        self._completion_tables = self._safe_identifiers(tables)
+        self._completion_columns_by_table = {
+            str(table): self._safe_identifiers(columns)
+            for table, columns in (columns_by_table or {}).items()
+            if _IDENTIFIER_COMPLETION.fullmatch(str(table))
+        }
+        self._completion_active_schema = str(active_schema or "")
+        self._extra_completion_words = self._safe_identifiers(extra_words)
+        self._refresh_completions()
+
+    def _all_completion_words(self) -> set[str]:
+        words = set(SQL_COMPLETIONS)
+        words.update(self._extra_completion_words)
+        words.update(self._completion_databases)
+        words.update(self._completion_tables)
+        for columns in self._completion_columns_by_table.values():
+            words.update(columns)
+        return words
+
     def completion_words(self) -> tuple[str, ...]:
-        """Expose the active word list for regression tests."""
-        return tuple(self._completion_model.stringList())
+        """Expose all available suggestions for regression tests and diagnostics."""
+        return tuple(sorted(self._all_completion_words(), key=str.casefold))
+
+    def _table_for_qualifier(self, qualifier: str) -> str | None:
+        key = qualifier.casefold()
+        for table in self._completion_columns_by_table:
+            if table.casefold() == key:
+                return table
+
+        # Resolve aliases from the whole current SQL buffer. This also supports the
+        # common editing order where SELECT columns are typed before FROM/JOIN.
+        sql = self.toPlainText()
+        reserved = {
+            "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "STRAIGHT_JOIN",
+            "WHERE", "ON", "USING", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
+            "UNION", "EXCEPT", "INTERSECT", "SET", "VALUES", "FOR", "LOCK",
+        }
+        table_pattern = re.compile(
+            r"\b(?:FROM|JOIN)\s+"
+            r"((?:[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)?[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"(?:\s+(?:AS\s+)?([A-Za-z_$][A-Za-z0-9_$]*))?",
+            re.IGNORECASE,
+        )
+        for match in table_pattern.finditer(sql):
+            table_ref = re.sub(r"\s", "", match.group(1)).split(".")[-1]
+            alias = match.group(2)
+            if table_ref.casefold() == key:
+                return table_ref
+            if alias and alias.upper() not in reserved and alias.casefold() == key:
+                return table_ref
+        return None
+
+    def _context_completion_words(self) -> tuple[str, ...]:
+        """Choose suggestions for the SQL clause around the cursor without parsing all MySQL."""
+        all_words = self._all_completion_words()
+        before = self.toPlainText()[:self.textCursor().position()]
+        database_context = re.search(r"\bUSE\s+[A-Za-z_$0-9]*$", before, re.IGNORECASE)
+        if database_context:
+            return tuple(sorted(self._completion_databases or all_words, key=str.casefold))
+
+        qualified = re.search(
+            r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*[A-Za-z0-9_$]*$",
+            before,
+        )
+        if qualified:
+            qualifier = qualified.group(1)
+            table = self._table_for_qualifier(qualifier)
+            if table:
+                columns = next(
+                    (value for name, value in self._completion_columns_by_table.items()
+                     if name.casefold() == table.casefold()),
+                    set(),
+                )
+                if columns:
+                    return tuple(sorted(columns, key=str.casefold))
+            if (self._completion_active_schema and
+                    qualifier.casefold() == self._completion_active_schema.casefold()):
+                return tuple(sorted(self._completion_tables or all_words, key=str.casefold))
+            if any(db.casefold() == qualifier.casefold() for db in self._completion_databases):
+                return tuple(sorted(all_words, key=str.casefold))
+
+        table_context = re.search(
+            r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+(?:[A-Za-z_$][A-Za-z0-9_$]*)?$",
+            before,
+            re.IGNORECASE,
+        )
+        if table_context:
+            tables = self._completion_tables | self._completion_databases
+            return tuple(sorted(tables or all_words, key=str.casefold))
+
+        column_context = re.search(
+            r"\b(?:SELECT|WHERE|ON|AND|OR|HAVING|SET|BY|RETURNING)\s+[A-Za-z_$0-9]*$",
+            before,
+            re.IGNORECASE,
+        )
+        if column_context:
+            columns = set(self._extra_completion_words)
+            for table_columns in self._completion_columns_by_table.values():
+                columns.update(table_columns)
+            return tuple(sorted(set(SQL_COMPLETIONS) | columns, key=str.casefold))
+
+        return tuple(sorted(all_words, key=str.casefold))
 
     def _refresh_completions(self) -> None:
         self._completion_model.setStringList(
-            sorted(SQL_COMPLETIONS | self._extra_completion_words, key=str.casefold)
+            sorted(self._all_completion_words(), key=str.casefold)
         )
 
     def _completion_prefix(self) -> str:
@@ -205,6 +319,7 @@ class SqlEditor(QPlainTextEdit):
         if not force and len(prefix) < 2:
             self._completer.popup().hide()
             return
+        self._completion_model.setStringList(list(self._context_completion_words()))
         self._completer.setCompletionPrefix(prefix)
         popup = self._completer.popup()
         if self._completer.completionCount() == 0:
