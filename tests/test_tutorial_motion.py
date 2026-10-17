@@ -53,4 +53,5 @@ def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
 
     tour.close()
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
+    assert tour._fade.targetObject() is None
     assert tour.windowOpacity() == 1.0
