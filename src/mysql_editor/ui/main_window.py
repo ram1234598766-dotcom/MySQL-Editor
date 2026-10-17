@@ -664,6 +664,14 @@ class MainWindow(QMainWindow):
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
+                # QApplication stylesheet changes can repolish fonts; restore the explicit
+                # SQL editor preferences so appearance switches never reset readability.
+                font = editor.font()
+                font.setPointSize(self._editor_font_size)
+                editor.setFont(font)
+                editor.setTabStopDistance(
+                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
+                )
                 editor.set_editor_theme(resolved_theme)
         label = {"system": "System", "light": "Light", "dark": "Dark"}[theme]
         self.status.setText(
