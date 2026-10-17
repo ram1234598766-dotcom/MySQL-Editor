@@ -3,6 +3,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QLabel
 
 from mysql_editor.ui.animations import (
@@ -21,6 +22,14 @@ class SettingsStub:
 
 
 _APP = QApplication.instance() or QApplication([])
+
+
+def _dispose(widget):
+    """Destroy a test widget and flush Qt's deferred-deletion queue."""
+    widget.close()
+    widget.deleteLater()
+    _APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _APP.processEvents()
 
 
 def test_reduce_motion_setting_is_respected():
@@ -45,7 +54,7 @@ def test_headless_platform_uses_immediate_feedback_without_animation():
     assert animation is None
     assert getattr(label, "_mysql_editor_color_animation", None) is None
     assert "#50d9ee" in label.styleSheet()
-    label.close()
+    _dispose(label)
 
 
 def test_reduce_motion_uses_immediate_feedback():
@@ -58,7 +67,7 @@ def test_reduce_motion_uses_immediate_feedback():
     assert animation is None
     assert getattr(label, "_mysql_editor_color_animation", None) is None
     assert "#50d9ee" in label.styleSheet()
-    label.close()
+    _dispose(label)
 
 
 def test_hidden_widget_gets_immediate_state_without_animation():

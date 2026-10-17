@@ -3,12 +3,21 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
 _APP = QApplication.instance() or QApplication([])
+
+
+def _dispose(widget):
+    """Destroy a test widget tree and flush deferred Qt deletion events."""
+    widget.close()
+    widget.deleteLater()
+    _APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _APP.processEvents()
 
 
 class RepositoryStub:
@@ -36,7 +45,7 @@ def test_guided_tour_respects_reduce_motion_and_changes_pages_immediately(monkey
 
     tour._skip()
     assert tour.pages.graphicsEffect() is None
-    tour.close()
+    _dispose(tour)
 
 
 def test_guided_tour_uses_immediate_feedback_in_headless_mode(monkeypatch):
@@ -56,7 +65,7 @@ def test_guided_tour_uses_immediate_feedback_in_headless_mode(monkeypatch):
 
     tour._skip()
     assert all(label.graphicsEffect() is None for label in tour.progress_labels)
-    tour.close()
+    _dispose(tour)
 
 
 def test_guided_tour_finish_persists_completion_and_cleans_up():
@@ -69,4 +78,4 @@ def test_guided_tour_finish_persists_completion_and_cleans_up():
 
     assert repository.settings["guided_tour_completed"] == "true"
     assert all(label.graphicsEffect() is None for label in tour.progress_labels)
-    tour.close()
+    _dispose(tour)
