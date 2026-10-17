@@ -160,6 +160,8 @@ class MainWindow(QMainWindow):
         self.config = config
         self.connect_result = connect_result
         self._transaction_open = bool(connect_result.get("transaction_open", False))
+        self._connection_available = True
+        self._disconnect_pending = False
         self._jobs: dict[str, tuple[str, dict]] = {}
         self._deferred_export_notifications: list[dict] = []
         self._schema_request_id: str | None = None
@@ -263,10 +265,22 @@ class MainWindow(QMainWindow):
         self.tour_button = QPushButton("✧  Guided tour")
         self.tour_button.clicked.connect(self._show_product_tour)
         top_layout.addWidget(self.tour_button)
-        switch = QPushButton("Connect")
-        switch.setObjectName("primaryButton")
-        switch.clicked.connect(self.open_connection_dialog)
-        top_layout.addWidget(switch)
+        self.connect_button = QPushButton("Connect")
+        self.connect_button.setObjectName("primaryButton")
+        self.connect_button.setAccessibleName("Connect or switch MySQL connection")
+        self.connect_button.setToolTip("Connect to another MySQL server or reconnect after disconnecting.")
+        self.connect_button.clicked.connect(self.open_connection_dialog)
+        top_layout.addWidget(self.connect_button)
+        self.disconnect_button = QPushButton("Disconnect")
+        self.disconnect_button.setAccessibleName("Disconnect from the active MySQL server")
+        self.disconnect_button.setAccessibleDescription(
+            "Closes the current database session. Query tabs and fetched results stay open."
+        )
+        self.disconnect_button.setToolTip(
+            "Close the active MySQL session without closing SQL tabs or removing fetched results."
+        )
+        self.disconnect_button.clicked.connect(self.disconnect_from_mysql)
+        top_layout.addWidget(self.disconnect_button)
         outer.addWidget(top)
 
         navigation = QWidget()
@@ -827,6 +841,21 @@ class MainWindow(QMainWindow):
         self._set_editor_font_size(10)
 
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
+        database_actions = {"query", "schema", "schema_objects", "table_preview", "commit", "rollback"}
+        if action in database_actions and (
+            not self._connection_available or self._disconnect_pending
+        ):
+            self.status.setText(
+                "SQL not submitted · no active MySQL connection. Use Connect to reconnect."
+                if action == "query"
+                else "MySQL action not started · connect to a server first."
+            )
+            if action == "query":
+                self.query_meta.setText("Not connected")
+            return None
+        if action == "disconnect" and self._query_running:
+            self._report_query_busy("connection")
+            return None
         # Keep a single SQL task active even if another entry point bypasses editor buttons.
         if action == "query" and self._query_running:
             self._report_query_busy("submit")
@@ -1265,6 +1294,13 @@ class MainWindow(QMainWindow):
             editor.setTextCursor(cursor)
 
     def refresh_schema(self):
+        if not self._connection_available or self._disconnect_pending:
+            self.schema_state_label.setText(
+                "No active MySQL connection. Connect to a server to browse schema metadata."
+            )
+            self.status.setText("Schema refresh unavailable · connect to MySQL first.")
+            self.schema_refresh_button.setEnabled(False)
+            return
         schema = str(self.config.get("default_schema", "") or self.connect_result.get("database", ""))
         self._schema_request_id = None
         self._schema_expansion_requests.clear()
@@ -1583,10 +1619,7 @@ class MainWindow(QMainWindow):
             outcome = classify_query_outcome(result, self._cancellation_requested)
             self._query_running = False
             self._cancellation_requested = False
-            self.run_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.commit_button.setEnabled(True)
-            self.rollback_button.setEnabled(True)
+            self._sync_connection_controls()
         if action in {"query", "table_preview"}:
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
@@ -1652,6 +1685,57 @@ class MainWindow(QMainWindow):
                     + (f"\n{detail}" if detail else " Check the connection and try again.")
                 )
                 self.status.setText(detail or "Could not load schema metadata. Use Refresh to retry.")
+            return
+        if action == "disconnect":
+            self._disconnect_pending = False
+            if result.get("ok"):
+                self._connection_available = False
+                self._transaction_open = False
+                self._schema_request_id = None
+                self._schema_expansion_requests.clear()
+                self._schema_expand_items.clear()
+                self.schema_tree.clear()
+                self._schema_databases.clear()
+                self._schema_tables.clear()
+                self._schema_columns_by_table.clear()
+                self._schema_completion_words.clear()
+                self._active_schema_name = ""
+                self._update_all_editor_completions()
+
+                profile_name = str(self.profile.get("name", "Connection") or "Connection")
+                host = str(self.config.get("host", "MySQL") or "MySQL")
+                port = self.config.get("port", 3306)
+                username = str(self.config.get("username", "") or "")
+                schema = str(self.config.get("default_schema", "") or "(no default schema)")
+                detail = (
+                    "Disconnected from MySQL. Query tabs and fetched results are preserved; "
+                    "connect again to run SQL."
+                )
+                self.connection_badge.setText(f"○  {profile_name} · {host} · Disconnected")
+                self.connection_badge.setToolTip(detail)
+                self.connection_badge.setAccessibleName("MySQL connection disconnected")
+                self.connection_badge.setAccessibleDescription(detail)
+                self._set_connection_badge_state("disconnected")
+                self.connection_details.setText(
+                    f"{username}@{host}:{port} · {schema} · Disconnected"
+                )
+                self.connection_details.setToolTip(detail)
+                self.connection_details.setAccessibleName("Disconnected MySQL connection details")
+                self.connection_details.setAccessibleDescription(detail)
+                self.schema_state_label.setText(
+                    "Disconnected. Connect to a MySQL server to browse schema metadata."
+                )
+                self.query_meta.setText("Disconnected")
+                self.status.setText(
+                    f"Disconnected from {profile_name} at {host}. "
+                    "Query tabs and fetched results were kept."
+                )
+            else:
+                detail = redact_secrets(str(result.get("error") or "Disconnect failed.")).strip()
+                self.status.setText(
+                    "Could not disconnect from MySQL. " + (detail or "The session may still be active.")
+                )
+            self._sync_connection_controls()
             return
         if action in {"commit", "rollback"}:
             if result.get("ok"):
@@ -2384,6 +2468,9 @@ class MainWindow(QMainWindow):
         if self._query_running:
             self._report_query_busy("connection")
             return
+        if self._disconnect_pending:
+            self.status.setText("Connection change blocked · disconnect is still in progress.")
+            return
         dialog = ConnectionDialog(
             self.worker, self.repository, self.credentials, self,
             master_unlocked=True, before_connect=self._confirm_connection_switch,
@@ -2395,6 +2482,8 @@ class MainWindow(QMainWindow):
         if self._query_running:
             self._report_query_busy("connection")
             return
+        self._disconnect_pending = False
+        self._connection_available = True
         self._persist_profile(profile, config)
         self.profile = profile
         self.config = config
@@ -2436,6 +2525,54 @@ class MainWindow(QMainWindow):
         style.polish(self.connection_badge)
         self.connection_badge.update()
 
+    def _sync_connection_controls(self) -> None:
+        """Keep database-only controls consistent with connection, query and refresh state."""
+        available = self._connection_available and not self._disconnect_pending
+        idle = available and not self._query_running
+        self.connect_button.setEnabled(not self._disconnect_pending)
+        self.disconnect_button.setEnabled(idle)
+        self.run_button.setEnabled(idle)
+        self.run_selection_button.setEnabled(idle)
+        self.explain_button.setEnabled(idle)
+        self.commit_button.setEnabled(idle)
+        self.rollback_button.setEnabled(idle)
+        self.stop_button.setEnabled(self._query_running)
+        self.schema_refresh_button.setEnabled(available and self._schema_request_id is None)
+
+    def disconnect_from_mysql(self) -> None:
+        """Queue a session close without blocking the UI or discarding local query work."""
+        if self._query_running:
+            self._report_query_busy("connection")
+            return
+        if self._disconnect_pending:
+            self.status.setText("Disconnect already in progress.")
+            return
+        if not self._connection_available:
+            self.status.setText("No active MySQL session. Use Connect to reconnect.")
+            return
+        if self._transaction_open:
+            answer = QMessageBox.warning(
+                self,
+                "Disconnect with an open transaction",
+                "The active MySQL session has an open transaction. Disconnecting may cause "
+                "MySQL to roll back uncommitted work. Disconnect anyway?",
+                QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.status.setText(
+                    "Disconnect cancelled · the active MySQL session remains connected."
+                )
+                return
+
+        self._disconnect_pending = True
+        self._schema_request_id = None
+        self._schema_expansion_requests.clear()
+        self._schema_expand_items.clear()
+        self._sync_connection_controls()
+        self.status.setText("Disconnecting from MySQL…")
+        self._dispatch("disconnect", {})
+
     def _mark_connection_lost(self, error_message: str = "") -> None:
         """Show a lost database session without discarding query buffers or target details."""
         host = str(self.config.get("host", "MySQL") or "MySQL")
@@ -2456,13 +2593,12 @@ class MainWindow(QMainWindow):
         self.connection_details.setAccessibleName("Lost MySQL connection details")
         self.connection_details.setAccessibleDescription(details)
         self._transaction_open = False
-        if hasattr(self, "commit_button"):
-            self.commit_button.setEnabled(False)
-        if hasattr(self, "rollback_button"):
-            self.rollback_button.setEnabled(False)
+        self._connection_available = False
         self.status.setText(hint)
+        self._sync_connection_controls()
 
     def _update_connection_status(self):
+        self._connection_available = True
         host = self.config.get("host", "MySQL")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
         profile_name = str(self.profile.get("name", "Connection") or "Connection")
@@ -2480,6 +2616,7 @@ class MainWindow(QMainWindow):
         self.connection_details.setToolTip(details)
         self.connection_details.setAccessibleName("Active MySQL connection details")
         self.connection_details.setAccessibleDescription(details)
+        self._sync_connection_controls()
 
     def show_safety_info(self):
         QMessageBox.information(

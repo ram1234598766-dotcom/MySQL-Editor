@@ -116,6 +116,7 @@ QLabel#panelTitle { font-size: @TYPE_PANEL_TITLE@px; font-weight: 650; }
 QLabel#sectionLabel { color: #aabbd2; font-size: @TYPE_CAPTION@px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
 QLabel#connectionBadge[connectionState="lost"] { color: @COLOR_STATUS_DANGER@; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
+QLabel#connectionBadge[connectionState="disconnected"] { color: @COLOR_TEXT_SECONDARY@; background: @COLOR_SURFACE_RAISED@; border: 1px solid @COLOR_BORDER_SUBTLE@; border-radius: 8px; padding: 7px 10px; }
 QWidget#statusStrip { background: #121a27; border-top: 1px solid #354760; }
 QLabel#statusBar { background: transparent; color: #c0ccdc; border: none; padding: 7px 13px; }
 QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: @TYPE_CAPTION@px; }

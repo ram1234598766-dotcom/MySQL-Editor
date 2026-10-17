@@ -21,6 +21,8 @@ def test_dark_theme_uses_semantic_palette_values():
     assert TOKENS["window_bg"] in STYLESHEET
     assert TOKENS["accent_primary"] in STYLESHEET
     assert TOKENS["status_danger"] in STYLESHEET
+    assert 'QLabel#connectionBadge[connectionState="disconnected"]' in STYLESHEET
+    assert 'QLabel#connectionBadge[connectionState="disconnected"]' in stylesheet_for_theme("light")
 
 
 
