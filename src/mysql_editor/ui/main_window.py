@@ -17,10 +17,12 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
+from mysql_editor.core import (
+    classify_statement, current_statement, format_sql, redact_secrets,
+    redact_sql_secrets, split_sql_statements, transaction_pending_after_sql,
+)
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
-from mysql_editor.ui.animations import fade_in
 from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
@@ -33,6 +35,10 @@ from mysql_editor.ui.result_tools import (
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
+from mysql_editor.recent_files import (
+    MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
+    remove_recent_sql_path,
+)
 
 
 class ResultsModel(QAbstractTableModel):
@@ -142,6 +148,7 @@ class MainWindow(QMainWindow):
         self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
+        self._transaction_pending = False
         self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
@@ -528,6 +535,10 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
         self._action(file_menu, "New query", "Ctrl+N", self.new_query_tab)
         self._action(file_menu, "Open SQL file…", "Ctrl+O", self.open_sql_file)
+        self.recent_sql_menu = file_menu.addMenu("Recent SQL files")
+        self.recent_sql_menu.setAccessibleName("Recent SQL files")
+        self.recent_sql_menu.aboutToShow.connect(self._refresh_recent_sql_menu)
+        self._refresh_recent_sql_menu()
         self._action(file_menu, "Save SQL file", "Ctrl+S", self.save_sql_file)
         self._action(file_menu, "Save All", "", self.save_all_sql_files)
         self._action(file_menu, "Save SQL snippet", "Ctrl+Shift+S", self.save_query_snippet)
@@ -755,9 +766,6 @@ class MainWindow(QMainWindow):
             self._set_workspace_nav(destination)
             self.inspector_tabs.setCurrentIndex(2)
             self._refresh_saved_queries()
-
-        if destination in {"Schema explorer", "Query history", "Saved queries"}:
-            fade_in(self.inspector_tabs, self._settings)
 
     def _insert_tour_example(self):
         editor = self._current_editor()
@@ -1268,6 +1276,15 @@ class MainWindow(QMainWindow):
             outcome = classify_query_outcome(result, self._cancellation_requested)
             self._query_running = False
             self._cancellation_requested = False
+            if outcome == "complete":
+                self._transaction_pending = transaction_pending_after_sql(
+                    self._transaction_pending, context.get("sql", ""), complete=True,
+                )
+            elif outcome in {"partial_failure", "cancelled", "interrupted"}:
+                self._transaction_pending = transaction_pending_after_sql(
+                    self._transaction_pending, context.get("sql", ""), partial=True,
+                )
+            self._update_connection_status()
             self.run_button.setEnabled(True)
             self.stop_button.setEnabled(False)
         if action in {"query", "table_preview"}:
@@ -1334,7 +1351,10 @@ class MainWindow(QMainWindow):
             return
         if action in {"commit", "rollback"}:
             self.status.setText(result.get("message", result.get("error", action.title())))
-            if not result.get("ok"):
+            if result.get("ok"):
+                self._transaction_pending = False
+                self._update_connection_status()
+            else:
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
             return
         if action == "export_csv":
@@ -1565,6 +1585,70 @@ class MainWindow(QMainWindow):
         if self.saved_list.count() == 0:
             self.saved_list.addItem("Save a query snippet to see it here.")
 
+    def _recent_sql_paths(self) -> list[str]:
+        """Read local recent-file path metadata; SQL contents are never stored here."""
+        stored = self._settings.value("files/recentSqlPaths", [], type=list)
+        return normalize_recent_sql_paths(stored, limit=MAX_RECENT_SQL_FILES)
+
+    def _persist_recent_sql_paths(self, paths) -> None:
+        self._settings.setValue(
+            "files/recentSqlPaths",
+            normalize_recent_sql_paths(paths, limit=MAX_RECENT_SQL_FILES),
+        )
+        self._settings.sync()
+
+    def _record_recent_sql_file(self, path: str | Path) -> None:
+        self._persist_recent_sql_paths(
+            record_recent_sql_path(self._recent_sql_paths(), path, limit=MAX_RECENT_SQL_FILES)
+        )
+        self._refresh_recent_sql_menu()
+
+    def _remove_recent_sql_file(self, path: str | Path) -> None:
+        self._persist_recent_sql_paths(remove_recent_sql_path(self._recent_sql_paths(), path))
+        self._refresh_recent_sql_menu()
+
+    def _clear_recent_sql_files(self) -> None:
+        self._persist_recent_sql_paths([])
+        self._refresh_recent_sql_menu()
+        self.status.setText("Recent SQL file list cleared. No SQL content was stored in that list.")
+
+    def _open_recent_sql_file(self, path: str) -> None:
+        source = Path(path)
+        if not source.is_file():
+            self._remove_recent_sql_file(path)
+            QMessageBox.warning(
+                self, "Recent SQL file unavailable",
+                f"{source.name} is no longer available at the saved location. "
+                "The missing entry has been removed from Recent SQL files.",
+            )
+            self.status.setText("Recent SQL file unavailable; stale entry removed.")
+            return
+        self._open_sql_path(source)
+
+    def _refresh_recent_sql_menu(self) -> None:
+        menu = getattr(self, "recent_sql_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        paths = self._recent_sql_paths()
+        if not paths:
+            empty_action = menu.addAction("No recent SQL files")
+            empty_action.setEnabled(False)
+            return
+
+        for path in paths:
+            source = Path(path)
+            action = menu.addAction(source.name or path)
+            action.setToolTip(path)
+            action.setData(path)
+            action.triggered.connect(
+                lambda _checked=False, recent_path=path: self._open_recent_sql_file(recent_path)
+            )
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear recent list")
+        clear_action.setToolTip("Clear the local list of file paths. This does not delete any SQL files.")
+        clear_action.triggered.connect(self._clear_recent_sql_files)
+
     def _open_sql_path(self, path: str | Path) -> bool:
         source_path = Path(path)
         try:
@@ -1578,6 +1662,7 @@ class MainWindow(QMainWindow):
             self.status.setText("Could not open SQL file.")
             return False
         self.new_query_tab(sql_text, str(source_path))
+        self._record_recent_sql_file(source_path)
         self.status.setText(f"Opened {source_path.name}")
         return True
 
@@ -1871,6 +1956,29 @@ class MainWindow(QMainWindow):
         self.status.setText("Local query history cleared and disabled.")
 
     def open_connection_dialog(self):
+        if self._query_running:
+            QMessageBox.warning(
+                self, "Query still running",
+                "Wait for the current query to finish or cancel it before changing connections. "
+                "This prevents queued work from running against an unexpected server.",
+            )
+            self.status.setText("Connection switch blocked while a query is running.")
+            return
+
+        if self._transaction_pending:
+            answer = QMessageBox.warning(
+                self,
+                "Uncommitted database changes",
+                "This session may contain uncommitted writes. Switching connections closes the "
+                "current session and MySQL may roll back those changes. Commit or Rollback first, "
+                "or continue only if you accept that risk. Cancelling this dialog leaves the current "
+                "connection and transaction unchanged.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
         dialog = ConnectionDialog(
             self.worker, self.repository, self.credentials, self,
             master_unlocked=True,
@@ -1883,6 +1991,8 @@ class MainWindow(QMainWindow):
         self.profile = profile
         self.config = config
         self.connect_result = connect_result
+        # The accepted switch has replaced the prior server session.
+        self._transaction_pending = False
         self._update_connection_status()
         self.refresh_schema()
 
@@ -1906,12 +2016,20 @@ class MainWindow(QMainWindow):
     def _update_connection_status(self):
         host = self.config.get("host", "MySQL")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
-        self.connection_badge.setText(f"●  {host} · Connected")
+        pending_suffix = " · Uncommitted writes" if self._transaction_pending else ""
+        self.connection_badge.setText(f"●  {host} · Connected{pending_suffix}")
+        self.connection_badge.setAccessibleName(
+            f"Connection status: connected to {host}"
+            + ("; uncommitted writes may be pending" if self._transaction_pending else "")
+        )
         details = (
             f"{host}:{self.config.get('port', 3306)} · {self.config.get('username', '')} · "
             f"Database: {schema} · Server: {self.connect_result.get('server_version', 'MySQL')} · "
-            f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}"
+            f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}\n"
+            "All SQL query tabs use this active connection; switching changes their execution target."
         )
+        if self._transaction_pending:
+            details += "\nUncommitted writes may be pending on this session."
         self.connection_details.setText(
             f"{self.config.get('username', '')}@{host}:{self.config.get('port', 3306)} · {schema}"
         )

@@ -559,3 +559,8 @@ The worker now emits running/fetch progress and CSV export progress; the UI dist
 ### Appearance preference work — 17 October 2026
 
 System/Light/Dark theme selection is now implemented in the desktop Settings menu. The selected preference is stored in QSettings, applied during startup, and can be changed immediately without rebuilding the main window or clearing editor/result state. Windows System mode reads the Windows app-colour preference; other platforms fall back to the Qt application palette. Regression tests cover invalid stored values, System resolution, and important light-theme widget states. High-DPI contrast and visual consistency still require manual review on real Windows displays before a release claim.
+
+
+### Motion accessibility work — 17 October 2026
+
+The guided tour now reads the persistent Reduce Motion preference. When reduced motion is enabled, page changes are immediate and no opacity effect is attached. When motion is enabled, the tour uses the shared 260 ms motion token; rapid page changes restart the transition, and Skip/Finish stop it and restore full opacity. Regression tests cover reduced-motion behavior, completion, repeated navigation, and close/finish cleanup. Physical Windows visual checks for flicker, focus preservation, and high-DPI rendering remain release gates.

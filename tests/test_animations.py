@@ -1,4 +1,9 @@
-from mysql_editor.ui.animations import MICRO_DURATION_MS, STANDARD_DURATION_MS, reduce_motion_enabled
+"""Regression tests for animation preferences and bounded motion durations."""
+from mysql_editor.ui.animations import (
+    MICRO_DURATION_MS,
+    STANDARD_DURATION_MS,
+    reduce_motion_enabled,
+)
 
 
 class SettingsStub:

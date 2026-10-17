@@ -88,3 +88,41 @@ def test_risk_advisory_understands_cte_wrapped_mutations():
 def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
     assert classify_statement("UPDATE " + chr(96) + "where" + chr(96) + " SET value = 1")[0] == "high"
     assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
+
+
+
+def test_transaction_pending_tracks_writes_and_explicit_completion():
+    from mysql_editor.core import transaction_pending_after_sql
+
+    assert transaction_pending_after_sql(False, "INSERT INTO users VALUES (1)", complete=True)
+    assert transaction_pending_after_sql(False, "UPDATE users SET label = 'DELETE'", complete=True)
+    assert not transaction_pending_after_sql(False, "SELECT 'UPDATE users'", complete=True)
+    assert not transaction_pending_after_sql(True, "COMMIT", complete=True)
+    assert not transaction_pending_after_sql(True, "ROLLBACK", complete=True)
+    assert not transaction_pending_after_sql(True, "CREATE TABLE audit_log (id INT)", complete=True)
+
+
+def test_transaction_pending_is_conservative_after_partial_failure():
+    from mysql_editor.core import transaction_pending_after_sql
+
+    assert transaction_pending_after_sql(
+        False, "UPDATE users SET active = 0; SELECT broken syntax", partial=True
+    )
+    assert not transaction_pending_after_sql(
+        False, "SELECT 1; SELECT broken syntax", partial=True
+    )
+
+
+def test_transaction_pending_understands_cte_updates_and_comment_masking():
+    from mysql_editor.core import transaction_pending_after_sql
+
+    assert transaction_pending_after_sql(
+        False,
+        "WITH candidate AS (SELECT id FROM users) UPDATE users SET active = 0",
+        complete=True,
+    )
+    assert not transaction_pending_after_sql(
+        False,
+        "SELECT 'UPDATE users SET active = 0' /* DELETE FROM users */",
+        complete=True,
+    )

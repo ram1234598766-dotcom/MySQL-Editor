@@ -37,7 +37,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - SQL syntax highlighting, line numbers, current-line highlighting, indentation, and a monospace font.
 - A live editor position indicator shows line/column and selected character count; the active connection and unsaved-tab state remain visible.
 - MySQL keyword/function completion plus suitable identifiers learned from the current schema and result-column names. Use **Ctrl+Space** to open completion on demand.
-- SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
+- SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, a local **Recent SQL files** menu, and saved query snippets.
 - Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, and editor font size are stored locally.
 - Animated five-step guided tour that can insert a sample SELECT into the editor.
 
@@ -218,7 +218,7 @@ Shortcuts can depend on which widget has focus.
 
 The **Settings** menu groups working preferences by purpose:
 
-- **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. Reduce motion disables optional transitions while leaving status feedback intact.
+- **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. Reduce motion disables optional workspace and guided-tour transitions while leaving status feedback intact.
 - **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
 - **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
 - **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.
@@ -226,6 +226,8 @@ The **Settings** menu groups working preferences by purpose:
 Tab width and result row height are validated when settings load. Missing or malformed values fall back to 4 spaces and 28 px, respectively. Editor font size remains available under **View** and is persisted separately.
 
 ## Security and privacy
+
+The Recent SQL files menu stores only local file paths in application settings, not SQL text or query results. Use **File → Recent SQL files → Clear recent list** to remove this path history. Removing an entry does not delete the file.
 
 ### Local data
 - Connection profile metadata—including host, port, username, default schema, TLS policy, CA path, and timeouts—is stored in the local settings database.

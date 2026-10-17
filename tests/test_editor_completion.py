@@ -4,7 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.editor import SqlEditor, _matching_bracket_positions
@@ -275,3 +275,87 @@ def test_bracket_matching_works_backwards_and_rejects_unmatched_or_malformed_pai
 
     malformed = "SELECT ([value)"
     assert _matching_bracket_positions(malformed, malformed.index("(")) is None
+
+def _send_text_key(editor, key, text):
+    event = QKeyEvent(
+        QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier, text
+    )
+    QApplication.sendEvent(editor, event)
+    _APP.processEvents()
+
+
+def test_parentheses_auto_pair_and_close_bracket_skip_over():
+    editor = SqlEditor()
+    editor.setPlainText("SELECT ")
+    cursor = editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    editor.setTextCursor(cursor)
+
+    _send_text_key(editor, Qt.Key.Key_ParenLeft, "(")
+
+    assert editor.toPlainText() == "SELECT ()"
+    assert editor.textCursor().position() == len("SELECT (")
+
+    _send_text_key(editor, Qt.Key.Key_ParenRight, ")")
+
+    assert editor.toPlainText() == "SELECT ()"
+    assert editor.textCursor().position() == len("SELECT ()")
+
+
+def test_parentheses_auto_pair_wraps_selected_expression_without_losing_selection():
+    editor = SqlEditor()
+    editor.setPlainText("SELECT customer_id FROM customers")
+    cursor = editor.textCursor()
+    start = len("SELECT ")
+    end = start + len("customer_id")
+    cursor.setPosition(start)
+    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+    editor.setTextCursor(cursor)
+
+    _send_text_key(editor, Qt.Key.Key_ParenLeft, "(")
+
+    assert editor.toPlainText() == "SELECT (customer_id) FROM customers"
+    assert editor.textCursor().selectedText() == "customer_id"
+
+
+def test_parentheses_are_not_auto_paired_inside_strings_or_comments():
+    cases = [
+        ("SELECT 'value'", len("SELECT 'val")),
+        ('SELECT "value"', len('SELECT "val')),
+        ("SELECT " + chr(96) + "column" + chr(96), len("SELECT " + chr(96) + "col")),
+        ("SELECT value /* comment */", len("SELECT value /* com")),
+        ("SELECT value -- comment", len("SELECT value -- com")),
+        ("SELECT value # comment", len("SELECT value # com")),
+    ]
+    for source, position in cases:
+        expected = source[:position] + "(" + source[position:]
+        editor = SqlEditor()
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(position)
+        editor.setTextCursor(cursor)
+
+        _send_text_key(editor, Qt.Key.Key_ParenLeft, "(")
+
+        assert editor.toPlainText() == expected
+
+
+def test_pasted_parentheses_are_not_auto_paired_or_modified():
+    editor = SqlEditor()
+    pasted = "SELECT (customer_id)\nFROM customers"
+    editor.insertPlainText(pasted)
+
+    assert editor.toPlainText() == pasted
+
+
+def test_lexical_code_position_handles_escaped_quotes_and_mysql_comments():
+    from mysql_editor.ui.editor import _is_sql_code_position
+
+    escaped = "SELECT 'abc" + chr(92) + "' still string"
+    assert _is_sql_code_position(escaped, len("SELECT 'abc" + chr(92) + "'")) is False
+    assert _is_sql_code_position("SELECT 'abc' + ", len("SELECT 'abc' + ")) is True
+    assert _is_sql_code_position("SELECT 1 -- comment\n", len("SELECT 1 -- comment\n")) is True
+    assert _is_sql_code_position("SELECT 1 -- comment", len("SELECT 1 --")) is False
+    assert _is_sql_code_position("SELECT 1 /* comment */ + ", len("SELECT 1 /* comment */ + ")) is True
+
+

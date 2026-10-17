@@ -120,6 +120,65 @@ def _sql_code_mask(text: str) -> bytearray:
     return mask
 
 
+
+def _is_sql_code_position(text: str, cursor_position: int) -> bool:
+    """Return whether a cursor boundary is outside MySQL strings and comments."""
+    position = max(0, min(int(cursor_position), len(text)))
+    index = 0
+    quote: str | None = None
+    in_line_comment = False
+    in_block_comment = False
+
+    while index < position:
+        char = text[index]
+        following = text[index + 1] if index + 1 < position else ""
+
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+            index += 1
+            continue
+
+        if in_block_comment:
+            if char == "*" and following == "/":
+                in_block_comment = False
+                index += 2
+            else:
+                index += 1
+            continue
+
+        if quote is not None:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                if following == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+
+        if char in ("'", '"', chr(96)):
+            quote = char
+            index += 1
+            continue
+        if text.startswith("/*", index) and index + 1 < position:
+            in_block_comment = True
+            index += 2
+            continue
+        if char == "#" or (
+            text.startswith("--", index)
+            and (index + 2 >= len(text) or text[index + 2].isspace())
+        ):
+            in_line_comment = True
+            index += 1 if char == "#" else 2
+            continue
+        index += 1
+
+    return quote is None and not in_line_comment and not in_block_comment
+
+
 def _matching_bracket_positions(text: str, cursor_position: int) -> tuple[int, int] | None:
     """Return the opening/closing bracket positions adjacent to the cursor, if paired."""
     left = cursor_position - 1
@@ -631,6 +690,58 @@ class SqlEditor(QPlainTextEdit):
                 popup.hide()
                 event.accept()
                 return
+        typed = event.text()
+        modifiers = event.modifiers()
+        allows_edit_pairing = not (
+            modifiers
+            & (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.MetaModifier
+            )
+        )
+        cursor = self.textCursor()
+        sql = self.toPlainText()
+        cursor_position = cursor.position()
+
+        # Pair only typed parentheses. Clipboard paste and multiline insertions
+        # use different paths and therefore remain byte-for-byte untouched.
+        if (
+            typed == "("
+            and allows_edit_pairing
+            and _is_sql_code_position(sql, cursor_position)
+        ):
+            selection_start = cursor.selectionStart()
+            if cursor.hasSelection():
+                selected = cursor.selectedText().replace("\u2029", "\n")
+                selected_length = len(selected.encode("utf-16-le")) // 2
+                cursor.insertText("(" + selected + ")")
+                cursor.setPosition(selection_start + 1)
+                cursor.setPosition(
+                    selection_start + 1 + selected_length,
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+            else:
+                cursor.insertText("()")
+                cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
+            self.setTextCursor(cursor)
+            self.highlight_current_line()
+            event.accept()
+            return
+
+        if (
+            typed == ")"
+            and allows_edit_pairing
+            and not cursor.hasSelection()
+            and cursor_position < len(sql)
+            and sql[cursor_position] == ")"
+            and _is_sql_code_position(sql, cursor_position)
+        ):
+            cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
+            self.setTextCursor(cursor)
+            event.accept()
+            return
+
         if (
             key in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
             and not self.textCursor().hasSelection()

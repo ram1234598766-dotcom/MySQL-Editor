@@ -219,6 +219,57 @@ def _has_top_level_keyword(masked_sql: str, keyword: str, start: int) -> bool:
     return False
 
 
+def transaction_pending_after_sql(
+    previous: bool,
+    sql: str,
+    *,
+    complete: bool = False,
+    partial: bool = False,
+) -> bool:
+    """Conservatively track uncommitted writes for safe connection switching.
+
+    Successful COMMIT/ROLLBACK and MySQL implicit-commit DDL clear the pending
+    flag. A partially completed script that contains a write keeps the warning
+    active because the UI cannot infer exactly which statements reached MySQL.
+    """
+    statements = split_sql_statements(sql)
+    if not complete:
+        if partial and any(
+            _transaction_effect(statement) == "write" for statement in statements
+        ):
+            return True
+        return previous
+
+    pending = previous
+    for statement in statements:
+        effect = _transaction_effect(statement)
+        if effect == "clear":
+            pending = False
+        elif effect == "write":
+            pending = True
+    return pending
+
+
+def _transaction_effect(statement: str) -> str:
+    """Classify the transaction-state effect of one ordinary SQL statement."""
+    masked = _mask_sql_literals_and_comments(statement)
+    command, _start = _main_statement_command(masked)
+    normalized = " ".join(masked.strip().upper().split())
+
+    if command in {"COMMIT", "ROLLBACK", "BEGIN", "START"}:
+        return "clear"
+    if command in {"CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "GRANT", "REVOKE"}:
+        return "clear"
+    if command == "SET" and re.match(
+        r"SET\s+(?:SESSION\s+)?AUTOCOMMIT\s*=\s*(?:1|ON)\b",
+        normalized,
+    ):
+        return "clear"
+    if command in {"INSERT", "UPDATE", "DELETE", "REPLACE", "CALL", "LOAD"}:
+        return "write"
+    return "none"
+
+
 def classify_statement(sql: str) -> tuple[str, str]:
     """Conservative SQL advisory, excluding strings/comments and understanding CTE DML.
 
