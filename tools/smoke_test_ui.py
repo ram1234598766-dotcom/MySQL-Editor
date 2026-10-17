@@ -148,7 +148,9 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
         if not window.grab().save(str(output_path), "PNG"):
             raise RuntimeError(f"Could not write visual QA screenshot: {output_path}")
         window.close()
+        _repository.close()
         app.processEvents()
+        app.quit()
 
 
 def main():
