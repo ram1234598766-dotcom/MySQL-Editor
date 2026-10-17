@@ -163,7 +163,7 @@ class ProductTourDialog(QDialog):
 
         # The dialog is the animation target and owner. This avoids a separate
         # widget-owned graphics effect and keeps interruption/teardown straightforward.
-        self._fade = QPropertyAnimation(self, b"windowOpacity", self)
+        self._fade = QPropertyAnimation(self, b"windowOpacity")
         self._fade.setDuration(STANDARD_DURATION_MS)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fade.setStartValue(0.92)
