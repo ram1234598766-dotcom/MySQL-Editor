@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -475,6 +477,7 @@ class MainWindow(QMainWindow):
         self._action(file_menu, "New query", "Ctrl+N", self.new_query_tab)
         self._action(file_menu, "Open SQL file…", "Ctrl+O", self.open_sql_file)
         self._action(file_menu, "Save SQL file", "Ctrl+S", self.save_sql_file)
+        self._action(file_menu, "Save All", "", self.save_all_sql_files)
         self._action(file_menu, "Save SQL snippet", "Ctrl+Shift+S", self.save_query_snippet)
         file_menu.addSeparator()
         self._action(file_menu, "Switch connection…", "", self.open_connection_dialog)
@@ -1511,15 +1514,36 @@ class MainWindow(QMainWindow):
         if path:
             self._open_sql_path(path)
 
-    def _write_current_editor(self, path: str) -> bool:
-        editor = self._current_editor()
-        if not editor:
+    def _write_editor_to_path(self, editor, path: str) -> bool:
+        """Atomically save one editor buffer and update only that tab's save state."""
+        if editor is None:
             return False
+
         destination = Path(path)
+        temporary_path: Path | None = None
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(editor.toPlainText(), encoding="utf-8")
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                dir=str(destination.parent),
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(editor.toPlainText())
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, destination)
+            temporary_path = None
         except (OSError, UnicodeError) as exc:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             QMessageBox.warning(
                 self, "Save SQL file",
                 f"Could not save {destination.name}. Your query remains open and unchanged.\n\n"
@@ -1527,11 +1551,64 @@ class MainWindow(QMainWindow):
             )
             self.status.setText("Save failed; your query remains open.")
             return False
+
         editor.document().setModified(False)
         self._last_saved_paths[id(editor)] = str(destination)
-        self.editors.setTabText(self.editors.currentIndex(), destination.name)
+        index = self.editors.indexOf(editor)
+        if index >= 0:
+            self.editors.setTabText(index, destination.name)
         self._refresh_saved_queries()
         self.status.setText(f"Saved {destination.name}")
+        return True
+
+    def _write_current_editor(self, path: str) -> bool:
+        return self._write_editor_to_path(self._current_editor(), path)
+
+    def save_all_sql_files(self) -> bool:
+        """Save modified tabs in order; cancellation/failure leaves later tabs untouched."""
+        pending = [
+            (self.editors.widget(index), self.editors.tabText(index))
+            for index in range(self.editors.count())
+            if self.editors.widget(index) is not None
+            and self.editors.widget(index).document().isModified()
+        ]
+        if not pending:
+            self.status.setText("All SQL tabs are already saved.")
+            return True
+
+        saved_count = 0
+        for editor, raw_label in pending:
+            path = self._last_saved_paths.get(id(editor), "") or ""
+            if not path:
+                tab_label = raw_label.removesuffix(" *")
+                suggested = Path(tab_label).name or "query.sql"
+                if not suggested.lower().endswith(".sql"):
+                    suggested += ".sql"
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    f"Save {tab_label}",
+                    suggested,
+                    "SQL files (*.sql)",
+                )
+                if not path:
+                    if saved_count:
+                        self.status.setText(
+                            f"Save All cancelled after saving {saved_count} tab(s); "
+                            "remaining tabs were left unchanged."
+                        )
+                    else:
+                        self.status.setText("Save All cancelled; no tabs were saved.")
+                    return False
+
+            if not self._write_editor_to_path(editor, path):
+                self.status.setText(
+                    f"Save All stopped after saving {saved_count} tab(s); "
+                    "remaining tabs were left unchanged."
+                )
+                return False
+            saved_count += 1
+
+        self.status.setText(f"Saved {saved_count} modified SQL tab(s).")
         return True
 
     def save_sql_file(self, force_dialog: bool = False):
