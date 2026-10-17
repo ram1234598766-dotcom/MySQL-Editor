@@ -52,8 +52,9 @@ EDITOR_PALETTES = {
 
 # Component rules remain one stylesheet so semantic palette changes are applied
 # consistently. Values are resolved here because Qt stylesheets do not support CSS vars.
+# App-level typography is set through QApplication. Avoid universal font rules here so
+# each SQL editor can keep its configured monospace family and point size.
 STYLESHEET = r'''
-* { font-family: "Segoe UI"; font-size: 12px; }
 QMainWindow, QDialog, QWidget { background: #0B111B; color: #e8f1ff; }
 QMenuBar { background: #121a27; color: #e8f1ff; padding: 4px 10px; border-bottom: 1px solid #2c3a50; }
 QMenuBar::item { padding: 6px 9px; border-radius: 5px; }

@@ -3,10 +3,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.editor import SqlEditor
-from mysql_editor.ui.theme import EDITOR_PALETTES
+from mysql_editor.ui.theme import EDITOR_PALETTES, stylesheet_for_theme
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -80,4 +81,23 @@ def test_unknown_editor_theme_falls_back_to_dark_palette():
         assert editor.theme_palette == EDITOR_PALETTES["dark"]
     finally:
         editor.deleteLater()
+        _APP.processEvents()
+
+
+def test_shared_theme_stylesheet_respects_editor_font_preferences():
+    """The application chrome stylesheet must not override the SQL editor font."""
+    original_stylesheet = _APP.styleSheet()
+    editor = None
+    try:
+        _APP.setStyleSheet(stylesheet_for_theme("dark"))
+        editor = SqlEditor()
+        editor.setFont(QFont("Cascadia Code", 15))
+        _APP.processEvents()
+
+        assert editor.font().pointSize() == 15
+        assert editor.font().family().casefold() == "cascadia code"
+    finally:
+        if editor is not None:
+            editor.deleteLater()
+        _APP.setStyleSheet(original_stylesheet)
         _APP.processEvents()
