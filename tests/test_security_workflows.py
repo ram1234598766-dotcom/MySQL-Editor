@@ -1,6 +1,7 @@
 """Regression checks for runtime and build-environment dependency audit coverage."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -50,7 +51,7 @@ def test_windows_build_uses_read_only_permissions_and_isolates_release_write_acc
     build_job = workflow.split("  build:\n", 1)[1].split("  publish:\n", 1)[0]
     publish_job = workflow.split("  publish:\n", 1)[1]
     assert "Publish Windows packages to GitHub Releases" not in build_job
-    assert "uses: actions/download-artifact@v7" in publish_job
+    assert re.search(r"uses: actions/download-artifact@[0-9a-f]{40} # v7", publish_job)
     assert "needs: build" in publish_job
     assert "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in publish_job
     assert "GH_REPO: ${{ github.repository }}" in publish_job
@@ -66,3 +67,27 @@ def test_windows_build_uses_read_only_permissions_and_isolates_release_write_acc
         "dist/THIRD_PARTY_LICENSES.md",
     ):
         assert required_asset in upload_config
+
+def test_ci_actions_are_pinned_to_immutable_shas_and_dependabot_updates_them():
+    workflow_paths = (
+        ".github/workflows/desktop-ci.yml",
+        ".github/workflows/security.yml",
+        ".github/workflows/windows-release.yml",
+    )
+    for relative_path in workflow_paths:
+        workflow = _read_workflow(relative_path)
+        action_lines = [
+            line.strip()
+            for line in workflow.splitlines()
+            if re.match(r"^\\s*(?:-\\s*)?uses:", line)
+        ]
+        assert action_lines, f"No actions found in {relative_path}"
+        for line in action_lines:
+            assert re.search(r"@[0-9a-f]{40}\\s+#\\s*v\\d+\\s*$", line), (
+                f"Action reference is not SHA-pinned in {relative_path}: {line}"
+            )
+
+    dependabot = _read_workflow(".github/dependabot.yml")
+    assert '"package-ecosystem": "github-actions"' in dependabot
+    assert 'directory: "/"' in dependabot
+    assert 'interval: "weekly"' in dependabot
