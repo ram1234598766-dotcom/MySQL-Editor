@@ -1881,7 +1881,6 @@ class MainWindow(QMainWindow):
                 action = menu.addAction(label)
                 action.setToolTip(raw_path)
                 action.setStatusTip(raw_path)
-                action.setAccessibleDescription(f"Open SQL file: {raw_path}")
                 action.triggered.connect(
                     lambda _checked=False, selected_path=raw_path: self._open_sql_path(selected_path)
                 )
