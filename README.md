@@ -162,7 +162,7 @@ Before running a mutation, verify the active server and schema. High-impact stat
 ### Transactions and cancellation
 Commit and Rollback act on the active connection. Some MySQL statements, particularly many DDL operations, implicitly commit regardless of the application's transaction controls. Do not assume every operation can be undone with Rollback. Use backups and server-side privileges for important safety controls.
 
-**Stop** sends a best-effort KILL QUERY request through a separate control connection. Permissions, network conditions, and server state affect whether it succeeds promptly. A request to cancel is not proof that the server stopped immediately; check the final state before retrying a mutation.
+**Stop** sends a best-effort KILL QUERY request through a separate control connection. Permissions, network conditions, and server state affect whether it succeeds promptly. A request to cancel is not proof that the server stopped immediately; check the final state before retrying a mutation. The status strip separates queued/running/fetching states from completion. The UI reports “cancelled” only when MySQL returns an explicit interruption signal after a cancellation request. If a multi-statement script completes earlier statements before a later one fails, it is marked as a partial failure and retains the earlier result sets.
 
 ## Results and CSV export
 

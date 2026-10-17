@@ -1,4 +1,4 @@
-from mysql_editor.database import DatabaseWorker, safe_db_error
+from mysql_editor.database import DatabaseWorker, is_query_interrupted, safe_db_error
 
 
 def test_automatic_tls_does_not_require_an_explicit_certificate_file():
@@ -116,3 +116,17 @@ def test_csv_export_failure_preserves_previous_file_and_removes_temp_file(tmp_pa
     assert destination.read_text(encoding="utf-8") == "previous export"
     assert list(tmp_path.glob(".report.csv.*.tmp")) == []
     spool_owner._spool.close()
+
+
+
+def test_only_explicit_mysql_interruption_errors_are_classified_as_interrupted():
+    class MysqlException(Exception):
+        def __init__(self, message, errno=None, sqlstate=None):
+            super().__init__(message)
+            self.errno = errno
+            self.sqlstate = sqlstate
+
+    assert is_query_interrupted(MysqlException("Query execution was interrupted", 1317))
+    assert is_query_interrupted(MysqlException("statement interrupted", sqlstate="70100"))
+    assert not is_query_interrupted(MysqlException("Lost connection to MySQL server", 2013))
+    assert not is_query_interrupted(RuntimeError("Execution timed out"))

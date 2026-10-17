@@ -25,6 +25,7 @@ from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
+from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, select_preview_sql
 
 
@@ -122,6 +123,7 @@ class MainWindow(QMainWindow):
         self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
+        self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._query_results: list[dict] = []
         self._last_duration = 0
@@ -610,10 +612,14 @@ class MainWindow(QMainWindow):
         self._jobs[job_id] = (action, context or {})
         self.worker.submit(action, payload, job_id)
         if action == "query":
+            self._cancellation_requested = False
             self._query_running = True
             self.run_button.setEnabled(False)
             self.stop_button.setEnabled(True)
-            self.query_meta.setText("Running…")
+            self.query_meta.setText("Queued…")
+            self.status.setText("Query queued…")
+        elif action == "export_csv":
+            self.status.setText("CSV export queued…")
         return job_id
 
     def _set_workspace_nav(self, destination: str):
@@ -817,9 +823,9 @@ class MainWindow(QMainWindow):
             "sql": sql, "profile_name": self.profile.get("name", "Connection"),
         })
         self.result_message.setText(
-            "SQL is running in the database worker. The editor remains responsive."
+            "SQL is queued for the database worker. The editor remains responsive."
         )
-        self.status.setText("Executing…")
+        self.status.setText("Query queued…")
 
     def explain_query(self):
         editor = self._current_editor()
@@ -835,9 +841,16 @@ class MainWindow(QMainWindow):
         self._execute_sql("EXPLAIN " + sql)
 
     def stop_query(self):
-        if self._query_running:
-            self.status.setText("Sending a best-effort cancellation request to MySQL…")
+        if self._query_running and not self._cancellation_requested:
+            self._cancellation_requested = True
+            self.status.setText("Cancellation requested · waiting for MySQL to respond…")
+            self.query_meta.setText("Cancellation requested…")
+            self.result_message.setText(
+                "A cancellation request was sent. The query remains active until MySQL interrupts it."
+            )
             self.worker.cancel_current_query()
+        elif self._query_running:
+            self.status.setText("Cancellation is already requested; waiting for MySQL…")
 
     def format_current_sql(self):
         editor = self._current_editor()
@@ -1051,8 +1064,11 @@ class MainWindow(QMainWindow):
         expected_action, context = pending
         if expected_action != action:
             return
+        outcome = None
         if action == "query":
+            outcome = classify_query_outcome(result, self._cancellation_requested)
             self._query_running = False
+            self._cancellation_requested = False
             self.run_button.setEnabled(True)
             self.stop_button.setEnabled(False)
         if action in {"query", "table_preview"}:
@@ -1075,11 +1091,15 @@ class MainWindow(QMainWindow):
             elif result.get("ok"):
                 self.query_meta.setText("No result rows")
                 self.result_message.setText("Statement completed. No result set was returned.")
-            self.status.setText(result.get("error") or "Query complete.")
+            if action == "query":
+                self._apply_query_outcome(outcome, result)
+            else:
+                self.status.setText(result.get("error") or "Table preview complete.")
             if context.get("sql"):
                 self.repository.add_history(
                     context.get("profile_name", "Connection"), redact_sql_secrets(context["sql"]),
-                    self._last_duration, "success" if result.get("ok") else "error",
+                    self._last_duration,
+                    "success" if outcome == "complete" else "error" if outcome else ("success" if result.get("ok") else "error"),
                 )
                 self.refresh_history()
             return
@@ -1111,8 +1131,60 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
 
+    def _apply_query_outcome(self, outcome: str | None, result: dict):
+        error = str(result.get("error") or "Query failed.")
+        results = list(result.get("results") or [])
+        completed_results = sum(item.get("kind") != "error" for item in results)
+        duration = int(result.get("duration_ms", 0) or 0)
+
+        if outcome == "complete":
+            if results:
+                self.status.setText(f"Query complete · {completed_results:,} result set(s) · {duration:,} ms.")
+            else:
+                self.query_meta.setText("Completed")
+                self.result_message.setText("Statement completed successfully. No result set was returned.")
+                self.status.setText(f"Statement complete · {duration:,} ms.")
+        elif outcome == "cancelled":
+            self.query_meta.setText("Cancelled")
+            self.result_message.setText(
+                "MySQL interrupted this query after a cancellation request. Any earlier statement results "
+                "from a script remain available."
+            )
+            self.status.setText("Query cancelled by request.")
+        elif outcome == "interrupted":
+            self.query_meta.setText("Interrupted")
+            self.result_message.setText(
+                "MySQL interrupted this query. This can occur when the server or another client interrupts it."
+            )
+            self.status.setText("Query interrupted by MySQL.")
+        elif outcome == "partial_failure":
+            self.query_meta.setText(f"{completed_results:,} completed result(s) · partial failure")
+            self.result_message.setText(
+                "The script stopped when a later statement failed. Earlier results remain available; "
+                "select the final Error result for details."
+            )
+            self.status.setText("Partial failure · a later SQL statement failed.")
+        else:
+            self.query_meta.setText("Query failed")
+            self.result_message.setText(error)
+            self.status.setText(error)
+
     def _on_activity(self, message: str):
         self.status.setText(message)
+        if message.startswith("Running "):
+            self.query_meta.setText("Running…")
+        elif message.startswith("Fetching result rows"):
+            self.query_meta.setText("Fetching rows…")
+        elif message.startswith("Fetched "):
+            self.query_meta.setText(message)
+        elif message.startswith("Cancellation request sent"):
+            self.query_meta.setText("Cancellation request sent…")
+        elif message.startswith("Cancellation could not be confirmed"):
+            self.query_meta.setText("Cancellation not confirmed")
+        elif message.startswith("Exporting CSV"):
+            self.status.setText(message)
+        elif message.startswith("Exported "):
+            self.status.setText(message)
 
     def export_results(self):
         if not self._current_result_id:

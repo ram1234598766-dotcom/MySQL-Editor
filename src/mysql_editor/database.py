@@ -36,6 +36,16 @@ def safe_db_error(error: BaseException) -> str:
         message = message[:1600] + "…"
     return message or "The database operation failed. Check the connection and server logs."
 
+def is_query_interrupted(error: BaseException) -> bool:
+    """Recognize MySQL's explicit query-interrupted error, not generic failures/timeouts."""
+    message = str(error).casefold()
+    return (
+        getattr(error, "errno", None) == 1317
+        or getattr(error, "sqlstate", None) == "70100"
+        or "query execution was interrupted" in message
+    )
+
+
 class DatabaseWorker(QThread):
     completed = Signal(str, str, object)
     activity = Signal(str)
@@ -231,18 +241,21 @@ class DatabaseWorker(QThread):
         started = time.perf_counter()
         with self._lock:
             self._active_query = True
-        self.activity.emit("Executing SQL in the background…")
+        self.activity.emit(f"Running {len(statements):,} SQL statement(s)…")
         try:
-            for sql in statements:
+            for statement_number, sql in enumerate(statements, start=1):
+                self.activity.emit(f"Running statement {statement_number} of {len(statements)}…")
                 statement_start = time.perf_counter()
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)
                     if cursor.with_rows:
+                        self.activity.emit("Fetching result rows from MySQL…")
                         headers = [str(desc[0]) for desc in (cursor.description or [])]
                         result_id = uuid.uuid4().hex
                         preview: list[list[Any]] = []
                         count = 0
+                        next_progress_row = 5000
                         assert self._spool is not None
                         self._spool.execute(
                             "INSERT INTO result_meta(result_id,headers,statement,row_count) VALUES(?,?,?,0)",
@@ -260,6 +273,9 @@ class DatabaseWorker(QThread):
                                  for i, row in enumerate(serialized)],
                             )
                             count += len(serialized)
+                            if count >= next_progress_row:
+                                self.activity.emit(f"Fetched {count:,} result row(s) so far…")
+                                next_progress_row = ((count // 5000) + 1) * 5000
                         self._spool.execute("UPDATE result_meta SET row_count=? WHERE result_id=?",
                                             (count, result_id))
                         self._spool.commit()
@@ -281,13 +297,17 @@ class DatabaseWorker(QThread):
                             "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                         })
                 except Exception as exc:
+                    interrupted = is_query_interrupted(exc)
                     results.append({
                         "headers": ["Error"], "rows": [[safe_db_error(exc)]], "row_count": 1,
-                        "kind": "error",
+                        "kind": "error", "interrupted": interrupted,
                         "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                     })
-                    return {"ok": False, "results": results, "error": safe_db_error(exc),
-                            "duration_ms": int((time.perf_counter() - started) * 1000)}
+                    return {
+                        "ok": False, "results": results, "error": safe_db_error(exc),
+                        "interrupted": interrupted,
+                        "duration_ms": int((time.perf_counter() - started) * 1000),
+                    }
                 finally:
                     cursor.close()
         finally:
@@ -375,6 +395,10 @@ class DatabaseWorker(QThread):
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
         count = 0
+        activity = getattr(self, "activity", None)
+        if activity is not None:
+            activity.emit("Exporting CSV rows…")
+        next_progress_row = 5000
         try:
             with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
@@ -385,6 +409,10 @@ class DatabaseWorker(QThread):
                 for (value_json,) in cursor:
                     writer.writerow(json.loads(value_json))
                     count += 1
+                    if count >= next_progress_row:
+                        if activity is not None:
+                            activity.emit(f"Exported {count:,} CSV row(s)…")
+                        next_progress_row = ((count // 5000) + 1) * 5000
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, destination)

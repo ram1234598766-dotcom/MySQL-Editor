@@ -549,3 +549,8 @@ The CI workflow for each commit is the evidence source for lint, compilation, au
 ### Preference work — 17 October 2026
 
 The Settings menu now groups Appearance, Editor, Results, and Query History. Editor tab width (2/4/8 spaces) and result-grid row height (24/28/36 px) are validated, persisted, applied to current and new editor tabs, and covered by unit/UI-smoke tests.
+
+
+### Query lifecycle feedback — 17 October 2026
+
+The worker now emits running/fetch progress and CSV export progress; the UI distinguishes a cancellation request from a confirmed MySQL interruption, recognizes partial script failure, and keeps earlier result sets available. A pure outcome classifier and database interruption tests cover completion, cancellation, interruption, partial failure, and ordinary failures.
