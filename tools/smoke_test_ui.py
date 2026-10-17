@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal, Qt
-from PySide6.QtGui import QFont, QIcon, QTextCursor
+from PySide6.QtGui import QFont, QFontDatabase, QFontInfo, QIcon, QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
@@ -72,14 +72,32 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
         app = QApplication.instance() or QApplication([])
         app.setOrganizationName("MySQL Editor Visual QA")
         app.setApplicationName("MySQL Editor Visual QA")
-        # Match app.py startup: offscreen Qt does not automatically invoke the entry point.
+        # Match app.py startup. Offscreen Windows runners may omit Segoe UI, so
+        # use a documented system-font fallback only for visual QA when unavailable.
         app.setStyle("Fusion")
-        app.setFont(QFont(TYPOGRAPHY["app_family"], TYPOGRAPHY["app_size_pt"]))
+        available_fonts = {name.casefold(): name for name in QFontDatabase.families()}
+        preferred_font = TYPOGRAPHY["app_family"]
+        fallback_font = next(
+            (available_fonts[name.casefold()] for name in
+             (preferred_font, "Arial", "Tahoma", "Microsoft Sans Serif")
+             if name.casefold() in available_fonts),
+            QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family(),
+        )
+        screenshot_font = QFont(fallback_font, TYPOGRAPHY["app_size_pt"])
+        app.setFont(screenshot_font)
+        print(
+            "Visual QA font:",
+            f"preferred={preferred_font!r}",
+            f"selected={fallback_font!r}",
+            f"resolved={QFontInfo(screenshot_font).family()!r}",
+            f"available={len(available_fonts)} families",
+        )
         app.setStyleSheet(stylesheet_for_theme("dark"))
         QSettings().clear()
 
         window, _repository = make_window(root / "visual-qa.sqlite3")
         window.resize(1600, 1000)
+        window.setFont(screenshot_font)
         window.setWindowIcon(QIcon(str(Path("assets/mysql-editor.ico").resolve())))
         window._set_theme("dark")
 
