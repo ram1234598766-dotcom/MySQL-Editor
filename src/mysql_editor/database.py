@@ -19,7 +19,7 @@ from mysql_editor.core import redact_secrets, safe_identifier, split_sql_stateme
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
 
-CSV_NULL_TOKEN = r"\N"
+CSV_NULL_TOKEN = r"\N"  # noqa: S105 - CSV marker, not a credential.
 
 
 def _csv_export_value(value: Any) -> Any:
