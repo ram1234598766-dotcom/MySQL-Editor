@@ -49,6 +49,7 @@ def is_query_interrupted(error: BaseException) -> bool:
 class DatabaseWorker(QThread):
     completed = Signal(str, str, object)
     activity = Signal(str)
+    task_activity = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -58,6 +59,8 @@ class DatabaseWorker(QThread):
         self._connection_id: int | None = None
         self._lock = threading.Lock()
         self._active_query = False
+        self._active_query_task_id: str | None = None
+        self._current_task_id: str | None = None
         self._spool_dir = Path(tempfile.mkdtemp(prefix="mysql-editor-results-"))
         self._spool_path = self._spool_dir / "results.sqlite3"
         self._spool: sqlite3.Connection | None = None
@@ -66,6 +69,17 @@ class DatabaseWorker(QThread):
         task_id = task_id or uuid.uuid4().hex
         self._tasks.put({"id": task_id, "action": action, "payload": payload or {}})
         return task_id
+
+    def _report_activity(self, message: str) -> None:
+        """Tag worker progress with the task that caused it, if there is one."""
+        task_id = self._current_task_id
+        self._report_task_activity(task_id, message)
+
+    def _report_task_activity(self, task_id: str | None, message: str) -> None:
+        if task_id:
+            self.task_activity.emit(task_id, message)
+        else:
+            self.activity.emit(message)
 
     def _initialize_result_spool(self) -> None:
         """Create the worker-owned on-disk result cache."""
@@ -116,14 +130,18 @@ class DatabaseWorker(QThread):
                 task = self._tasks.get()
                 if task is None:
                     break
-                if startup_error is not None:
-                    result = {"ok": False, "error": startup_error}
-                else:
-                    try:
-                        result = self._dispatch(task["action"], task["payload"])
-                    except Exception as exc:
-                        result = {"ok": False, "error": safe_db_error(exc)}
-                self.completed.emit(task["id"], task["action"], result)
+                self._current_task_id = task["id"]
+                try:
+                    if startup_error is not None:
+                        result = {"ok": False, "error": startup_error}
+                    else:
+                        try:
+                            result = self._dispatch(task["action"], task["payload"])
+                        except Exception as exc:
+                            result = {"ok": False, "error": safe_db_error(exc)}
+                    self.completed.emit(task["id"], task["action"], result)
+                finally:
+                    self._current_task_id = None
         finally:
             self._cleanup_resources()
 
@@ -136,6 +154,7 @@ class DatabaseWorker(QThread):
             config = dict(self._connection_config or {})
             connection_id = self._connection_id
             active = self._active_query
+            active_task_id = self._active_query_task_id
         if not active or not config or not connection_id:
             self.activity.emit("No cancellable query is currently active.")
             return
@@ -147,11 +166,13 @@ class DatabaseWorker(QThread):
                     cursor = control.cursor()
                     cursor.execute(f"KILL QUERY {int(connection_id)}")
                     cursor.close()
-                    self.activity.emit("Cancellation request sent to MySQL.")
+                    self._report_task_activity(active_task_id, "Cancellation request sent to MySQL.")
                 finally:
                     control.close()
             except Exception as exc:
-                self.activity.emit("Cancellation could not be confirmed: " + safe_db_error(exc))
+                self._report_task_activity(
+                    active_task_id, "Cancellation could not be confirmed: " + safe_db_error(exc)
+                )
         threading.Thread(target=cancel, name="mysql-editor-cancel", daemon=True).start()
 
     @staticmethod
@@ -296,16 +317,17 @@ class DatabaseWorker(QThread):
         started = time.perf_counter()
         with self._lock:
             self._active_query = True
-        self.activity.emit(f"Running {len(statements):,} SQL statement(s)…")
+            self._active_query_task_id = self._current_task_id
+        self._report_activity(f"Running {len(statements):,} SQL statement(s)…")
         try:
             for statement_number, sql in enumerate(statements, start=1):
-                self.activity.emit(f"Running statement {statement_number} of {len(statements)}…")
+                self._report_activity(f"Running statement {statement_number} of {len(statements)}…")
                 statement_start = time.perf_counter()
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)
                     if cursor.with_rows:
-                        self.activity.emit("Fetching result rows from MySQL…")
+                        self._report_activity("Fetching result rows from MySQL…")
                         headers = [str(desc[0]) for desc in (cursor.description or [])]
                         result_id = uuid.uuid4().hex
                         preview: list[list[Any]] = []
@@ -329,7 +351,7 @@ class DatabaseWorker(QThread):
                             )
                             count += len(serialized)
                             if count >= next_progress_row:
-                                self.activity.emit(f"Fetched {count:,} result row(s) so far…")
+                                self._report_activity(f"Fetched {count:,} result row(s) so far…")
                                 next_progress_row = ((count // 5000) + 1) * 5000
                         self._spool.execute("UPDATE result_meta SET row_count=? WHERE result_id=?",
                                             (count, result_id))
@@ -369,6 +391,7 @@ class DatabaseWorker(QThread):
         finally:
             with self._lock:
                 self._active_query = False
+                self._active_query_task_id = None
         return {
             "ok": True, "results": results,
             "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -454,9 +477,7 @@ class DatabaseWorker(QThread):
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
         count = 0
-        activity = getattr(self, "activity", None)
-        if activity is not None:
-            activity.emit("Exporting CSV rows…")
+        self._report_activity("Exporting CSV rows…")
         next_progress_row = 5000
         try:
             with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -469,8 +490,7 @@ class DatabaseWorker(QThread):
                     writer.writerow(json.loads(value_json))
                     count += 1
                     if count >= next_progress_row:
-                        if activity is not None:
-                            activity.emit(f"Exported {count:,} CSV row(s)…")
+                        self._report_activity(f"Exported {count:,} CSV row(s)…")
                         next_progress_row = ((count // 5000) + 1) * 5000
                 handle.flush()
                 os.fsync(handle.fileno())
