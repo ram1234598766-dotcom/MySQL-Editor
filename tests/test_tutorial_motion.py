@@ -3,13 +3,21 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QEventLoop, QTimer
+from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEvent, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
 _APP = QApplication.instance() or QApplication([])
+
+
+def _dispose_tour(tour):
+    """Destroy offscreen dialogs deterministically before QApplication teardown."""
+    tour.close()
+    tour.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _APP.processEvents()
 
 
 class SettingsStub:
@@ -29,7 +37,7 @@ def test_guided_tour_skips_fade_when_reduce_motion_is_enabled():
     assert tour.pages.currentIndex() == 1
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
     assert tour.windowOpacity() == 1.0
-    tour.close()
+    _dispose_tour(tour)
 
 
 def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
@@ -55,3 +63,4 @@ def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
     assert tour._fade.targetObject() is None
     assert tour.windowOpacity() == 1.0
+    _dispose_tour(tour)
