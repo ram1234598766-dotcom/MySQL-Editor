@@ -93,7 +93,6 @@ def test_close_other_tabs_keeps_selected_tab_and_removes_saved_path_entries(monk
 def test_cancelled_close_other_tabs_preserves_every_tab_and_dirty_buffer(monkeypatch):
     window = WindowHarness(["changed.sql", "keep.sql", "also-changed.sql"], dirty={"changed.sql", "also-changed.sql"})
     before = list(window.editors.items)
-    window._last_saved_paths.copy()
     calls = []
 
     def cancel(*_args, **_kwargs):
