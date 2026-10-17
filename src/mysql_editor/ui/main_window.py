@@ -23,7 +23,9 @@ from mysql_editor.ui.connection_dialog import ConnectionDialog
 from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
-from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
+from mysql_editor.ui.result_tools import (
+    cell_detail_text, column_headers_tsv, result_filter_message, rows_tsv, selected_cells_tsv,
+)
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
@@ -126,6 +128,8 @@ class MainWindow(QMainWindow):
         self._query_running = False
         self._cancellation_requested = False
         self._current_result_id: str | None = None
+        self._result_fetched_row_count = 0
+        self._result_base_message = "Ready. Run a query to view results."
         self._query_results: list[dict] = []
         self._last_duration = 0
         self._last_sql = ""
@@ -913,7 +917,7 @@ class MainWindow(QMainWindow):
         self._dispatch("query", {"sql": sql}, {
             "sql": sql, "profile_name": self.profile.get("name", "Connection"),
         })
-        self.result_message.setText(
+        self._set_result_message(
             "SQL is queued for the database worker. The editor remains responsive."
         )
         self.status.setText("Query queued…")
@@ -936,7 +940,7 @@ class MainWindow(QMainWindow):
             self._cancellation_requested = True
             self.status.setText("Cancellation requested · waiting for MySQL to respond…")
             self.query_meta.setText("Cancellation requested…")
-            self.result_message.setText(
+            self._set_result_message(
                 "A cancellation request was sent. The query remains active until MySQL interrupts it."
             )
             self.worker.cancel_current_query()
@@ -1040,13 +1044,21 @@ class MainWindow(QMainWindow):
     def _filter_results(self, value: str) -> None:
         query = value.strip()
         self.result_proxy.setFilterFixedString(query)
-        if query:
-            total = len(self.result_model.rows)
-            visible = self.result_proxy.rowCount()
-            self.result_message.setText(
-                f"Quick filter: {visible:,} of {total:,} visible row(s) match. "
-                f"CSV export still includes all {total:,} fetched rows."
-            )
+        if not query:
+            self.result_message.setText(self._result_base_message)
+            return
+
+        preview_rows = len(self.result_model.rows)
+        visible_rows = self.result_proxy.rowCount()
+        message = result_filter_message(
+            query, visible_rows, preview_rows, self._result_fetched_row_count
+        )
+        self.result_message.setText(message)
+
+    def _set_result_message(self, message: str) -> None:
+        """Store the unfiltered result state so clearing a filter restores it."""
+        self._result_base_message = str(message)
+        self.result_message.setText(self._result_base_message)
 
     def _schema_item_activated(self, item, _column):
         data = item.data(0, Qt.ItemDataRole.UserRole) or {}
@@ -1138,14 +1150,20 @@ class MainWindow(QMainWindow):
     def _select_result(self, index: int, total_duration: int | None = None):
         if index < 0 or index >= len(self._query_results):
             self._current_result_id = None
+            self._result_fetched_row_count = 0
             self._set_result_controls()
             return
         item = self._query_results[index]
         self.result_filter.clear()
         self._set_result_completion_words(item.get("headers", []))
-        self.result_model.update(item.get("headers", []), item.get("rows", []))
+        rows = item.get("rows", [])
+        self.result_model.update(item.get("headers", []), rows)
         self._current_result_id = item.get("result_id")
-        total = item.get("row_count", len(item.get("rows", [])))
+        try:
+            total = max(len(rows), int(item.get("row_count", len(rows)) or 0))
+        except (TypeError, ValueError):
+            total = len(rows)
+        self._result_fetched_row_count = total
         duration = item.get("duration_ms", 0)
         self._last_duration = duration
         if total_duration is not None:
@@ -1158,7 +1176,7 @@ class MainWindow(QMainWindow):
         )
         if item.get("kind") == "error":
             suffix = " Statement failed; review the error details."
-        self.result_message.setText(
+        self._set_result_message(
             f"{item.get('kind', 'result').title()} result · {total:,} row(s) received.{suffix}"
         )
         self._set_result_controls()
@@ -1180,7 +1198,7 @@ class MainWindow(QMainWindow):
         if action in {"query", "table_preview"}:
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
-                self.result_message.setText(result.get("error", "Query failed."))
+                self._set_result_message(result.get("error", "Query failed."))
             if result.get("results"):
                 self._query_results = list(result["results"])
                 self.result_picker.blockSignals(True)
@@ -1196,7 +1214,7 @@ class MainWindow(QMainWindow):
                 self._select_result(self.result_picker.currentIndex(), result.get("duration_ms", 0))
             elif result.get("ok"):
                 self.query_meta.setText("No result rows")
-                self.result_message.setText("Statement completed. No result set was returned.")
+                self._set_result_message("Statement completed. No result set was returned.")
             if action == "query":
                 self._apply_query_outcome(outcome, result)
             else:
@@ -1250,31 +1268,31 @@ class MainWindow(QMainWindow):
                 self.status.setText(f"Query complete · {completed_results:,} result set(s) · {duration:,} ms.")
             else:
                 self.query_meta.setText("Completed")
-                self.result_message.setText("Statement completed successfully. No result set was returned.")
+                self._set_result_message("Statement completed successfully. No result set was returned.")
                 self.status.setText(f"Statement complete · {duration:,} ms.")
         elif outcome == "cancelled":
             self.query_meta.setText("Cancelled")
-            self.result_message.setText(
+            self._set_result_message(
                 "MySQL interrupted this query after a cancellation request. Any earlier statement results "
                 "from a script remain available."
             )
             self.status.setText("Query cancelled by request.")
         elif outcome == "interrupted":
             self.query_meta.setText("Interrupted")
-            self.result_message.setText(
+            self._set_result_message(
                 "MySQL interrupted this query. This can occur when the server or another client interrupts it."
             )
             self.status.setText("Query interrupted by MySQL.")
         elif outcome == "partial_failure":
             self.query_meta.setText(f"{completed_results:,} completed result(s) · partial failure")
-            self.result_message.setText(
+            self._set_result_message(
                 "The script stopped when a later statement failed. Earlier results remain available; "
                 "select the final Error result for details."
             )
             self.status.setText("Partial failure · a later SQL statement failed.")
         else:
             self.query_meta.setText("Query failed")
-            self.result_message.setText(error)
+            self._set_result_message(error)
             self.status.setText(error)
 
     def _on_activity(self, message: str):

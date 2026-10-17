@@ -45,3 +45,29 @@ def column_headers_tsv(headers: Sequence[str]) -> str:
 def cell_detail_text(value: Any) -> str:
     """Return a faithful human-readable detail value; SQL NULL is distinct from empty text."""
     return "SQL NULL (no value)" if value is None else str(value)
+
+
+def result_filter_message(
+    query: str,
+    visible_rows: int,
+    preview_rows: int,
+    fetched_rows: int,
+) -> str:
+    """Describe quick-filter matches without confusing the visible preview with CSV rows."""
+    term = str(query or "").strip()
+    if not term:
+        return ""
+
+    preview_count = max(0, int(preview_rows))
+    fetched_count = max(preview_count, int(fetched_rows))
+    visible_count = max(0, min(int(visible_rows), preview_count))
+    if visible_count == 0:
+        return (
+            f"No rows in the visible preview match {term!r}. "
+            f"{preview_count:,} preview row(s) checked; CSV export still includes "
+            f"all {fetched_count:,} fetched row(s)."
+        )
+    return (
+        f"Quick filter: {visible_count:,} of {preview_count:,} preview row(s) match. "
+        f"CSV export still includes all {fetched_count:,} fetched row(s)."
+    )
