@@ -393,32 +393,63 @@ class SqlEditor(QPlainTextEdit):
         return tuple(sorted(self._all_completion_words(), key=str.casefold))
 
     def _table_for_qualifier(self, qualifier: str) -> str | None:
-        key = qualifier.casefold()
-        for table in self._completion_columns_by_table:
-            if table.casefold() == key:
-                return table
+        """Resolve a table name or alias in the current statement only.
 
-        # Resolve aliases from the whole current SQL buffer. This also supports the
-        # common editing order where SELECT columns are typed before FROM/JOIN.
+        String/comment contents and previous statements are intentionally excluded so
+        an unrelated identifier cannot pollute column suggestions.
+        """
+        key = qualifier.casefold()
+        known_tables = {
+            name.casefold(): name for name in self._completion_columns_by_table
+        }
+        direct = known_tables.get(key)
+        if direct is not None:
+            return direct
+
         sql = self.toPlainText()
+        cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
+        code_mask = _sql_code_mask(sql)
+        code_sql = "".join(
+            char if code_mask[position] else " "
+            for position, char in enumerate(sql)
+        )
+
+        cursor_position = min(cursor_position, len(sql))
+        start = 0
+        for position in range(cursor_position):
+            if sql[position] == ";" and code_mask[position]:
+                start = position + 1
+        end = len(sql)
+        for position in range(cursor_position, len(sql)):
+            if sql[position] == ";" and code_mask[position]:
+                end = position
+                break
+        statement = code_sql[start:end]
+
         reserved = {
             "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "STRAIGHT_JOIN",
             "WHERE", "ON", "USING", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
             "UNION", "EXCEPT", "INTERSECT", "SET", "VALUES", "FOR", "LOCK",
         }
         table_pattern = re.compile(
-            r"\b(?:FROM|JOIN)\s+"
-            r"((?:[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)?[A-Za-z_$][A-Za-z0-9_$]*)"
-            r"(?:\s+(?:AS\s+)?([A-Za-z_$][A-Za-z0-9_$]*))?",
+            r"\\b(?:FROM|JOIN)\\s+"
+            r"((?:`?[A-Za-z_$][A-Za-z0-9_$]*`?\\s*\\.\\s*)?"
+            r"`?[A-Za-z_$][A-Za-z0-9_$]*`?)"
+            r"(?:\\s+(?:AS\\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
             re.IGNORECASE,
         )
-        for match in table_pattern.finditer(sql):
-            table_ref = re.sub(r"\s", "", match.group(1)).split(".")[-1]
+        resolved: set[str] = set()
+        for match in table_pattern.finditer(statement):
+            table_ref = re.sub(r"\\s", "", match.group(1))
+            table_name = table_ref.split(".")[-1].strip("`")
+            table = known_tables.get(table_name.casefold())
+            if table is None:
+                continue
             alias = match.group(2)
-            if table_ref.casefold() == key:
-                return table_ref
             if alias and alias.upper() not in reserved and alias.casefold() == key:
-                return table_ref
+                resolved.add(table)
+        if len(resolved) == 1:
+            return next(iter(resolved))
         return None
 
     def _referenced_tables_in_current_statement(self) -> set[str]:

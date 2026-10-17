@@ -188,6 +188,55 @@ def test_context_completion_suggests_columns_for_table_alias_without_mutating_sq
     assert editor.toPlainText() == source
 
 
+
+def test_qualified_completion_ignores_aliases_inside_strings_comments_and_prior_statements():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={
+            "orders": ["order_id", "order_total"],
+            "customers": ["customer_id", "display_name"],
+        },
+    )
+    source = (
+        "SELECT 'FROM orders o'; /* FROM orders o */ "
+        "SELECT o.order_i FROM customers AS c"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("order_i") + len("order_i"))
+    editor.setTextCursor(cursor)
+
+    assert editor._context_completion_words() == ()
+    assert editor.toPlainText() == source
+
+
+def test_qualified_completion_resolves_schema_qualified_backtick_alias():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={
+            "orders": ["order_id", "order_total"],
+            "customers": ["customer_id", "display_name"],
+        },
+        active_schema="app_db",
+    )
+    source = (
+        "SELECT ord.order_i FROM `app_db`.`orders` AS ord "
+        "JOIN `customers` AS c ON c.customer_id = ord.order_id"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("order_i") + len("order_i"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+    assert {"order_id", "order_total"} <= candidates
+    assert "customer_id" not in candidates
+    assert "display_name" not in candidates
+    assert editor.toPlainText() == source
+
+
 def test_unqualified_column_completion_scopes_to_current_statement_tables():
     editor = SqlEditor()
     editor.set_completion_context(
