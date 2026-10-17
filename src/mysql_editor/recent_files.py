@@ -47,7 +47,7 @@ def normalize_recent_sql_paths(
             continue
         if not path:
             continue
-        key = os.path.normcase(path).casefold()
+        key = os.path.normcase(path)
         if key in seen:
             continue
         seen.add(key)

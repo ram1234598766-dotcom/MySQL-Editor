@@ -31,7 +31,7 @@ def test_single_string_and_empty_values_are_handled(tmp_path: Path):
     assert normalize_recent_sql_paths(["", None, "  "]) == []
 
 
-def test_reopening_same_path_deduplicates_using_case_insensitive_key(tmp_path: Path, monkeypatch):
+def test_reopening_same_normalized_path_deduplicates(tmp_path: Path):
     file_path = tmp_path / "select.sql"
     normalized = str(file_path.resolve())
     alternate = str(file_path.parent / "." / file_path.name)

@@ -1888,7 +1888,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         clear_action = menu.addAction("Clear recent list")
         clear_action.setToolTip("Remove recent file paths from this menu. Does not delete files.")
-        clear_action.triggered.connect(self._clear_recent_sql_files)
+        clear_action.triggered.connect(lambda _checked=False: self._clear_recent_sql_files())
 
     def _clear_recent_sql_files(self) -> None:
         """Clear only the saved path list; source SQL files are not modified or deleted."""

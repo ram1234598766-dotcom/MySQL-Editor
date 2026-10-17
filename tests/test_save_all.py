@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from mysql_editor.recent_files import record_recent_sql_path
 from mysql_editor.ui.main_window import MainWindow
 
 
@@ -72,6 +73,10 @@ class WindowHarness:
         self._last_saved_paths = dict(paths or {})
         self.status = FakeStatus()
         self.refresh_count = 0
+        self.recent_paths = []
+
+    def _record_recent_sql_path(self, path):
+        self.recent_paths = record_recent_sql_path(self.recent_paths, path)
 
     def _write_editor_to_path(self, editor, path):
         return MainWindow._write_editor_to_path(self, editor, path)
@@ -112,6 +117,7 @@ def test_save_all_skips_clean_tabs_and_saves_modified_tabs_atomically(
     assert window.editors.tabText(2) == "new-query.sql"
     assert window.status.message == "Saved 2 modified SQL tab(s)."
     assert window.refresh_count == 2
+    assert window.recent_paths == [str(prompted.resolve()), str(existing.resolve())]
 
 
 def test_save_all_cancel_stops_before_touching_remaining_tabs(
@@ -162,4 +168,5 @@ def test_atomic_save_failure_keeps_existing_file_and_unsaved_state(
     assert window.status.message == (
         "Save All stopped after saving 0 tab(s); remaining tabs were left unchanged."
     )
+    assert window.recent_paths == []
     assert not list(tmp_path.glob(".protected.sql.*.tmp"))

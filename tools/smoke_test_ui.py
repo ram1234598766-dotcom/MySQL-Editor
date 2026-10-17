@@ -114,6 +114,18 @@ def main():
             assert first._open_sql_path(missing_file) is False
         assert first.editors.count() == original_count
 
+        # Recent SQL stores file paths only and offers an explicit non-destructive clear.
+        recent_source = root / "queries" / "private-query.sql"
+        recent_source.parent.mkdir(parents=True)
+        private_sql = "SELECT 'query body is not stored in settings';"
+        recent_source.write_text(private_sql, encoding="utf-8")
+        assert first._open_sql_path(recent_source) is True
+        normalized_recent = str(recent_source.resolve())
+        assert first._settings.value("ui/recentSqlFiles", []) == [normalized_recent]
+        assert private_sql not in repr(first._settings.value("ui/recentSqlFiles", []))
+        first._refresh_recent_sql_menu()
+        assert any(action.toolTip() == normalized_recent for action in first.recent_sql_menu.actions())
+
         # Exercise the animated tour's navigation and its real "insert sample SQL" action.
         tour = ProductTourDialog(first, first_repo, first._insert_tour_example)
         tour._go(2)
@@ -342,6 +354,17 @@ def main():
         assert second._result_row_height == 36
         assert second.result_grid.verticalHeader().defaultSectionSize() == 36
         assert second.inspector_tabs.currentIndex() == 1
+        assert any(
+            action.toolTip() == normalized_recent
+            for action in second.recent_sql_menu.actions()
+        )
+        clear_recent = next(
+            action for action in second.recent_sql_menu.actions()
+            if action.text() == "Clear recent list"
+        )
+        clear_recent.trigger()
+        assert second._settings.value("ui/recentSqlFiles", []) == []
+        assert recent_source.exists() and recent_source.read_text(encoding="utf-8") == private_sql
         assert len(second.editor_results_split.sizes()) == 2
         assert all(size > 0 for size in second.editor_results_split.sizes())
         second.close()
