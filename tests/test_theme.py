@@ -1,5 +1,5 @@
 from mysql_editor.ui.theme import (
-    STYLESHEET, TOKENS, normalize_theme, resolve_theme, stylesheet_for_theme,
+    EDITOR_PALETTES, STYLESHEET, TOKENS, normalize_theme, resolve_theme, stylesheet_for_theme,
 )
 
 
@@ -83,3 +83,39 @@ def test_light_theme_key_text_states_meet_wcag_aa_contrast():
     assert _contrast_ratio("#946200", "#F8FAFC") >= 4.5  # warning
     assert _contrast_ratio("#B42335", "#F8FAFC") >= 4.5  # danger
     assert _contrast_ratio("#1F6FEB", "#FFFFFF") >= 4.5  # focus ring
+
+
+
+def test_dark_theme_key_text_states_meet_wcag_aa_contrast():
+    # These pairs represent actual visible text states in the shared dark stylesheet.
+    assert _contrast_ratio("#e8f1ff", "#0B111B") >= 4.5  # primary text
+    assert _contrast_ratio("#a9bad0", "#0B111B") >= 4.5  # secondary/helper text
+    assert _contrast_ratio("#8093AC", "#0B111B") >= 4.5  # muted text
+    assert _contrast_ratio("#0B111B", "#37C7D8") >= 4.5  # primary-button text
+    assert _contrast_ratio("#3bd49b", "#142d2b") >= 4.5  # connection success badge
+    assert _contrast_ratio("#F2BE6B", "#0B111B") >= 4.5  # warning text
+    assert _contrast_ratio("#F07886", "#0B111B") >= 4.5  # danger text
+    assert _contrast_ratio("#8293a9", "#121a26") >= 4.5  # disabled button text
+    assert _contrast_ratio("#FFFFFF", "#1d4f88") >= 4.5  # selected table rows
+    assert _contrast_ratio("#4a9bff", "#0B111B") >= 3.0  # focus boundary, non-text
+
+
+def test_light_theme_focus_boundary_meets_non_text_contrast_target():
+    assert _contrast_ratio("#1F6FEB", "#FFFFFF") >= 3.0
+
+
+def test_sql_syntax_palette_text_meets_wcag_aa_on_editor_surface():
+    backgrounds = {"dark": "#080e17", "light": "#FFFFFF"}
+    for theme_name, palette in EDITOR_PALETTES.items():
+        background = backgrounds[theme_name]
+        for role in ("keyword", "string", "number", "function", "comment"):
+            assert _contrast_ratio(palette[role], background) >= 4.5, (
+                f"{theme_name} SQL {role} contrast failed: "
+                f"{_contrast_ratio(palette[role], background):.2f}:1"
+            )
+        gutter_background = palette["gutter_background"]
+        for role in ("gutter_text", "gutter_active_text"):
+            assert _contrast_ratio(palette[role], gutter_background) >= 4.5, (
+                f"{theme_name} editor {role} contrast failed: "
+                f"{_contrast_ratio(palette[role], gutter_background):.2f}:1"
+            )
