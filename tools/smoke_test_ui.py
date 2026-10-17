@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtGui import QFont, QFontDatabase, QFontInfo, QIcon, QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
@@ -129,15 +130,6 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
         window.result_message.setText(
             "Visual QA preview: synthetic rows only; no query was executed."
         )
-        window.status.setText("VISUAL QA PREVIEW  |  SYNTHETIC DATA  |  OFFLINE")
-
-        window.connection_badge.setText("No connection selected")
-        window.connection_badge.setToolTip(
-            "Visual QA screenshot only. No MySQL server is connected."
-        )
-        window.connection_badge.setProperty("connectionState", "disconnected")
-        window.connection_badge.style().unpolish(window.connection_badge)
-        window.connection_badge.style().polish(window.connection_badge)
 
         window._fill_schema_tree({
             "ok": True,
@@ -159,13 +151,62 @@ def capture_screenshot(output_path: Path, requested_scale: float) -> None:
         })
 
         window.show()
+        # Let the product's delayed initial schema refresh run, then answer it with the
+        # fixture's synthetic metadata so the screenshot cannot freeze in a loading state.
+        QTest.qWait(220)
         app.processEvents()
-        app.processEvents()
+        schema_job = window._schema_request_id
+        if schema_job:
+            window._on_worker_completed(schema_job, "schema", {
+                "ok": True,
+                "databases": ["app_database"],
+                "schema": "app_database",
+                "objects": [
+                    {"name": "customers", "type": "BASE TABLE"},
+                    {"name": "orders", "type": "BASE TABLE"},
+                    {"name": "order_items", "type": "BASE TABLE"},
+                    {"name": "products", "type": "BASE TABLE"},
+                ],
+                "columns_by_table": {
+                    "customers": ["id", "name"],
+                    "orders": ["id", "order_date", "status"],
+                    "order_items": ["id", "order_id", "quantity", "unit_price"],
+                    "products": ["id", "name", "price"],
+                },
+                "column_metadata_truncated": False,
+            })
         actual_scale = window.devicePixelRatioF()
         if abs(actual_scale - requested_scale) > 0.15:
             raise RuntimeError(
                 f"Qt scale mismatch: requested {requested_scale:g}, got {actual_scale:g}."
             )
+
+        # A visual-only snapshot must not imply that the fake profile is a live session.
+        # Keep the sample schema/results visible while disabling server-dependent actions.
+        offline_detail = (
+            "Visual QA preview only. Synthetic data is shown; no MySQL session is connected."
+        )
+        window._connection_available = False
+        window._transaction_open = False
+        window._sync_connection_controls()
+        window.connection_badge.setText("○  No active MySQL session")
+        window.connection_badge.setToolTip(offline_detail)
+        window.connection_badge.setAccessibleName("MySQL connection disconnected")
+        window.connection_badge.setAccessibleDescription(offline_detail)
+        window.connection_badge.setProperty("connectionState", "disconnected")
+        window.connection_badge.style().unpolish(window.connection_badge)
+        window.connection_badge.style().polish(window.connection_badge)
+        window.connection_badge.update()
+        window.connection_details.setText("Offline · synthetic preview only")
+        window.connection_details.setToolTip(offline_detail)
+        window.connection_details.setAccessibleName("Offline visual QA connection details")
+        window.connection_details.setAccessibleDescription(offline_detail)
+        window.schema_state_label.setText(
+            "Synthetic schema preview only. Connect to MySQL to view live metadata."
+        )
+        window.schema_refresh_button.setEnabled(False)
+        window.query_meta.setText("Offline preview")
+        window.status.setText("VISUAL QA PREVIEW  |  SYNTHETIC DATA  |  OFFLINE")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if not window.grab().save(str(output_path), "PNG"):
