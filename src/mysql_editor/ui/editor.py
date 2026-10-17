@@ -362,16 +362,16 @@ class SqlEditor(QPlainTextEdit):
         cursor = self.textCursor()
         current_line = cursor.block().text()
         prefix = current_line[:cursor.positionInBlock()]
-        leading = re.match(r"[ \\t]*", current_line).group(0)
+        leading = re.match(r"[ \t]*", current_line).group(0)
         trimmed = prefix.rstrip()
         opens_block = trimmed.endswith("(") or bool(re.search(
-            r"\\b(?:BEGIN|THEN|ELSE|CASE|LOOP|REPEAT|WHILE|DO)\\s*$",
+            r"\b(?:BEGIN|THEN|ELSE|CASE|LOOP|REPEAT|WHILE|DO)\s*$",
             trimmed,
             re.IGNORECASE,
         ))
         indent = leading + ("    " if opens_block else "")
         cursor.beginEditBlock()
-        cursor.insertText("\\n" + indent)
+        cursor.insertText("\n" + indent)
         cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
