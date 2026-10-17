@@ -1827,6 +1827,16 @@ class MainWindow(QMainWindow):
                 persistence_error = redact_secrets(str(exc)).strip()
 
             self._update_connection_status()
+            active_context = self._current_connection_context()
+            # Tabs follow schema changes within their own profile, but tabs pinned
+            # to a different profile keep their target and still require confirmation.
+            for index in range(self.editors.count()):
+                editor = self.editors.widget(index)
+                if not isinstance(editor, SqlEditor):
+                    continue
+                bound = getattr(editor, "_mysql_editor_connection_context", None)
+                if connection_context_matches(bound, active_context):
+                    self._bind_editor_connection_context(editor, active_context)
             self.refresh_schema()
             if persistence_error:
                 QMessageBox.warning(
