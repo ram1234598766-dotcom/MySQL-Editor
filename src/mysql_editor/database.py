@@ -352,6 +352,7 @@ class DatabaseWorker(QThread):
                 self._report_activity(f"Running statement {statement_number} of {len(statements)}…")
                 statement_start = time.perf_counter()
                 connection_lost = False
+                result_id: str | None = None
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)
@@ -411,6 +412,22 @@ class DatabaseWorker(QThread):
                 except Exception as exc:
                     interrupted = is_query_interrupted(exc)
                     connection_lost = is_connection_lost(exc)
+                    if result_id is not None and self._spool is not None:
+                        # A fetch/serialization failure must not leave an invisible partial
+                        # result in the session spool. Earlier completed results are retained.
+                        try:
+                            self._spool.execute(
+                                "DELETE FROM result_rows WHERE result_id=?", (result_id,)
+                            )
+                            self._spool.execute(
+                                "DELETE FROM result_meta WHERE result_id=?", (result_id,)
+                            )
+                            self._spool.commit()
+                        except Exception:
+                            try:
+                                self._spool.rollback()
+                            except Exception:
+                                pass
                     results.append({
                         "headers": ["Error"], "rows": [[safe_db_error(exc)]], "row_count": 1,
                         "kind": "error", "interrupted": interrupted,

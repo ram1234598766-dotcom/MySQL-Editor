@@ -575,3 +575,78 @@ def test_query_disconnect_closes_the_dead_session_and_marks_result(tmp_path):
         worker._spool.close()
         worker._spool = None
         worker._spool_dir.rmdir()
+
+
+def test_mid_fetch_disconnect_discards_partial_spool_and_closes_session():
+    import sqlite3
+
+    class MysqlError(Exception):
+        errno = 2013
+        sqlstate = "HY000"
+
+    class Cursor:
+        with_rows = True
+        rowcount = -1
+        warning_count = 0
+        description = [("value",)]
+
+        def __init__(self):
+            self.fetch_calls = 0
+            self.closed = False
+
+        def execute(self, _sql):
+            pass
+
+        def fetchmany(self, _batch_size):
+            self.fetch_calls += 1
+            if self.fetch_calls == 1:
+                return [("partial row",)]
+            raise MysqlError("Lost connection to MySQL server during query")
+
+        def close(self):
+            self.closed = True
+
+    class Connection:
+        in_transaction = True
+
+        def __init__(self):
+            self.cursor_object = Cursor()
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_object
+
+        def close(self):
+            self.closed = True
+
+    worker = DatabaseWorker()
+    connection = Connection()
+    worker._connection = connection
+    worker._report_activity = lambda _message: None
+    worker._spool = sqlite3.connect(":memory:")
+    worker._spool.executescript("""
+        CREATE TABLE result_meta (
+            result_id TEXT PRIMARY KEY, headers TEXT NOT NULL,
+            statement TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE result_rows (
+            result_id TEXT NOT NULL, row_idx INTEGER NOT NULL,
+            values_json TEXT NOT NULL, PRIMARY KEY(result_id,row_idx)
+        );
+    """)
+    try:
+        result = worker._execute_script("SELECT value FROM large_table;")
+        assert result["ok"] is False
+        assert result["connection_lost"] is True
+        assert result["transaction_open"] is False
+        assert len(result["results"]) == 1
+        assert result["results"][0]["kind"] == "error"
+        assert worker._spool.execute("SELECT COUNT(*) FROM result_meta").fetchone()[0] == 0
+        assert worker._spool.execute("SELECT COUNT(*) FROM result_rows").fetchone()[0] == 0
+        assert connection.closed is True
+        assert connection.cursor_object.closed is True
+        assert worker._connection is None
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
