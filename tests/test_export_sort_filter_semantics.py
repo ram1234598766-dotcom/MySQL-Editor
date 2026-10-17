@@ -31,6 +31,7 @@ def test_sorting_and_filtering_preview_preserve_complete_csv_fetch_order(tmp_pat
     proxy = ResultsFilterProxyModel()
     proxy.setSourceModel(model)
     proxy.setFilterKeyColumn(-1)
+    proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
     proxy.sort(1, Qt.SortOrder.AscendingOrder)
     _APP.processEvents()
 
