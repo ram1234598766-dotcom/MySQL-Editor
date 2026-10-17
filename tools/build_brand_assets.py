@@ -212,21 +212,22 @@ def _crop_badge_to_transparent_square(source: Image.Image, cleaned: Image.Image)
     """Isolate the rounded-square artwork; discard banner padding and the outer shadow."""
     left, top, right, bottom = _detect_badge_bounds(source)
     badge = cleaned.crop((left, top, right, bottom))
+    badge_width, badge_height = badge.size
     side = max(badge.size)
-    if badge.size != (side, side):
-        # Correct the slight aspect distortion from the promotional source so the app
-        # icon is truly square instead of looking soft or squeezed in Windows.
-        badge = badge.resize((side, side), Image.Resampling.LANCZOS)
 
-    shape = Image.new("L", (side, side), 0)
+    # Keep the exact source artwork proportions. The source's app badge is slightly
+    # wider than tall; put it on a square transparent canvas rather than stretching it.
+    shape = Image.new("L", badge.size, 0)
     draw = ImageDraw.Draw(shape)
-    radius = max(1, round(side * BADGE_CORNER_RADIUS_RATIO))
-    draw.rounded_rectangle((0, 0, side - 1, side - 1), radius=radius, fill=255)
+    radius = max(1, round(min(badge.size) * BADGE_CORNER_RADIUS_RATIO))
+    draw.rounded_rectangle(
+        (0, 0, badge_width - 1, badge_height - 1), radius=radius, fill=255
+    )
     badge.putalpha(ImageChops.multiply(badge.getchannel("A"), shape))
 
     badge_pixels = badge.load()
-    for y in range(side):
-        for x in range(side):
+    for y in range(badge_height):
+        for x in range(badge_width):
             r, g, b, alpha = badge_pixels[x, y]
             # These tiny pale-alpha JPEG interpolation samples vanish visually but can
             # turn into white flecks in small ICO frames, so make them fully transparent.
@@ -234,8 +235,11 @@ def _crop_badge_to_transparent_square(source: Image.Image, cleaned: Image.Image)
                 badge_pixels[x, y] = (0, 0, 0, 0)
 
     padding = max(4, round(side * BADGE_PADDING_RATIO))
-    output = Image.new("RGBA", (side + padding * 2, side + padding * 2), (0, 0, 0, 0))
-    output.alpha_composite(badge, (padding, padding))
+    canvas_side = side + padding * 2
+    output = Image.new("RGBA", (canvas_side, canvas_side), (0, 0, 0, 0))
+    output_x = padding + (side - badge_width) // 2
+    output_y = padding + (side - badge_height) // 2
+    output.alpha_composite(badge, (output_x, output_y))
     output_pixels = output.load()
     for y in range(output.height):
         for x in range(output.width):

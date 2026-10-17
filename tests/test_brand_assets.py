@@ -78,6 +78,12 @@ def test_background_removal_clears_soft_shadow_but_preserves_white_artwork():
     icon = _crop_badge_to_transparent_square(source, cleaned)
     assert icon.width == icon.height
     assert icon.getpixel((0, 0))[3] == 0
+    source_bounds = (13, 12, 83, 76)
+    source_ratio = (source_bounds[2] - source_bounds[0]) / (source_bounds[3] - source_bounds[1])
+    icon_bounds = icon.getchannel("A").getbbox()
+    assert icon_bounds is not None
+    icon_ratio = (icon_bounds[2] - icon_bounds[0]) / (icon_bounds[3] - icon_bounds[1])
+    assert abs(icon_ratio - source_ratio) < 0.02
     assert any(
         icon.getpixel((x, y)) == (255, 255, 255, 255)
         for y in range(icon.height)
