@@ -1,3 +1,4 @@
+from PySide6.QtCore import QAbstractAnimation
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -60,7 +61,7 @@ def test_reduce_motion_interrupts_and_cleans_an_active_fade():
 
     fade_in(widget, SettingsStub(True))
 
-    assert animation.state() == animation.State.Stopped
+    assert animation.state() == QAbstractAnimation.State.Stopped
     assert widget.graphicsEffect() is None
     assert getattr(widget, "_mysql_editor_fade_animation", None) is None
     widget.close()
