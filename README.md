@@ -38,7 +38,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - A live editor position indicator shows line/column and selected character count; the active connection and unsaved-tab state remain visible.
 - MySQL keyword/function completion plus suitable identifiers learned from the current schema and result-column names. Use **Ctrl+Space** to open completion on demand.
 - SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
-- Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, and editor font size are stored locally.
+- Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, editor font family, and font size are stored locally.
 - Animated five-step guided tour that can insert a sample SELECT into the editor.
 
 ### Database work
@@ -220,11 +220,12 @@ Shortcuts can depend on which widget has focus.
 The **Settings** menu groups working preferences by purpose:
 
 - **Appearance:** choose System, Light, or Dark. Theme changes preserve SQL buffers, cursor/selection, current tabs, result filters, and splitter state. SQL syntax highlighting, line-number gutter, active-line shading, and bracket matching follow the selected palette. Reduce motion disables optional transitions while leaving status feedback intact.
+- **Editor → SQL font family:** choose an installed monospace font. The family applies immediately to all open tabs and is remembered for new tabs; font size remains independent.
 - **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
 - **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
 - **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.
 
-Tab width and result row height are validated when settings load. Missing or malformed values fall back to 4 spaces and 28 px, respectively. Editor font size remains available under **View** and is persisted separately.
+Tab width, font family, and result row height are validated when settings load. Missing or malformed values fall back to 4 spaces, Cascadia Code, and 28 px, respectively. Editor font size remains available under **View** and is persisted separately.
 
 ## Security and privacy
 

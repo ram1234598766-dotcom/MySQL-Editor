@@ -123,6 +123,11 @@ def main():
         first.increase_editor_font()
         assert editor.font().pointSize() == 11
         first._set_editor_tab_width(8)
+        first._set_editor_font_family("Consolas")
+        assert first._current_editor().font().family().casefold() == "consolas"
+        assert settings.value("ui/editorFontFamily", "") == "Consolas"
+        first.new_query_tab()
+        assert first._current_editor().font().family().casefold() == "consolas"
         assert first._editor_tab_width == 8
         assert editor.tabStopDistance() == editor.fontMetrics().horizontalAdvance(" ") * 8
         first._set_result_row_height(36)
@@ -397,6 +402,8 @@ def main():
         app.processEvents()
         restored = second._current_editor()
         assert restored is not None and restored.font().pointSize() == 11
+        assert restored.font().family().casefold() == "consolas"
+        assert second._settings.value("ui/editorFontFamily", "") == "Consolas"
         assert second._editor_tab_width == 8
         assert restored.tabStopDistance() == restored.fontMetrics().horizontalAdvance(" ") * 8
         assert second._result_row_height == 36

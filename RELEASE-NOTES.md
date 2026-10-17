@@ -21,6 +21,11 @@
 - Dark, light and system appearance update SQL syntax highlighting, the line-number gutter, active-line shading and bracket matching without changing editor content or selection.
 - CSV exports are written to a temporary sibling file and atomically moved into place after a complete successful write; a failed export no longer truncates an existing destination.
 
+## SQL editor font preference
+
+- Added a Settings → Editor font-family picker restricted to installed monospace fonts. Changes apply to every open query tab, are persisted locally, and carry over to new tabs and future launches.
+- Font size remains a separate preference, and changing appearance does not discard the selected editor font family.
+
 ## Known limitations
 
 - MySQL DELIMITER directives and compound stored-program parsing are not implemented.

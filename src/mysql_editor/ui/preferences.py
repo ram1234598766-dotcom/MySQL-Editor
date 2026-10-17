@@ -24,3 +24,15 @@ def normalize_tab_width(value: Any) -> int:
 def normalize_result_row_height(value: Any) -> int:
     """Accept supported density heights only; malformed settings fall back to 28."""
     return _normalize_choice(value, (24, 28, 36), 28)
+
+
+DEFAULT_EDITOR_FONT_FAMILY = "Cascadia Code"
+
+def normalize_editor_font_family(value: Any) -> str:
+    """Validate a persisted editor font name and fall back to the SQL default."""
+    if not isinstance(value, str) or any(ord(character) < 32 for character in value):
+        return DEFAULT_EDITOR_FONT_FAMILY
+    family = " ".join(value.split())
+    if not family or len(family) > 128:
+        return DEFAULT_EDITOR_FONT_FAMILY
+    return family

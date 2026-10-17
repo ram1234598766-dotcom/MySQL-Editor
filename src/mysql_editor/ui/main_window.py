@@ -9,9 +9,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QApplication, QButtonGroup, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -33,7 +33,9 @@ from mysql_editor.ui.result_tools import (
     cell_detail_text, column_headers_tsv, column_width_samples, result_filter_message,
     result_picker_label, result_summary_message, rows_tsv, selected_cells_tsv,
 )
-from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
+from mysql_editor.ui.preferences import (
+    normalize_editor_font_family, normalize_result_row_height, normalize_tab_width,
+)
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
 from mysql_editor.recent_files import (
@@ -172,6 +174,9 @@ class MainWindow(QMainWindow):
         self._last_saved_paths: dict[int, str] = {}
         self._settings = QSettings()
         self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
+        self._editor_font_family = normalize_editor_font_family(
+            self._settings.value("ui/editorFontFamily", "Cascadia Code")
+        )
         self._result_row_height = normalize_result_row_height(self._settings.value("ui/resultRowHeight", 28))
         self._find_count_timer = QTimer(self)
         self._find_count_timer.setSingleShot(True)
@@ -608,6 +613,13 @@ class MainWindow(QMainWindow):
         appearance_menu.addAction(reduce_motion)
 
         editor_preferences = settings_menu.addMenu("Editor")
+        font_family_action = self._action(
+            editor_preferences, "SQL font family…", "", self.choose_editor_font_family
+        )
+        font_family_action.setToolTip(
+            "Choose an installed monospace font. Change the editor size under View."
+        )
+        editor_preferences.addSeparator()
         tab_width_menu = editor_preferences.addMenu("Tab width")
         tab_width_group = QActionGroup(self)
         tab_width_group.setExclusive(True)
@@ -667,6 +679,8 @@ class MainWindow(QMainWindow):
                 # QApplication stylesheet changes can repolish fonts; restore the explicit
                 # SQL editor preferences so appearance switches never reset readability.
                 font = editor.font()
+                font.setFamily(self._editor_font_family)
+                font.setStyleHint(QFont.StyleHint.Monospace)
                 font.setPointSize(self._editor_font_size)
                 editor.setFont(font)
                 editor.setTabStopDistance(
@@ -719,6 +733,8 @@ class MainWindow(QMainWindow):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
                 font = editor.font()
+                font.setFamily(self._editor_font_family)
+                font.setStyleHint(QFont.StyleHint.Monospace)
                 font.setPointSize(size)
                 editor.setFont(font)
                 editor.setTabStopDistance(
@@ -726,6 +742,39 @@ class MainWindow(QMainWindow):
                 )
         self._settings.setValue("ui/editorFontSize", size)
         self.status.setText(f"SQL editor font size: {size} pt")
+
+    def choose_editor_font_family(self):
+        """Choose an installed monospace face without changing the configured point size."""
+        initial_font = QFont(self._editor_font_family)
+        initial_font.setStyleHint(QFont.StyleHint.Monospace)
+        initial_font.setPointSize(self._editor_font_size)
+        dialog = QFontDialog(initial_font, self)
+        dialog.setWindowTitle("Choose SQL editor font family")
+        dialog.setOption(QFontDialog.FontDialogOption.MonospacedFonts, True)
+        dialog.setOption(QFontDialog.FontDialogOption.ScalableFonts, True)
+        dialog.setToolTip(
+            "Choose a monospace font family. The SQL editor point size is controlled separately."
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._set_editor_font_family(dialog.currentFont().family())
+
+    def _set_editor_font_family(self, family: object):
+        """Apply and persist an editor font face across open and future query tabs."""
+        family = normalize_editor_font_family(family)
+        self._editor_font_family = family
+        for index in range(self.editors.count()):
+            editor = self.editors.widget(index)
+            if isinstance(editor, SqlEditor):
+                font = editor.font()
+                font.setFamily(family)
+                font.setStyleHint(QFont.StyleHint.Monospace)
+                font.setPointSize(self._editor_font_size)
+                editor.setFont(font)
+                editor.setTabStopDistance(
+                    editor.fontMetrics().horizontalAdvance(" ") * self._editor_tab_width
+                )
+        self._settings.setValue("ui/editorFontFamily", family)
+        self.status.setText(f"SQL editor font family: {family}")
 
     def _set_editor_tab_width(self, width: int):
         width = normalize_tab_width(width)
@@ -909,6 +958,8 @@ class MainWindow(QMainWindow):
             active_schema=self._active_schema_name,
         )
         font = editor.font()
+        font.setFamily(self._editor_font_family)
+        font.setStyleHint(QFont.StyleHint.Monospace)
         font.setPointSize(self._editor_font_size)
         editor.setFont(font)
         editor.setTabStopDistance(
