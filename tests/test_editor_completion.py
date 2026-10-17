@@ -7,7 +7,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 
-from mysql_editor.ui.editor import SqlEditor
+from mysql_editor.ui.editor import SqlEditor, _matching_bracket_positions
 from mysql_editor.ui.main_window import ResultsFilterProxyModel, ResultsModel
 
 
@@ -173,3 +173,33 @@ def test_enter_indents_after_open_parenthesis_and_begin_block():
         _send_key(editor, Qt.Key.Key_Return)
 
         assert editor.toPlainText() == source + "\n    "
+
+
+def test_bracket_matching_handles_nested_pairs_and_ignores_strings_and_comments():
+    sql = (
+        "SELECT wrap((x + y)), '(ignored)', /* (ignored) */ z -- (ignored)\n"
+        "WHERE [column_name] = 1"
+    )
+    opening = sql.index("wrap(") + len("wrap")
+    closing = sql.index(")),") + 1
+    assert _matching_bracket_positions(sql, opening + 1) == (opening, closing)
+
+    quoted_bracket = sql.index("'(ignored)'") + 1
+    block_comment_bracket = sql.index("/* (ignored) */") + 3
+    line_comment_bracket = sql.index("-- (ignored)") + 3
+    assert _matching_bracket_positions(sql, quoted_bracket) is None
+    assert _matching_bracket_positions(sql, block_comment_bracket) is None
+    assert _matching_bracket_positions(sql, line_comment_bracket) is None
+
+
+def test_bracket_matching_works_backwards_and_rejects_unmatched_or_malformed_pairs():
+    sql = "SELECT ([column_name])"
+    opening = sql.index("(")
+    closing = sql.rindex(")")
+    assert _matching_bracket_positions(sql, closing + 1) == (opening, closing)
+
+    unmatched = "SELECT (value"
+    assert _matching_bracket_positions(unmatched, unmatched.index("(")) is None
+
+    malformed = "SELECT ([value)"
+    assert _matching_bracket_positions(malformed, malformed.index("(")) is None

@@ -68,6 +68,107 @@ VALUES VARIANCE VAR_POP VAR_SAMP VERSION WEEK WEEKDAY WEEKOFYEAR YEAR YEARWEEK
 
 SQL_COMPLETIONS = SQL_KEYWORDS | SQL_FUNCTIONS
 _IDENTIFIER_COMPLETION = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+_BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
+_CLOSING_BRACKETS = {close: open_ for open_, close in _BRACKET_PAIRS.items()}
+
+
+def _sql_code_mask(text: str) -> bytearray:
+    """Mark SQL code positions, excluding quotes and comments from bracket matching."""
+    mask = bytearray(b"\x01" * len(text))
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char in ("'", '"', chr(96)):
+            quote = char
+            mask[index] = 0
+            index += 1
+            while index < len(text):
+                mask[index] = 0
+                if text[index] == "\\" and index + 1 < len(text):
+                    mask[index + 1] = 0
+                    index += 2
+                    continue
+                if text[index] == quote:
+                    if index + 1 < len(text) and text[index + 1] == quote:
+                        mask[index + 1] = 0
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+
+        is_line_comment = char == "#" or (
+            text.startswith("--", index)
+            and (index + 2 >= len(text) or text[index + 2].isspace())
+        )
+        if is_line_comment:
+            end = text.find("\n", index)
+            end = len(text) if end < 0 else end
+            mask[index:end] = b"\x00" * (end - index)
+            index = end
+            continue
+
+        if text.startswith("/*", index):
+            closing = text.find("*/", index + 2)
+            end = len(text) if closing < 0 else closing + 2
+            mask[index:end] = b"\x00" * (end - index)
+            index = end
+            continue
+
+        index += 1
+    return mask
+
+
+def _matching_bracket_positions(text: str, cursor_position: int) -> tuple[int, int] | None:
+    """Return the opening/closing bracket positions adjacent to the cursor, if paired."""
+    candidate = next(
+        (
+            position
+            for position in (cursor_position, cursor_position - 1)
+            if 0 <= position < len(text)
+            and text[position] in {*_BRACKET_PAIRS, *_CLOSING_BRACKETS}
+        ),
+        None,
+    )
+    if candidate is None:
+        return None
+
+    code_mask = _sql_code_mask(text)
+    if not code_mask[candidate]:
+        return None
+
+    char = text[candidate]
+    if char in _BRACKET_PAIRS:
+        stack = [char]
+        for position in range(candidate + 1, len(text)):
+            if not code_mask[position]:
+                continue
+            current = text[position]
+            if current in _BRACKET_PAIRS:
+                stack.append(current)
+            elif current in _CLOSING_BRACKETS:
+                if not stack or _BRACKET_PAIRS[stack[-1]] != current:
+                    return None
+                stack.pop()
+                if not stack:
+                    return (candidate, position)
+        return None
+
+    stack = [char]
+    for position in range(candidate - 1, -1, -1):
+        if not code_mask[position]:
+            continue
+        current = text[position]
+        if current in _CLOSING_BRACKETS:
+            stack.append(current)
+        elif current in _BRACKET_PAIRS:
+            if not stack or _BRACKET_PAIRS[current] != stack[-1]:
+                return None
+            stack.pop()
+            if not stack:
+                return (position, candidate)
+    return None
 
 
 class SqlHighlighter(QSyntaxHighlighter):
@@ -420,12 +521,35 @@ class SqlEditor(QPlainTextEdit):
             number += 1
 
     def highlight_current_line(self):
-        selection = QTextEdit.ExtraSelection()
-        selection.format.setBackground(QColor("#122136"))
-        selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-        selection.cursor = self.textCursor()
-        selection.cursor.clearSelection()
-        self.setExtraSelections([selection] if not self.isReadOnly() else [])
+        if self.isReadOnly():
+            self.setExtraSelections([])
+            return
+
+        selections = []
+        line_selection = QTextEdit.ExtraSelection()
+        line_selection.format.setBackground(QColor("#122136"))
+        line_selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+        line_selection.cursor = self.textCursor()
+        line_selection.cursor.clearSelection()
+        selections.append(line_selection)
+
+        matched = _matching_bracket_positions(
+            self.toPlainText(), self.textCursor().position()
+        )
+        if matched is not None:
+            for position in matched:
+                bracket_selection = QTextEdit.ExtraSelection()
+                bracket_selection.format.setBackground(QColor("#2B526D"))
+                bracket_selection.format.setForeground(QColor("#F5FAFF"))
+                bracket_selection.format.setFontWeight(QFont.Weight.Bold)
+                bracket_selection.cursor = QTextCursor(self.document())
+                bracket_selection.cursor.setPosition(position)
+                bracket_selection.cursor.setPosition(
+                    position + 1, QTextCursor.MoveMode.KeepAnchor
+                )
+                selections.append(bracket_selection)
+
+        self.setExtraSelections(selections)
 
     def keyPressEvent(self, event):
         key = event.key()
