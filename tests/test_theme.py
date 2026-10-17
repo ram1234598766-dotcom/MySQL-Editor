@@ -40,7 +40,7 @@ def test_light_theme_translates_shared_component_styles_and_preserves_contrast()
     light = stylesheet_for_theme("light")
     assert dark == STYLESHEET
     assert light != STYLESHEET
-    assert "QMainWindow, QDialog, QWidget { background: #F8FAFC; color: #243246; }" in light
+    assert "QMainWindow, QDialog, QWidget { background: #F8FAFC; color: #263548; }" in light
     assert "QPushButton#primaryButton { background: #087E8B; color: #F8FAFC;" in light
     assert "QMenu::item:selected { background: #225EA8; color: white; }" in light
     assert "QTreeWidget::item:selected, QListWidget::item:selected { background: #D6E6F9;" in light
@@ -89,13 +89,13 @@ def test_light_theme_key_text_states_meet_wcag_aa_contrast():
 
 def test_dark_theme_key_text_states_meet_wcag_aa_contrast():
     # These pairs represent actual visible text states in the shared dark stylesheet.
-    assert _contrast_ratio("#e8f1ff", "#0B111B") >= 4.5  # primary text
-    assert _contrast_ratio("#a9bad0", "#0B111B") >= 4.5  # secondary/helper text
+    assert _contrast_ratio(TOKENS["text_primary"], TOKENS["window_bg"]) >= 4.5  # primary text
+    assert _contrast_ratio(TOKENS["text_secondary"], TOKENS["window_bg"]) >= 4.5  # secondary/helper text
     assert _contrast_ratio("#8093AC", "#0B111B") >= 4.5  # muted text
-    assert _contrast_ratio("#0B111B", "#37C7D8") >= 4.5  # primary-button text
+    assert _contrast_ratio(TOKENS["window_bg"], TOKENS["accent_primary"]) >= 4.5  # primary-button text
     assert _contrast_ratio("#3bd49b", "#142d2b") >= 4.5  # connection success badge
-    assert _contrast_ratio("#F2BE6B", "#0B111B") >= 4.5  # warning text
-    assert _contrast_ratio("#F07886", "#0B111B") >= 4.5  # danger text
+    assert _contrast_ratio(TOKENS["status_warning"], TOKENS["window_bg"]) >= 4.5  # warning text
+    assert _contrast_ratio(TOKENS["status_danger"], TOKENS["window_bg"]) >= 4.5  # danger text
     assert _contrast_ratio("#8293a9", "#121a26") >= 4.5  # disabled button text
     assert _contrast_ratio("#FFFFFF", "#1d4f88") >= 4.5  # selected table rows
     assert _contrast_ratio("#4a9bff", "#0B111B") >= 3.0  # focus boundary, non-text
@@ -154,3 +154,12 @@ def test_design_metrics_are_named_and_resolved_into_shared_stylesheet():
     assert not any(token in STYLESHEET for token in ("@SPACE_", "@TYPE_", "@RADIUS_", "@SIZE_"))
     assert "border-radius: 7px; padding: 8px 11px; min-height: 19px;" in STYLESHEET
     assert "QLabel#pageTitle { font-size: 23px; font-weight: 700; }" in STYLESHEET
+    assert "#162235" in STYLESHEET
+    assert "#1B2B42" in STYLESHEET
+    assert "#203650" in STYLESHEET
+    assert "#26364B" in STYLESHEET
+    assert TOKENS["text_primary"] in STYLESHEET
+    assert TOKENS["text_secondary"] in STYLESHEET
+    assert not any(token in STYLESHEET for token in (
+        "@COLOR_", "@SPACE_", "@TYPE_", "@RADIUS_", "@SIZE_"
+    ))

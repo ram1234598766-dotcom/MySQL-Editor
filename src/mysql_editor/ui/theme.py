@@ -97,15 +97,15 @@ EDITOR_PALETTES = {
 # App-level typography is set through QApplication. Avoid universal font rules here so
 # each SQL editor can keep its configured monospace family and point size.
 _STYLESHEET_TEMPLATE = r'''
-QMainWindow, QDialog, QWidget { background: #0B111B; color: #e8f1ff; }
-QMenuBar { background: #121a27; color: #e8f1ff; padding: @SPACE_MENU_VERTICAL@px @SPACE_MENU_HORIZONTAL@px; border-bottom: 1px solid #2c3a50; }
+QMainWindow, QDialog, QWidget { background: @COLOR_WINDOW_BG@; color: @COLOR_TEXT_PRIMARY@; }
+QMenuBar { background: #121a27; color: @COLOR_TEXT_PRIMARY@; padding: @SPACE_MENU_VERTICAL@px @SPACE_MENU_HORIZONTAL@px; border-bottom: 1px solid #2c3a50; }
 QMenuBar::item { padding: 6px 9px; border-radius: 5px; }
-QMenuBar::item:selected, QMenu { background: #172235; }
+QMenuBar::item:selected, QMenu { background: @COLOR_SURFACE_RAISED@; }
 QMenu { border: 1px solid #344761; padding: 5px; }
 QMenu::item { padding: 7px 25px 7px 12px; border-radius: @RADIUS_COMPACT@px; }
 QMenu::item:selected { background: #2569cb; color: white; }
-QLabel { color: #e8f1ff; }
-QLabel#mutedText { color: #a9bad0; }
+QLabel { color: @COLOR_TEXT_PRIMARY@; }
+QLabel#mutedText { color: @COLOR_TEXT_SECONDARY@; }
 QLabel#noticeText { color: #d3e1f5; background: #111e2f; border: 1px solid #405675; border-radius: 7px; padding: 9px; }
 QLabel#dialogTitle { font-size: @TYPE_DIALOG_TITLE@px; font-weight: 650; }
 QLabel#brandTitle { font-size: @TYPE_BRAND_TITLE@px; font-weight: 700; }
@@ -115,35 +115,35 @@ QLabel#pageTitle { font-size: @TYPE_PAGE_TITLE@px; font-weight: 700; }
 QLabel#panelTitle { font-size: @TYPE_PANEL_TITLE@px; font-weight: 650; }
 QLabel#sectionLabel { color: #aabbd2; font-size: @TYPE_CAPTION@px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
-QLabel#connectionBadge[connectionState="lost"] { color: #F07886; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
+QLabel#connectionBadge[connectionState="lost"] { color: @COLOR_STATUS_DANGER@; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
 QWidget#statusStrip { background: #121a27; border-top: 1px solid #354760; }
 QLabel#statusBar { background: transparent; color: #c0ccdc; border: none; padding: 7px 13px; }
 QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: @TYPE_CAPTION@px; }
 QLabel#securityNotice, QFrame#securityCard { background: #151f2e; border: 1px solid #405675; border-radius: @RADIUS_PANEL@px; padding: 10px; color: #c0ccdc; }
 QFrame#separator { color: #40516a; max-height: 1px; }
 QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTreeWidget, QListWidget {
-  background: #080e17; color: #e8f1ff; border: 1px solid #405675;
+  background: #080e17; color: @COLOR_TEXT_PRIMARY@; border: 1px solid #405675;
   border-radius: @RADIUS_CONTROL@px; padding: @SPACE_INPUT_PADDING@px; selection-background-color: #286cc7;
   selection-color: white; min-height: 20px;
 }
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTreeWidget:focus, QListWidget:focus,
 QPushButton:focus, QToolButton:focus, QTableView:focus, QTabBar::tab:focus { border: 1px solid #4a9bff; }
 QComboBox::drop-down { border: none; width: 24px; }
-QComboBox QAbstractItemView { background: #101a29; color: #e8f1ff; selection-background-color: #2569cb; }
-QPushButton { background: #172235; color: #e8f1ff; border: 1px solid #405675; border-radius: @RADIUS_BUTTON@px; padding: @SPACE_BUTTON_VERTICAL@px @SPACE_BUTTON_HORIZONTAL@px; min-height: @SIZE_BUTTON_MIN_HEIGHT@px; }
-QPushButton:hover { background: #22334b; border-color: #87a4ca; }
+QComboBox QAbstractItemView { background: #101a29; color: @COLOR_TEXT_PRIMARY@; selection-background-color: #2569cb; }
+QPushButton { background: @COLOR_SURFACE_RAISED@; color: @COLOR_TEXT_PRIMARY@; border: 1px solid #405675; border-radius: @RADIUS_BUTTON@px; padding: @SPACE_BUTTON_VERTICAL@px @SPACE_BUTTON_HORIZONTAL@px; min-height: @SIZE_BUTTON_MIN_HEIGHT@px; }
+QPushButton:hover { background: @COLOR_SURFACE_HOVER@; border-color: #87a4ca; }
 QPushButton:pressed { background: #0b1422; }
 QPushButton:disabled { color: #8293a9; background: #121a26; border-color: #35465c; }
-QPushButton#primaryButton { background: #37C7D8; color: #0B111B; border: 1px solid #37C7D8; font-weight: 650; }
+QPushButton#primaryButton { background: @COLOR_ACCENT_PRIMARY@; color: @COLOR_WINDOW_BG@; border: 1px solid @COLOR_ACCENT_PRIMARY@; font-weight: 650; }
 QPushButton#primaryButton:hover { background: #55D5E2; border-color: #55D5E2; }
 QWidget#workspaceNavigation { background: #0d1522; border-bottom: 1px solid #263951; }
 QToolButton#navButton { text-align: center; background: transparent; color: #aebed2; border: 1px solid transparent; border-radius: 8px; padding: 9px 13px; }
 QToolButton#navButton:hover { background: #18273b; color: #eef6ff; border-color: #354b65; }
-QToolButton#navButton:checked { background: #132b42; color: #62dff0; border: 1px solid #285c77; }
+QToolButton#navButton:checked { background: @COLOR_SURFACE_SELECTED@; color: #62dff0; border: 1px solid #285c77; }
 QToolButton#navButton:focus { border: 1px solid #5bbdff; }
 QLabel#navHint { color: #7187a3; font-size: 9px; font-weight: 650; letter-spacing: 1px; padding-right: 5px; }
 QLabel#connectionDetails { color: #a7bad1; font-size: @TYPE_CAPTION@px; }
-QWidget#findReplaceBar { background: #101927; border: 1px solid #26364B; border-radius: @RADIUS_BUTTON@px; }
+QWidget#findReplaceBar { background: @COLOR_SURFACE_BASE@; border: 1px solid @COLOR_BORDER_SUBTLE@; border-radius: @RADIUS_BUTTON@px; }
 QWidget#findReplaceBar QLabel#findMatchCount { color: #A6B6CB; font-size: @TYPE_CAPTION@px; padding: 4px; }
 QWidget#findReplaceBar QPushButton { padding: 5px 9px; min-height: 16px; }
 QWidget#findReplaceBar QCheckBox { color: #A6B6CB; spacing: 6px; }
@@ -161,29 +161,42 @@ QLabel#tourProgress { padding: 0 2px; }
 QLabel#tourProgress[current="true"] { color: #58dcec; font-size: 14px; }
 QLabel#tourProgress[current="false"] { color: #7187a3; font-size: @TYPE_BODY@px; }
 QTabWidget::pane { background: #090f19; border: 1px solid #405675; border-radius: 7px; top: -1px; }
-QTabBar::tab { background: #172235; color: #b6c5d9; padding: @SPACE_TAB_VERTICAL@px @SPACE_TAB_HORIZONTAL@px; border: 1px solid #354760; border-top-left-radius: @RADIUS_CONTROL@px; border-top-right-radius: @RADIUS_CONTROL@px; margin-right: 3px; }
-QTabBar::tab:selected { background: #090f19; color: #e8f1ff; border-bottom-color: #090f19; }
-QTableView { background: #0b121d; alternate-background-color: #101b2a; color: #e8f1ff; gridline-color: #354760; border: 1px solid #405675; selection-background-color: #1d4f88; selection-color: white; }
-QHeaderView::section { background: #172235; color: #cad7e7; border: none; border-bottom: 1px solid #405675; padding: 8px; font-weight: 650; }
+QTabBar::tab { background: @COLOR_SURFACE_RAISED@; color: #b6c5d9; padding: @SPACE_TAB_VERTICAL@px @SPACE_TAB_HORIZONTAL@px; border: 1px solid #354760; border-top-left-radius: @RADIUS_CONTROL@px; border-top-right-radius: @RADIUS_CONTROL@px; margin-right: 3px; }
+QTabBar::tab:selected { background: #090f19; color: @COLOR_TEXT_PRIMARY@; border-bottom-color: #090f19; }
+QTableView { background: #0b121d; alternate-background-color: #101b2a; color: @COLOR_TEXT_PRIMARY@; gridline-color: #354760; border: 1px solid #405675; selection-background-color: #1d4f88; selection-color: white; }
+QHeaderView::section { background: @COLOR_SURFACE_RAISED@; color: #cad7e7; border: none; border-bottom: 1px solid #405675; padding: 8px; font-weight: 650; }
 QTreeWidget, QListWidget { border: none; }
 QTreeWidget::item, QListWidget::item { min-height: @SIZE_TREE_ITEM_MIN_HEIGHT@px; padding: @SPACE_TREE_ITEM_PADDING@px; }
 QTreeWidget::item:selected, QListWidget::item:selected { background: #205ca4; border-radius: 4px; }
-QScrollBar:vertical { background: #101927; width: @SIZE_SCROLLBAR@px; margin: 1px; }
+QScrollBar:vertical { background: @COLOR_SURFACE_BASE@; width: @SIZE_SCROLLBAR@px; margin: 1px; }
 QScrollBar::handle:vertical { background: #486181; border-radius: 5px; min-height: 24px; }
-QScrollBar:horizontal { background: #101927; height: @SIZE_SCROLLBAR@px; margin: 1px; }
+QScrollBar:horizontal { background: @COLOR_SURFACE_BASE@; height: @SIZE_SCROLLBAR@px; margin: 1px; }
 QScrollBar::handle:horizontal { background: #486181; border-radius: 5px; min-width: 24px; }
 QCheckBox { spacing: 8px; }
 QCheckBox::indicator { width: @SIZE_CHECKBOX_INDICATOR@px; height: @SIZE_CHECKBOX_INDICATOR@px; }
 QCheckBox::indicator:unchecked { background: #080e17; border: 1px solid #6b829e; border-radius: 3px; }
 QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; border-radius: 3px; }
-QLabel#statusSuccess { color: #4CC7A3; }
-QLabel#statusWarning { color: #F2BE6B; }
-QLabel#statusDanger { color: #F07886; }
-QPushButton#accentSecondary { border-color: #8D91FF; }
+QLabel#statusSuccess { color: @COLOR_STATUS_SUCCESS@; }
+QLabel#statusWarning { color: @COLOR_STATUS_WARNING@; }
+QLabel#statusDanger { color: @COLOR_STATUS_DANGER@; }
+QPushButton#accentSecondary { border-color: @COLOR_ACCENT_SECONDARY@; }
 '''
  
  
 _STYLE_METRIC_VALUES = {
+    "@COLOR_WINDOW_BG@": TOKENS["window_bg"],
+    "@COLOR_SURFACE_BASE@": TOKENS["surface_base"],
+    "@COLOR_SURFACE_RAISED@": TOKENS["surface_raised"],
+    "@COLOR_SURFACE_HOVER@": TOKENS["surface_hover"],
+    "@COLOR_SURFACE_SELECTED@": TOKENS["surface_selected"],
+    "@COLOR_BORDER_SUBTLE@": TOKENS["border_subtle"],
+    "@COLOR_TEXT_PRIMARY@": TOKENS["text_primary"],
+    "@COLOR_TEXT_SECONDARY@": TOKENS["text_secondary"],
+    "@COLOR_ACCENT_PRIMARY@": TOKENS["accent_primary"],
+    "@COLOR_ACCENT_SECONDARY@": TOKENS["accent_secondary"],
+    "@COLOR_STATUS_SUCCESS@": TOKENS["status_success"],
+    "@COLOR_STATUS_WARNING@": TOKENS["status_warning"],
+    "@COLOR_STATUS_DANGER@": TOKENS["status_danger"],
     "@SPACE_MENU_VERTICAL@": SPACING["menu_vertical"],
     "@SPACE_MENU_HORIZONTAL@": SPACING["menu_horizontal"],
     "@SPACE_BUTTON_VERTICAL@": SPACING["button_vertical"],
@@ -211,15 +224,15 @@ _STYLE_METRIC_VALUES = {
 }
 
 
-def _resolve_style_metrics(template: str) -> str:
-    """Resolve named geometry and type tokens for Qt's stylesheet engine."""
+def _resolve_style_tokens(template: str) -> str:
+    """Resolve semantic palette, geometry and typography tokens for Qt."""
     result = template
     for placeholder, value in _STYLE_METRIC_VALUES.items():
         result = result.replace(placeholder, str(value))
     return result
 
 
-STYLESHEET = _resolve_style_metrics(_STYLESHEET_TEMPLATE)
+STYLESHEET = _resolve_style_tokens(_STYLESHEET_TEMPLATE)
 
 
 # A light palette is generated by translating the shared dark stylesheet rather than
