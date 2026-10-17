@@ -43,9 +43,13 @@ from mysql_editor.recent_files import (
 )
 
 
+CSV_EXPORT_NULL_SEMANTICS = (
+    "SQL NULL is encoded as " + r"\N" + "; empty text stays blank. "
+    "Text values beginning with a backslash are escaped by adding one leading backslash."
+)
 CSV_EXPORT_SEMANTICS = (
     "CSV export preserves MySQL fetch order and includes every fetched row; "
-    "it ignores grid sorting and the visible-row filter."
+    "it ignores grid sorting and the visible-row filter. " + CSV_EXPORT_NULL_SEMANTICS
 )
 
 
@@ -1693,7 +1697,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "CSV export complete",
                 f"Exported {row_count:,} row(s) in MySQL fetch order to:\n{path}\n\n"
-                "Grid sorting and the visible-row filter do not change the exported rows.",
+                "Grid sorting and the visible-row filter do not change the exported rows.\n\n"
+                + CSV_EXPORT_NULL_SEMANTICS,
             )
         else:
             QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
@@ -1789,7 +1794,9 @@ class MainWindow(QMainWindow):
             cells[(index.row(), index.column())] = value
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(selected_cells_tsv(cells))
-        self.status.setText(f"Copied {len(indexes):,} selected cell(s). SQL NULL is copied as NULL.")
+        self.status.setText(
+            f"Copied {len(indexes):,} selected cell(s). SQL NULL is copied as NULL; empty text stays blank."
+        )
 
     def copy_selected_rows(self):
         view_rows = self._selected_view_rows()
@@ -1806,7 +1813,9 @@ class MainWindow(QMainWindow):
             rows.append(values)
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(rows_tsv(rows))
-        self.status.setText(f"Copied {len(rows):,} selected row(s).")
+        self.status.setText(
+            f"Copied {len(rows):,} selected row(s). SQL NULL is copied as NULL; empty text stays blank."
+        )
 
     def copy_column_headers(self):
         selected_columns = sorted({index.column() for index in self.result_grid.selectedIndexes()})

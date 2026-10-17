@@ -118,7 +118,7 @@ def test_mysql_query_schema_transaction_and_csv_round_trip(worker, tmp_path):
         csv_rows = list(csv.reader(handle))
     assert csv_rows == [
         ["id", "label", "note"],
-        ["1", "café", ""],
+        ["1", "café", r"\N"],
         ["2", "東京", "keep"],
         ["3", "O'Reilly", "keep"],
     ]

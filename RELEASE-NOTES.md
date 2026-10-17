@@ -48,3 +48,9 @@ This pre-release contains no APK/AAB files or cross-device password synchronizat
 - Added an animated multi-step guided tour (workspace header, connection form and Help → Guided tour / F1). The tour can insert an actual sample SELECT into the editor.
 - After the first setup, startup asks for only the local master password and automatically reconnects to the last remembered profile when the password is available in Windows Credential Manager. If vault data is missing or MySQL rejects the saved password, the connection form is shown.
 - The branded icon and UI assets now use an alpha-bearing PNG created by removing only edge-connected near-white matte pixels from the original artwork. Enclosed white artwork is preserved, and the tracked source logo remains unchanged.
+
+
+## CSV export NULL semantics
+
+- CSV export now distinguishes SQL NULL from empty text: SQL NULL is written as the unquoted `\N` token while empty text stays an empty field.
+- Text values beginning with a backslash are escaped by adding one leading backslash, so literal `\N` and path-like strings remain distinguishable from the NULL token. Export remains atomic and preserves MySQL fetch order.
