@@ -90,7 +90,7 @@ def animate_label_color(
     animation = _ensure_animation(widget)
     generation = object()
     setattr(widget, _COLOR_ANIMATION_GENERATION_ATTR, generation)
-    setattr(widget, "_mysql_editor_color_animation_end", end.name())
+    widget._mysql_editor_color_animation_end = end.name()
     animation.setDuration(max(0, min(int(duration_ms), MAX_DURATION_MS)))
     animation.setStartValue(QColor(start_color))
     animation.setEndValue(end)
