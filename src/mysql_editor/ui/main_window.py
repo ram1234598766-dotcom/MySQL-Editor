@@ -35,6 +35,10 @@ from mysql_editor.ui.result_tools import (
 from mysql_editor.ui.preferences import normalize_result_row_height, normalize_tab_width
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
+from mysql_editor.recent_files import (
+    MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
+    remove_recent_sql_path,
+)
 
 
 class ResultsModel(QAbstractTableModel):
@@ -480,6 +484,10 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
         self._action(file_menu, "New query", "Ctrl+N", self.new_query_tab)
         self._action(file_menu, "Open SQL file…", "Ctrl+O", self.open_sql_file)
+        self.recent_sql_menu = file_menu.addMenu("Recent SQL files")
+        self.recent_sql_menu.setAccessibleName("Recent SQL files")
+        self.recent_sql_menu.aboutToShow.connect(self._refresh_recent_sql_menu)
+        self._refresh_recent_sql_menu()
         self._action(file_menu, "Save SQL file", "Ctrl+S", self.save_sql_file)
         self._action(file_menu, "Save All", "", self.save_all_sql_files)
         self._action(file_menu, "Save SQL snippet", "Ctrl+Shift+S", self.save_query_snippet)
@@ -1526,6 +1534,70 @@ class MainWindow(QMainWindow):
         if self.saved_list.count() == 0:
             self.saved_list.addItem("Save a query snippet to see it here.")
 
+    def _recent_sql_paths(self) -> list[str]:
+        """Read local recent-file path metadata; SQL contents are never stored here."""
+        stored = self._settings.value("files/recentSqlPaths", [], type=list)
+        return normalize_recent_sql_paths(stored, limit=MAX_RECENT_SQL_FILES)
+
+    def _persist_recent_sql_paths(self, paths) -> None:
+        self._settings.setValue(
+            "files/recentSqlPaths",
+            normalize_recent_sql_paths(paths, limit=MAX_RECENT_SQL_FILES),
+        )
+        self._settings.sync()
+
+    def _record_recent_sql_file(self, path: str | Path) -> None:
+        self._persist_recent_sql_paths(
+            record_recent_sql_path(self._recent_sql_paths(), path, limit=MAX_RECENT_SQL_FILES)
+        )
+        self._refresh_recent_sql_menu()
+
+    def _remove_recent_sql_file(self, path: str | Path) -> None:
+        self._persist_recent_sql_paths(remove_recent_sql_path(self._recent_sql_paths(), path))
+        self._refresh_recent_sql_menu()
+
+    def _clear_recent_sql_files(self) -> None:
+        self._persist_recent_sql_paths([])
+        self._refresh_recent_sql_menu()
+        self.status.setText("Recent SQL file list cleared. No SQL content was stored in that list.")
+
+    def _open_recent_sql_file(self, path: str) -> None:
+        source = Path(path)
+        if not source.is_file():
+            self._remove_recent_sql_file(path)
+            QMessageBox.warning(
+                self, "Recent SQL file unavailable",
+                f"{source.name} is no longer available at the saved location. "
+                "The missing entry has been removed from Recent SQL files.",
+            )
+            self.status.setText("Recent SQL file unavailable; stale entry removed.")
+            return
+        self._open_sql_path(source)
+
+    def _refresh_recent_sql_menu(self) -> None:
+        menu = getattr(self, "recent_sql_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        paths = self._recent_sql_paths()
+        if not paths:
+            empty_action = menu.addAction("No recent SQL files")
+            empty_action.setEnabled(False)
+            return
+
+        for path in paths:
+            source = Path(path)
+            action = menu.addAction(source.name or path)
+            action.setToolTip(path)
+            action.setData(path)
+            action.triggered.connect(
+                lambda _checked=False, recent_path=path: self._open_recent_sql_file(recent_path)
+            )
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear recent list")
+        clear_action.setToolTip("Clear the local list of file paths. This does not delete any SQL files.")
+        clear_action.triggered.connect(self._clear_recent_sql_files)
+
     def _open_sql_path(self, path: str | Path) -> bool:
         source_path = Path(path)
         try:
@@ -1539,6 +1611,7 @@ class MainWindow(QMainWindow):
             self.status.setText("Could not open SQL file.")
             return False
         self.new_query_tab(sql_text, str(source_path))
+        self._record_recent_sql_file(source_path)
         self.status.setText(f"Opened {source_path.name}")
         return True
 
