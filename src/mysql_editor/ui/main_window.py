@@ -286,6 +286,11 @@ class MainWindow(QMainWindow):
         self.connection_details.setMaximumWidth(275)
         top_layout.addWidget(self.connection_details)
         self.tour_button = QPushButton("✧  Guided tour")
+        self.tour_button.setAccessibleName("Open MySQL Editor guided tour")
+        self.tour_button.setAccessibleDescription(
+            "Opens a guided overview of the SQL workspace and common actions."
+        )
+        self.tour_button.setToolTip("Learn the main parts of the MySQL Editor workspace.")
         self.tour_button.clicked.connect(self._show_product_tour)
         top_layout.addWidget(self.tour_button)
         self.connect_button = QPushButton("Connect")
@@ -360,13 +365,24 @@ class MainWindow(QMainWindow):
         heading_box.addWidget(caption)
         heading_row.addLayout(heading_box, 1)
         self.format_button = QPushButton("✦  Format SQL")
+        self.format_button.setAccessibleName("Format SQL in the current query tab")
+        self.format_button.setToolTip("Format the SQL text in the active query tab.")
         self.format_button.clicked.connect(self.format_current_sql)
         self.explain_button = QPushButton("Explain")
+        self.explain_button.setAccessibleName("Explain the current SELECT query")
+        self.explain_button.setToolTip("Ask MySQL to explain the SELECT query at the cursor.")
         self.explain_button.clicked.connect(self.explain_query)
         self.run_selection_button = QPushButton("Run selection")
+        self.run_selection_button.setAccessibleName("Run selected SQL text")
+        self.run_selection_button.setToolTip("Execute only the selected SQL text.")
         self.run_selection_button.clicked.connect(lambda: self.execute_current(selection_only=True))
         self.run_button = QPushButton("▶  Run SQL   Ctrl+Enter")
         self.run_button.setObjectName("primaryButton")
+        self.run_button.setAccessibleName("Run current SQL statement or selection")
+        self.run_button.setAccessibleDescription(
+            "Executes selected SQL text, or the statement at the cursor when no text is selected. "
+            "Keyboard shortcut: Ctrl+Enter."
+        )
         self.run_button.clicked.connect(self.execute_current)
         heading_row.addWidget(self.format_button)
         heading_row.addWidget(self.explain_button)

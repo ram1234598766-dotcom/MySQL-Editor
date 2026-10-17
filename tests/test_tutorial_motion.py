@@ -85,3 +85,17 @@ def test_tour_progress_state_uses_shared_stylesheet_not_widget_local_colors():
         assert all(label.styleSheet() == "" for label in tour.progress_labels)
     finally:
         _dispose_tour(tour)
+
+
+
+def test_guided_tour_actions_have_screen_reader_names_and_finish_label():
+    tour = ProductTourDialog(settings=SettingsStub(True))
+    try:
+        assert tour.skip_button.accessibleName() == "Skip guided tour"
+        assert tour.back_button.accessibleName() == "Previous guided tour step"
+        assert tour.next_button.accessibleName() == "Next guided tour step"
+        tour._go(len(tour._pages) - 1)
+        assert tour.next_button.accessibleName() == "Finish guided tour"
+        assert "Close" in tour.next_button.toolTip()
+    finally:
+        _dispose_tour(tour)

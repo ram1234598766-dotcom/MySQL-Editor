@@ -148,10 +148,18 @@ class ProductTourDialog(QDialog):
 
         footer = QHBoxLayout()
         self.skip_button = QPushButton("Skip tour")
+        self.skip_button.setAccessibleName("Skip guided tour")
+        self.skip_button.setAccessibleDescription(
+            "Close the guided tour without completing the remaining steps."
+        )
         self.skip_button.clicked.connect(self._skip)
         self.back_button = QPushButton("Back")
+        self.back_button.setAccessibleName("Previous guided tour step")
+        self.back_button.setToolTip("Return to the previous step.")
         self.back_button.clicked.connect(lambda: self._go(self._index - 1))
         self.next_button = QPushButton("Next step  →")
+        self.next_button.setAccessibleName("Next guided tour step")
+        self.next_button.setToolTip("Continue to the next guided tour step.")
         self.next_button.setObjectName("primaryButton")
         self.next_button.setMinimumWidth(132)
         self.next_button.clicked.connect(self._next)
@@ -173,7 +181,14 @@ class ProductTourDialog(QDialog):
         self.intro.setText(intro)
         self.step_label.setText(f"STEP {self._index + 1} OF {len(self._pages)}")
         self.back_button.setEnabled(self._index > 0)
-        self.next_button.setText("Finish tour  ✓" if self._index == len(self._pages) - 1 else "Next step  →")
+        is_last_step = self._index == len(self._pages) - 1
+        self.next_button.setText("Finish tour  ✓" if is_last_step else "Next step  →")
+        self.next_button.setAccessibleName(
+            "Finish guided tour" if is_last_step else "Next guided tour step"
+        )
+        self.next_button.setToolTip(
+            "Close the guided tour." if is_last_step else "Continue to the next guided tour step."
+        )
         for index, label in enumerate(self.progress_labels):
             label.setProperty("current", index == self._index)
             # Dynamic properties select the shared theme rule for both Light and Dark.

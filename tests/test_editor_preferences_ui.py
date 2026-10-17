@@ -95,6 +95,17 @@ def test_editor_view_preferences_persist_and_apply_to_current_and_new_tabs(tmp_p
             if action.text() == "Highlight current line"
         )
 
+        for control in (
+            window.tour_button,
+            window.format_button,
+            window.explain_button,
+            window.run_selection_button,
+            window.run_button,
+        ):
+            assert control.accessibleName().strip(), (
+                f"{control.text()!r} must expose a screen-reader name"
+            )
+
         current = window._current_editor()
         assert isinstance(current, SqlEditor)
         assert line_action.isChecked()
