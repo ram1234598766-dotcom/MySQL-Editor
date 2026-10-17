@@ -67,7 +67,7 @@ class FindReplaceBar(QWidget):
         find_row.addWidget(self.match_count)
         find_row.addWidget(self.previous_button)
         find_row.addWidget(self.next_button)
-        find_row.addWidget(self.match_case)
+        find_row.addWidget(self.match_case_checkbox)
         find_row.addWidget(self.close_button)
         layout.addLayout(find_row)
 
