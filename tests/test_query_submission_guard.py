@@ -192,3 +192,65 @@ def test_export_progress_and_completion_do_not_overwrite_a_newer_query(
         window._query_running = False
         window.close()
         repository.close()
+
+def test_multi_statement_high_impact_warning_numbers_risks_without_echoing_sql(
+    tmp_path, monkeypatch
+):
+    window, repository, worker = _make_window(tmp_path)
+    warnings = []
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args: (
+            warnings.append((title, message)) or main_window_module.QMessageBox.StandardButton.Cancel
+        ),
+    )
+    sql = "SELECT 'token=private-value'; DELETE FROM users; DROP TABLE audit_log;"
+    try:
+        window._execute_sql(sql)
+
+        assert len(warnings) == 1
+        title, message = warnings[0]
+        assert title == "High-impact SQL script"
+        assert "2 high-impact statement(s)" in message
+        assert "Statement 2:" in message
+        assert "DELETE has no top-level WHERE clause" in message
+        assert "Statement 3:" in message
+        assert "DROP can change schema" in message
+        assert "private-value" not in message
+        assert "audit_log" not in message
+        assert not any(action == "query" for action, _payload, _task_id in worker.submissions)
+    finally:
+        window.close()
+        repository.close()
+
+
+def test_multi_statement_high_impact_script_runs_only_after_explicit_confirmation(
+    tmp_path, monkeypatch
+):
+    window, repository, worker = _make_window(tmp_path)
+    warnings = []
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args: (
+            warnings.append((title, message)) or main_window_module.QMessageBox.StandardButton.Yes
+        ),
+    )
+    sql = "UPDATE users SET active=0; DROP TABLE old_audit;"
+    try:
+        window._execute_sql(sql)
+
+        assert len(warnings) == 1
+        assert "2 high-impact statement(s)" in warnings[0][1]
+        submissions = [
+            payload for action, payload, _task_id in worker.submissions if action == "query"
+        ]
+        assert len(submissions) == 1
+        assert submissions[0]["sql"] == sql
+        assert window._query_running is True
+    finally:
+        window._query_running = False
+        window.close()
+        repository.close()
+

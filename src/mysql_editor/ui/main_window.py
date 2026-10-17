@@ -1002,12 +1002,23 @@ class MainWindow(QMainWindow):
                 if answer != QMessageBox.StandardButton.Yes:
                     return
         else:
-            high = [classify_statement(item) for item in statements if classify_statement(item)[0] == "high"]
+            high: list[tuple[int, str]] = []
+            for statement_number, statement in enumerate(statements, start=1):
+                risk, explanation = classify_statement(statement)
+                if risk == "high":
+                    high.append((statement_number, explanation))
             if high:
+                reasons = "\\n".join(
+                    f"Statement {number}: {explanation}"
+                    for number, explanation in high
+                )
                 answer = QMessageBox.warning(
-                    self, "High-impact SQL script",
-                    f"The script contains {len(high)} high-impact statement(s). "
-                    "Review the complete script before continuing.",
+                    self,
+                    "High-impact SQL script",
+                    f"The script contains {len(high)} high-impact statement(s).\\n\\n"
+                    f"{reasons}\\n\\n"
+                    "Review the full script and its scope before continuing. "
+                    "This advisory is a safeguard, not a substitute for MySQL privileges.",
                     QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
                     QMessageBox.StandardButton.Cancel,
                 )
