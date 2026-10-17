@@ -36,6 +36,17 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "MySQLEditor-UISmokeData"
           New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
           python tools/smoke_test_ui.py
+      - name: Capture simulated display-scale UI evidence
+        run: python tools/capture_ui_screenshots.py
+      - name: Upload simulated display-scale UI evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: MySQLEditor-UI-Visual-QA
+          path: |
+            dist/ui-visual-qa/*.png
+            dist/ui-visual-qa/manifest.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Build application folder
         run: python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
       - name: Build portable executable

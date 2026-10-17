@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal, Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
@@ -55,7 +55,113 @@ def make_window(database_path: Path):
     return window, repository
 
 
+
+def capture_screenshot(output_path: Path, requested_scale: float) -> None:
+    """Capture synthetic-only workbench screenshots for simulated Qt DPI review."""
+    with tempfile.TemporaryDirectory(prefix="mysql-editor-visual-qa-") as temporary:
+        root = Path(temporary)
+        os.environ["LOCALAPPDATA"] = str(root / "localappdata")
+        settings_dir = root / "settings"
+        settings_dir.mkdir()
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(
+            QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir)
+        )
+
+        app = QApplication.instance() or QApplication([])
+        app.setOrganizationName("MySQL Editor Visual QA")
+        app.setApplicationName("MySQL Editor Visual QA")
+        QSettings().clear()
+
+        window, _repository = make_window(root / "visual-qa.sqlite3")
+        window.resize(1600, 1000)
+        window.setWindowIcon(QIcon(str(Path("assets/mysql-editor.ico").resolve())))
+        window._set_theme("dark")
+
+        editor = window._current_editor()
+        if editor is None:
+            raise RuntimeError("The workbench did not create its initial SQL editor.")
+        editor.setPlainText(
+            "SELECT o.id, o.order_date, o.status,\n"
+            "       SUM(oi.quantity * oi.unit_price) AS total_amount\n"
+            "FROM orders AS o\n"
+            "LEFT JOIN order_items AS oi ON oi.order_id = o.id\n"
+            "WHERE o.order_date >= '2026-01-01'\n"
+            "GROUP BY o.id, o.order_date, o.status\n"
+            "ORDER BY total_amount DESC;"
+        )
+        editor.document().setModified(False)
+
+        headers = ["id", "order_date", "status", "total_amount", "customer_name"]
+        rows = [
+            ["1041", "2026-01-03 09:22:18", "shipped", "148.50", "Alex Morgan"],
+            ["1040", "2026-01-02 17:45:02", "processing", "326.00", "Sam Rivera"],
+            ["1039", "2026-01-02 11:08:44", "delivered", "92.75", "Jordan Lee"],
+            ["1038", "2026-01-01 14:13:11", "cancelled", None, "Taylor Kim"],
+            ["1037", "2025-12-30 16:02:57", "shipped", "518.25", "Riley Carter"],
+        ]
+        window.result_model.update(headers, rows)
+        window._result_fetched_row_count = len(rows)
+        window._size_result_columns(headers, rows)
+        window.result_message.setText(
+            "Visual QA preview: synthetic rows only; no query was executed."
+        )
+        window.status.setText("VISUAL QA PREVIEW  |  SYNTHETIC DATA  |  OFFLINE")
+
+        window.connection_badge.setText("No connection selected")
+        window.connection_badge.setToolTip(
+            "Visual QA screenshot only. No MySQL server is connected."
+        )
+        window.connection_badge.setProperty("connectionState", "disconnected")
+        window.connection_badge.style().unpolish(window.connection_badge)
+        window.connection_badge.style().polish(window.connection_badge)
+
+        window._fill_schema_tree({
+            "ok": True,
+            "databases": ["app_database"],
+            "schema": "app_database",
+            "objects": [
+                {"name": "customers", "type": "BASE TABLE"},
+                {"name": "orders", "type": "BASE TABLE"},
+                {"name": "order_items", "type": "BASE TABLE"},
+                {"name": "products", "type": "BASE TABLE"},
+            ],
+            "columns_by_table": {
+                "customers": ["id", "name"],
+                "orders": ["id", "order_date", "status"],
+                "order_items": ["id", "order_id", "quantity", "unit_price"],
+                "products": ["id", "name", "price"],
+            },
+            "column_metadata_truncated": False,
+        })
+
+        window.show()
+        app.processEvents()
+        app.processEvents()
+        actual_scale = window.devicePixelRatioF()
+        if abs(actual_scale - requested_scale) > 0.15:
+            raise RuntimeError(
+                f"Qt scale mismatch: requested {requested_scale:g}, got {actual_scale:g}."
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not window.grab().save(str(output_path), "PNG"):
+            raise RuntimeError(f"Could not write visual QA screenshot: {output_path}")
+        window.close()
+        app.processEvents()
+
+
 def main():
+    capture_path = os.environ.get("MYSQL_EDITOR_CAPTURE_PATH")
+    if capture_path:
+        scale = float(
+            os.environ.get(
+                "MYSQL_EDITOR_EXPECTED_SCALE",
+                os.environ.get("QT_SCALE_FACTOR", "1"),
+            )
+        )
+        capture_screenshot(Path(capture_path), scale)
+        return
     with tempfile.TemporaryDirectory(prefix="mysql-editor-ui-smoke-") as temporary:
         root = Path(temporary)
         os.environ["LOCALAPPDATA"] = str(root / "localappdata")
