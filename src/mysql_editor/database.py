@@ -25,8 +25,8 @@ CSV_NULL_TOKEN = r"\N"
 def _csv_export_value(value: Any) -> Any:
     """Encode SQL NULL separately from empty text, escaping literal backslash-led text.
 
-    The CSV convention uses an unquoted \\N token for SQL NULL. Empty strings remain
-    empty fields. To avoid colliding with the NULL token, any text value that starts
+    The dedicated NULL token is unquoted. Empty strings remain empty fields.
+    To avoid colliding with the NULL token, any text value that starts
     with a backslash is escaped by adding one extra leading backslash.
     """
     if value is None:
