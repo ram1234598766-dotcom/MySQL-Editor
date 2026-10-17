@@ -105,3 +105,90 @@ def test_duplicate_profile_names_are_unique_case_insensitively():
     assert duplicate_profile_name("Analytics", ["Analytics copy"]) == "Analytics copy 2"
     assert duplicate_profile_name("Analytics", ["analytics COPY", "ANALYTICS copy 2"]) == "Analytics copy 3"
     assert duplicate_profile_name("   ", []) == "MySQL connection copy"
+
+def test_credential_store_refuses_to_save_on_non_windows_without_fallback(monkeypatch):
+    import platform
+
+    import pytest
+
+    from mysql_editor.storage import CredentialStore
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    store = CredentialStore()
+    with pytest.raises(RuntimeError, match="Windows Credential Manager"):
+        store.save("profile-secret-test", "never-write-this-plaintext")
+
+
+def test_credential_store_rejects_similarly_named_untrusted_backend(monkeypatch):
+    import platform
+
+    import keyring
+    import pytest
+
+    from mysql_editor.storage import CredentialStore
+
+    class NotReallyWinVaultKeyring:
+        def get_password(self, *_args):
+            return "should-not-be-read"
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(keyring, "get_keyring", lambda: NotReallyWinVaultKeyring())
+    with pytest.raises(RuntimeError, match="Credential Manager is unavailable"):
+        CredentialStore().read("profile-id")
+
+
+def test_credential_store_propagates_backend_failures_without_plaintext_fallback(monkeypatch):
+    import pytest
+
+    from mysql_editor.storage import CredentialStore
+
+    class PasswordDeleteError(Exception):
+        pass
+
+    class BackendErrors:
+        PasswordDeleteError = PasswordDeleteError
+
+    class FailingKeyring:
+        errors = BackendErrors
+
+        @staticmethod
+        def set_password(*_args):
+            raise RuntimeError("vault write failed")
+
+        @staticmethod
+        def get_password(*_args):
+            raise RuntimeError("vault read failed")
+
+        @staticmethod
+        def delete_password(*_args):
+            raise RuntimeError("vault delete failed")
+
+    monkeypatch.setattr(CredentialStore, "_backend", staticmethod(lambda: FailingKeyring))
+    store = CredentialStore()
+    with pytest.raises(RuntimeError, match="vault write failed"):
+        store.save("profile", "database-secret")
+    with pytest.raises(RuntimeError, match="vault read failed"):
+        store.read("profile")
+    with pytest.raises(RuntimeError, match="vault delete failed"):
+        store.delete("profile")
+
+
+def test_credential_store_ignores_only_missing_credential_on_delete(monkeypatch):
+    from mysql_editor.storage import CredentialStore
+
+    class PasswordDeleteError(Exception):
+        pass
+
+    class BackendErrors:
+        PasswordDeleteError = PasswordDeleteError
+
+    class MissingKeyring:
+        errors = BackendErrors
+
+        @staticmethod
+        def delete_password(*_args):
+            raise PasswordDeleteError("credential not found")
+
+    monkeypatch.setattr(CredentialStore, "_backend", staticmethod(lambda: MissingKeyring))
+    CredentialStore().delete("already-removed-profile")
+

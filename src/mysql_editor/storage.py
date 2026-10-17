@@ -215,8 +215,10 @@ class CredentialStore:
         if platform.system() != "Windows":
             raise RuntimeError("Saved database passwords require Windows Credential Manager.")
         backend = keyring.get_keyring()
-        if "WinVaultKeyring" not in type(backend).__name__:
-            raise RuntimeError("Windows Credential Manager is unavailable; database passwords were not saved.")
+        if type(backend).__name__ != "WinVaultKeyring":
+            raise RuntimeError(
+                "Windows Credential Manager is unavailable; database passwords were not saved."
+            )
         return keyring
 
     def save(self, profile_id: str, password: str) -> None:
