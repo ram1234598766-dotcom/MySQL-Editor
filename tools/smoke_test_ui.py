@@ -106,15 +106,18 @@ def main():
             themed_start + len("current_col"), QTextCursor.MoveMode.KeepAnchor
         )
         editor.setTextCursor(themed_cursor)
+        font_before_theme = editor.font().pointSize()
         first._set_theme("light")
         assert editor.theme_name == "light"
         assert editor.highlighter.theme_name == "light"
         assert editor.toPlainText() == themed_sql
         assert editor.textCursor().selectedText() == "current_col"
         assert editor.theme_palette["current_line_background"] == "#EFF6FC"
+        assert editor.font().pointSize() == font_before_theme
         first._set_theme("dark")
         assert editor.theme_name == "dark"
         assert editor.toPlainText() == themed_sql
+        assert editor.font().pointSize() == font_before_theme
         settings.setValue("ui/theme", "dark")
 
         first.increase_editor_font()
