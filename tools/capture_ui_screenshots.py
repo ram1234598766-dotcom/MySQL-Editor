@@ -58,7 +58,8 @@ def main() -> None:
         env["QT_ENABLE_HIGHDPI_SCALING"] = "1"
         env["MYSQL_EDITOR_CAPTURE_PATH"] = str(output)
         env["MYSQL_EDITOR_EXPECTED_SCALE"] = factor
-        subprocess.run(
+        # Fixed interpreter and repo-owned script; no shell or external command input.
+        subprocess.run(  # noqa: S603
             [sys.executable, str(SMOKE_TEST)],
             cwd=ROOT,
             env=env,
