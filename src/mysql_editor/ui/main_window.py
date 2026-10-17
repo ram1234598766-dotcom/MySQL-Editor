@@ -7,11 +7,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QColor, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QShortcut, QSplitter, QTabWidget, QTableView, QToolButton,
+    QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
