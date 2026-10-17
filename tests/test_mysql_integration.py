@@ -82,6 +82,9 @@ def test_mysql_query_schema_transaction_and_csv_round_trip(worker, tmp_path):
     )
     assert setup["ok"] is True
     assert len(setup["results"]) == 2
+    assert [item["statement_index"] for item in setup["results"]] == [1, 2]
+    assert all(item["statement_count"] == 2 for item in setup["results"])
+    assert all("warning_count" in item for item in setup["results"])
     worker._dispatch("commit", {})
 
     seeded = worker._dispatch(

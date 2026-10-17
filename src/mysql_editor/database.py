@@ -328,6 +328,10 @@ class DatabaseWorker(QThread):
                 cursor = self._connection.cursor()
                 try:
                     cursor.execute(sql)
+                    try:
+                        warning_count = max(0, int(getattr(cursor, "warning_count", 0) or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        warning_count = 0
                     if cursor.with_rows:
                         self._report_activity("Fetching result rows from MySQL…")
                         headers = [str(desc[0]) for desc in (cursor.description or [])]
@@ -361,7 +365,8 @@ class DatabaseWorker(QThread):
                         results.append({
                             "result_id": result_id, "headers": headers, "rows": preview,
                             "row_count": count, "preview_truncated": count > MAX_PREVIEW_ROWS,
-                            "kind": "rows",
+                            "kind": "rows", "statement_index": statement_number,
+                            "statement_count": len(statements), "warning_count": warning_count,
                             "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                         })
                     else:
@@ -372,7 +377,8 @@ class DatabaseWorker(QThread):
                         results.append({
                             "result_id": result_id, "headers": ["Result", "Affected rows"],
                             "rows": rows, "row_count": len(rows), "affected_rows": affected,
-                            "kind": "status",
+                            "kind": "status", "statement_index": statement_number,
+                            "statement_count": len(statements), "warning_count": warning_count,
                             "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                         })
                 except Exception as exc:
@@ -380,6 +386,8 @@ class DatabaseWorker(QThread):
                     results.append({
                         "headers": ["Error"], "rows": [[safe_db_error(exc)]], "row_count": 1,
                         "kind": "error", "interrupted": interrupted,
+                        "statement_index": statement_number, "statement_count": len(statements),
+                        "warning_count": 0,
                         "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                     })
                     return {
