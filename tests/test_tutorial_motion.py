@@ -28,7 +28,7 @@ def test_guided_tour_skips_fade_when_reduce_motion_is_enabled():
 
     assert tour.pages.currentIndex() == 1
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
-    assert tour._opacity.opacity() == 1.0
+    assert tour.windowOpacity() == 1.0
     tour.close()
 
 
@@ -49,4 +49,4 @@ def test_guided_tour_transition_uses_shared_motion_token_and_can_be_interrupted(
     # Dismissal must cancel motion and leave the page fully visible.
     tour.close()
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
-    assert tour._opacity.opacity() == 1.0
+    assert tour.windowOpacity() == 1.0
