@@ -34,11 +34,11 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 ### Editing and navigation
 - Horizontal workspace navigation for SQL Editor, Connections, Schema Explorer, Query History, and Saved Queries.
 - Multiple SQL tabs with unsaved-change markers and a confirmation before discarding modified tabs.
-- SQL syntax highlighting, line numbers, current-line highlighting, indentation, and a monospace font.
+- SQL syntax highlighting, configurable line numbers and current-line highlighting, tab-width-aware indentation, bracket matching, and a monospace font.
 - A live editor position indicator shows line/column and selected character count; the active connection and unsaved-tab state remain visible.
 - MySQL keyword/function completion plus context-aware schema columns and tables, including comma-separated `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Use **Ctrl+Space** to open completion on demand; completion remains a lightweight aid rather than a full MySQL parser.
 - SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
-- Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, editor font family, and font size are stored locally.
+- Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, editor font family/size, tab width, line-number visibility, and current-line highlight preference are stored locally.
 - Five-step guided tour with a short, interruptible content transition that respects Reduce Motion; it can insert a sample SELECT into the editor.
 
 ### Database work
@@ -65,7 +65,7 @@ The next planned quality phase is documented in **[UPGRADE_ROADMAP.md](UPGRADE_R
 
 The intended visual direction is a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and short transitions that never block work. The plan proposes motion tokens and explicit checks for keyboard focus, interrupted animations, high-DPI layouts, and result-grid performance.
 
-**Roadmap status:** implementation is in progress. Shared dark-theme tokens, Reduce Motion controls, the inline Find/Replace bar, and live line/column/selection status are implemented with regression coverage; semantic completion refinements, deeper accessibility, and release verification remain roadmap work. Automated checks do not replace Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
+**Roadmap status:** implementation is in progress. Shared dark/light theme tokens, Reduce Motion, contextual completion, the inline Find/Replace bar, editor position status, and persisted editor/result preferences have regression coverage. More accessibility and reliability work remains, and release verification is staged; automated checks do not replace hands-on Windows visual QA. Keep the app Windows-desktop-only during this phase; Android, cloud relay, cross-device sync, ads, and telemetry remain out of scope.
 
 ## Platform and scope
 
