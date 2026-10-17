@@ -704,8 +704,6 @@ class MainWindow(QMainWindow):
             self.inspector_tabs.setCurrentIndex(2)
             self._refresh_saved_queries()
 
-        if destination in {"Schema explorer", "Query history", "Saved queries"}:
-
     def _insert_tour_example(self):
         editor = self._current_editor()
         if editor is None:
