@@ -261,6 +261,8 @@ def main():
         first._on_worker_completed(retry_job, "schema_objects", {
             "ok": False, "error": "still denied",
         })
+        # Restore the pre-existing persisted inspector preference after this test.
+        first.inspector_tabs.setCurrentIndex(1)
 
         submitted = []
         first._dispatch = lambda action, payload, context=None: submitted.append((action, payload, context))
