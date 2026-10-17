@@ -1,9 +1,11 @@
+"""Regression checks for safe, interruptible UI color transitions."""
 from PySide6.QtCore import QAbstractAnimation
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLabel
 
 from mysql_editor.ui.animations import (
-    MICRO_DURATION_MS, STANDARD_DURATION_MS, reduce_motion_enabled, fade_in,
+    MICRO_DURATION_MS, STANDARD_DURATION_MS, animate_label_color,
+    reduce_motion_enabled,
 )
 
 
@@ -14,6 +16,9 @@ class SettingsStub:
     def value(self, key, default=False, type=bool):
         assert key == "ui/reduceMotion"
         return self._value
+
+
+_APP = QApplication.instance() or QApplication([])
 
 
 def test_reduce_motion_defaults_to_disabled():
@@ -28,53 +33,47 @@ def test_animation_durations_are_short_and_bounded():
     assert 0 < MICRO_DURATION_MS <= STANDARD_DURATION_MS <= 220
 
 
-
-_APP = QApplication.instance() or QApplication([])
-
-
-def test_fade_in_restores_widget_graphics_state_after_completion():
-    widget = QWidget()
-    widget.show()
+def test_color_transition_restores_final_color_after_completion():
+    label = QLabel("step")
+    label.show()
     _APP.processEvents()
 
-    fade_in(widget, SettingsStub(False), duration_ms=1)
-    animation = getattr(widget, "_mysql_editor_fade_animation", None)
+    animation = animate_label_color(
+        label, settings=SettingsStub(False), duration_ms=1,
+        start_color="#4a607c", end_color="#50d9ee",
+    )
     assert animation is not None
-    assert widget.graphicsEffect() is not None
-    assert getattr(widget, "_mysql_editor_fade_effect", None) is widget.graphicsEffect()
-    assert widget.graphicsEffect().parent() is None
+    assert animation.state() == QAbstractAnimation.State.Running
+    assert getattr(label, "_mysql_editor_color_animation", None) is animation
 
     QTest.qWait(35)
     _APP.processEvents()
 
-    assert widget.graphicsEffect() is None
-    assert getattr(widget, "_mysql_editor_fade_animation", None) is None
-    assert getattr(widget, "_mysql_editor_fade_effect", None) is None
-    widget.close()
+    assert getattr(label, "_mysql_editor_color_animation", None) is None
+    assert "#50d9ee" in label.styleSheet()
+    label.close()
 
 
-def test_reduce_motion_interrupts_and_cleans_an_active_fade():
-    widget = QWidget()
-    widget.show()
+def test_reduce_motion_interrupts_active_transition_and_sets_final_state():
+    label = QLabel("step")
+    label.show()
     _APP.processEvents()
 
-    fade_in(widget, SettingsStub(False), duration_ms=180)
-    animation = getattr(widget, "_mysql_editor_fade_animation", None)
+    animation = animate_label_color(label, settings=SettingsStub(False), duration_ms=180)
     assert animation is not None
-
-    fade_in(widget, SettingsStub(True))
+    animate_label_color(label, settings=SettingsStub(True))
 
     assert animation.state() == QAbstractAnimation.State.Stopped
-    assert widget.graphicsEffect() is None
-    assert getattr(widget, "_mysql_editor_fade_animation", None) is None
-    assert getattr(widget, "_mysql_editor_fade_effect", None) is None
-    widget.close()
+    assert getattr(label, "_mysql_editor_color_animation", None) is None
+    assert "#50d9ee" in label.styleSheet()
+    label.close()
 
 
-def test_hidden_widget_does_not_receive_a_graphics_effect():
-    widget = QWidget()
+def test_hidden_widget_gets_immediate_state_without_animation():
+    label = QLabel("step")
 
-    fade_in(widget, SettingsStub(False))
+    animation = animate_label_color(label, settings=SettingsStub(False))
 
-    assert widget.graphicsEffect() is None
-    assert getattr(widget, "_mysql_editor_fade_animation", None) is None
+    assert animation is None
+    assert getattr(label, "_mysql_editor_color_animation", None) is None
+    assert "#50d9ee" in label.styleSheet()
