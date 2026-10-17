@@ -79,11 +79,11 @@ def test_ci_actions_are_pinned_to_immutable_shas_and_dependabot_updates_them():
         action_lines = [
             line.strip()
             for line in workflow.splitlines()
-            if re.match(r"^\\s*(?:-\\s*)?uses:", line)
+            if re.match(r"^\s*(?:-\s*)?uses:", line)
         ]
         assert action_lines, f"No actions found in {relative_path}"
         for line in action_lines:
-            assert re.search(r"@[0-9a-f]{40}\\s+#\\s*v\\d+\\s*$", line), (
+            assert re.search(r"@[0-9a-f]{40}\s+#\s*v\d+\s*$", line), (
                 f"Action reference is not SHA-pinned in {relative_path}: {line}"
             )
 
