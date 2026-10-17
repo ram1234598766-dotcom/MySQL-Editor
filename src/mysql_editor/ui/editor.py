@@ -454,9 +454,12 @@ class SqlEditor(QPlainTextEdit):
 
         safe: set[str] = set()
         for word in candidates:
-            name = str(word)
-            if _IDENTIFIER_COMPLETION.fullmatch(name):
-                safe.add(name)
+            # Database identifiers are text. Do not turn malformed values such as
+            # None into plausible names like "None" by stringifying arbitrary objects.
+            if not isinstance(word, str):
+                continue
+            if _IDENTIFIER_COMPLETION.fullmatch(word):
+                safe.add(word)
         return safe
 
     def set_completion_words(self, words) -> None:
