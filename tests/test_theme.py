@@ -175,3 +175,26 @@ def test_design_metrics_are_named_and_resolved_into_shared_stylesheet():
     assert not any(token in STYLESHEET for token in (
         "@COLOR_", "@SPACE_", "@TYPE_", "@RADIUS_", "@SIZE_"
     ))
+
+
+
+def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes():
+    dark = stylesheet_for_theme("dark")
+    light = stylesheet_for_theme("light")
+
+    assert "QPushButton#primaryButton:disabled {" in dark
+    assert (
+        "background: #121a26; color: #8293a9; border-color: #35465c;"
+        in dark
+    )
+    assert "QPushButton#primaryButton:disabled:hover {" in dark
+
+    assert "QPushButton#primaryButton:disabled {" in light
+    assert (
+        "background: #F2F5F9; color: #64748B; border-color: #D6DEE8;"
+        in light
+    )
+    assert "QPushButton#primaryButton:disabled:hover {" in light
+
+    assert _contrast_ratio("#8293A9", "#121A26") >= 4.5
+    assert _contrast_ratio("#64748B", "#F2F5F9") >= 4.5

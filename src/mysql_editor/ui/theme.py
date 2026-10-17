@@ -137,6 +137,8 @@ QPushButton:pressed { background: #0b1422; }
 QPushButton:disabled { color: #8293a9; background: #121a26; border-color: #35465c; }
 QPushButton#primaryButton { background: @COLOR_ACCENT_PRIMARY@; color: @COLOR_WINDOW_BG@; border: 1px solid @COLOR_ACCENT_PRIMARY@; font-weight: 650; }
 QPushButton#primaryButton:hover { background: #55D5E2; border-color: #55D5E2; }
+QPushButton#primaryButton:disabled { background: #121a26; color: #8293a9; border-color: #35465c; }
+QPushButton#primaryButton:disabled:hover { background: #121a26; border-color: #35465c; }
 QWidget#workspaceNavigation { background: #0d1522; border-bottom: 1px solid #263951; }
 QToolButton#navButton { text-align: center; background: transparent; color: #aebed2; border: 1px solid transparent; border-radius: 8px; padding: 9px 13px; }
 QToolButton#navButton:hover { background: #18273b; color: #eef6ff; border-color: #354b65; }
