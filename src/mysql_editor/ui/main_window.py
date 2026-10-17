@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
-from mysql_editor.database import MAX_PREVIEW_ROWS, DatabaseWorker
+from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.animations import fade_in
 from mysql_editor.ui.connection_dialog import ConnectionDialog
