@@ -164,7 +164,8 @@ class ProductTourDialog(QDialog):
         self._opacity = QGraphicsOpacityEffect(self.pages)
         self._opacity.setOpacity(1.0)
         self.pages.setGraphicsEffect(self._opacity)
-        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
+        # Keep the animation owned by its target effect so Qt tears both down together.
+        self._fade = QPropertyAnimation(self._opacity, b"opacity", self._opacity)
         self._fade.setDuration(STANDARD_DURATION_MS)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._render_page()
