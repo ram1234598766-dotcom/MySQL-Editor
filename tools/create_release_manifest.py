@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         temporary.replace(destination)
-    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"Release manifest validation failed: {exc}", file=sys.stderr)
         return 2
 
