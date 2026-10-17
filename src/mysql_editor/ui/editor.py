@@ -15,6 +15,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QWidget
 
+from mysql_editor.ui.preferences import normalize_tab_width
 from mysql_editor.ui.theme import EDITOR_PALETTES, resolve_theme
 
 
@@ -375,6 +376,9 @@ class SqlEditor(QPlainTextEdit):
         super().__init__(parent)
         self._theme_name = "dark"
         self._theme_palette = EDITOR_PALETTES["dark"]
+        self._tab_width_spaces = 4
+        self._line_numbers_visible = True
+        self._current_line_highlight_enabled = True
         self.line_number_area = LineNumberArea(self)
         self.highlighter = SqlHighlighter(self.document())
         self.setObjectName("sqlEditor")
@@ -388,7 +392,7 @@ class SqlEditor(QPlainTextEdit):
         font.setStyleHint(QFont.StyleHint.Monospace)
         font.setPointSize(10)
         self.setFont(font)
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
+        self.set_tab_width(4)
         self.setPlaceholderText(
             "-- Write a query after connecting to MySQL.\n"
             "SELECT table_name\nFROM information_schema.tables\n"
@@ -437,6 +441,24 @@ class SqlEditor(QPlainTextEdit):
         self._theme_palette = EDITOR_PALETTES[name]
         self.highlighter.set_theme(name)
         self.line_number_area.update()
+        self.highlight_current_line()
+
+    def set_tab_width(self, width: int) -> None:
+        """Apply the configured indentation width to both tabs and automatic indentation."""
+        self._tab_width_spaces = normalize_tab_width(width)
+        space_width = max(1, self.fontMetrics().horizontalAdvance(" "))
+        self.setTabStopDistance(space_width * self._tab_width_spaces)
+
+    def set_line_numbers_visible(self, visible: bool) -> None:
+        """Show or hide the line-number gutter without changing the SQL document."""
+        self._line_numbers_visible = bool(visible)
+        self.line_number_area.setVisible(self._line_numbers_visible)
+        self.update_line_number_area_width(0)
+        self.line_number_area.update()
+
+    def set_current_line_highlight_enabled(self, enabled: bool) -> None:
+        """Enable or disable the current-line background while preserving bracket matches."""
+        self._current_line_highlight_enabled = bool(enabled)
         self.highlight_current_line()
 
     @staticmethod
@@ -910,7 +932,7 @@ class SqlEditor(QPlainTextEdit):
             trimmed,
             re.IGNORECASE,
         ))
-        indent = leading + ("    " if opens_block else "")
+        indent = leading + (" " * self._tab_width_spaces if opens_block else "")
         cursor.beginEditBlock()
         cursor.insertText("\n" + indent)
         cursor.endEditBlock()
@@ -919,6 +941,8 @@ class SqlEditor(QPlainTextEdit):
         self.highlight_current_line()
 
     def line_number_area_width(self) -> int:
+        if not self._line_numbers_visible:
+            return 0
         digits = max(2, len(str(max(1, self.blockCount()))))
         return 18 + self.fontMetrics().horizontalAdvance("9") * digits
 
@@ -941,6 +965,8 @@ class SqlEditor(QPlainTextEdit):
         )
 
     def paint_line_numbers(self, event):
+        if not self._line_numbers_visible:
+            return
         painter = QPainter(self.line_number_area)
         painter.fillRect(event.rect(), QColor(self._theme_palette["gutter_background"]))
         block = self.firstVisibleBlock()
@@ -965,18 +991,18 @@ class SqlEditor(QPlainTextEdit):
             number += 1
 
     def highlight_current_line(self):
-        if self.isReadOnly():
-            self.setExtraSelections([])
-            return
-
         selections = []
-        line_selection = QTextEdit.ExtraSelection()
-        line_selection.format.setBackground(QColor(self._theme_palette["current_line_background"]))
-        line_selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-        line_selection.cursor = self.textCursor()
-        line_selection.cursor.clearSelection()
-        selections.append(line_selection)
+        if not self.isReadOnly() and self._current_line_highlight_enabled:
+            line_selection = QTextEdit.ExtraSelection()
+            line_selection.format.setBackground(
+                QColor(self._theme_palette["current_line_background"])
+            )
+            line_selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            line_selection.cursor = self.textCursor()
+            line_selection.cursor.clearSelection()
+            selections.append(line_selection)
 
+        # Bracket matching remains visible when current-line highlighting is disabled.
         matched = _matching_bracket_positions(
             self.toPlainText(), self.textCursor().position()
         )
@@ -1093,6 +1119,13 @@ class SqlEditor(QPlainTextEdit):
             self._insert_newline_with_indentation()
             event.accept()
             return
+        if key == Qt.Key.Key_Tab and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            cursor = self.textCursor()
+            if not cursor.hasSelection():
+                cursor.insertText(" " * self._tab_width_spaces)
+                self.setTextCursor(cursor)
+                event.accept()
+                return
         super().keyPressEvent(event)
         typed = event.text()
         if typed and (typed[-1].isalnum() or typed[-1] in "_$"):
