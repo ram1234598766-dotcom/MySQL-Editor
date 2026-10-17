@@ -536,6 +536,8 @@ class SqlEditor(QPlainTextEdit):
                 return tuple(sorted(self._completion_tables or all_words, key=str.casefold))
             if any(db.casefold() == qualifier.casefold() for db in self._completion_databases):
                 return tuple(sorted(all_words, key=str.casefold))
+            # An unknown qualifier must not fall through to unrelated global words.
+            return ()
 
         table_context = re.search(
             r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+(?:[A-Za-z_$][A-Za-z0-9_$]*)?$",
