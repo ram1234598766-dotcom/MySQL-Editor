@@ -20,9 +20,9 @@ TOKENS = {
 
 # Component rules remain one stylesheet so semantic palette changes are applied
 # consistently. Values are resolved here because Qt stylesheets do not support CSS vars.
-STYLESHEET = (r'''
+STYLESHEET = r'''
 * { font-family: "Segoe UI"; font-size: 12px; }
-QMainWindow, QDialog, QWidget { background: {window_bg}; color: #e8f1ff; }
+QMainWindow, QDialog, QWidget { background: #0B111B; color: #e8f1ff; }
 QMenuBar { background: #121a27; color: #e8f1ff; padding: 4px 10px; border-bottom: 1px solid #2c3a50; }
 QMenuBar::item { padding: 6px 9px; border-radius: 5px; }
 QMenuBar::item:selected, QMenu { background: #172235; }
@@ -83,12 +83,12 @@ QHeaderView::section { background: #172235; color: #cad7e7; border: none; border
 QTreeWidget, QListWidget { border: none; }
 QTreeWidget::item, QListWidget::item { min-height: 25px; padding: 4px; }
 QTreeWidget::item:selected, QListWidget::item:selected { background: #205ca4; border-radius: 4px; }
-QScrollBar:vertical { background: {surface_base}; width: 12px; margin: 1px; }
+QScrollBar:vertical { background: #101927; width: 12px; margin: 1px; }
 QScrollBar::handle:vertical { background: #486181; border-radius: 5px; min-height: 24px; }
-QScrollBar:horizontal { background: {surface_base}; height: 12px; margin: 1px; }
+QScrollBar:horizontal { background: #101927; height: 12px; margin: 1px; }
 QScrollBar::handle:horizontal { background: #486181; border-radius: 5px; min-width: 24px; }
 QCheckBox { spacing: 8px; }
 QCheckBox::indicator { width: 16px; height: 16px; }
 QCheckBox::indicator:unchecked { background: #080e17; border: 1px solid #6b829e; border-radius: 3px; }
 QCheckBox::indicator:checked { background: #2879e8; border: 1px solid #438fff; border-radius: 3px; }
-''').format(**TOKENS)
+'''
