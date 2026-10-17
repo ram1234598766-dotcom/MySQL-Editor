@@ -448,10 +448,65 @@ def test_context_completion_falls_back_when_schema_metadata_is_unavailable():
 
 
 
-def _send_key(editor, key):
-    event = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+def _send_key(editor, key, modifiers=Qt.KeyboardModifier.NoModifier):
+    event = QKeyEvent(QEvent.Type.KeyPress, key, modifiers)
     QApplication.sendEvent(editor, event)
     _APP.processEvents()
+
+
+def test_ctrl_space_opens_completion_on_demand_without_moving_editor_focus(monkeypatch):
+    editor = SqlEditor()
+    source = "SELECT cou"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len(source))
+    editor.setTextCursor(cursor)
+    editor.show()
+    editor.setFocus()
+    _APP.processEvents()
+    calls = []
+    monkeypatch.setattr(editor, "_show_completion", lambda force=False: calls.append(force))
+
+    _send_key(editor, Qt.Key.Key_Space, Qt.KeyboardModifier.ControlModifier)
+
+    assert calls == [True]
+    assert editor.toPlainText() == source
+    assert editor.textCursor().position() == len(source)
+    assert editor.hasFocus()
+
+
+def test_up_and_down_navigate_completion_without_moving_sql_caret():
+    editor = SqlEditor()
+    source = "SELECT cou FROM customers"
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(len("SELECT cou"))
+    editor.setTextCursor(cursor)
+    editor._completion_model.setStringList(["COUNT", "COALESCE", "CONCAT"])
+    editor._completer.setCompletionPrefix("CO")
+    popup = editor._completer.popup()
+    popup.setCurrentIndex(editor._completer.completionModel().index(0, 0))
+    editor.show()
+    editor.setFocus()
+    popup.show()
+    _APP.processEvents()
+    original_position = editor.textCursor().position()
+
+    assert popup.currentIndex().data() == "COUNT"
+    _send_key(editor, Qt.Key.Key_Down)
+    assert popup.currentIndex().data() == "COALESCE"
+    assert editor.textCursor().position() == original_position
+    assert editor.toPlainText() == source
+
+    _send_key(editor, Qt.Key.Key_Up)
+    assert popup.currentIndex().data() == "COUNT"
+    _send_key(editor, Qt.Key.Key_Up)
+    assert popup.currentIndex().data() == "COUNT"
+    assert editor.textCursor().position() == original_position
+    assert editor.toPlainText() == source
+    assert editor.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    assert popup.focusPolicy() == Qt.FocusPolicy.NoFocus
+    editor.close()
 
 
 def test_enter_and_tab_accept_current_completion_without_changing_other_sql():
