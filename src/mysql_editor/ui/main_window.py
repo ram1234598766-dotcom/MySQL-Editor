@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from mysql_editor.core import classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements
+from mysql_editor.core import (classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets, split_sql_statements, transaction_pending_after_sql)
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.connection_dialog import ConnectionDialog
@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
+        self._transaction_pending = False
         self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
@@ -1213,6 +1214,15 @@ class MainWindow(QMainWindow):
             outcome = classify_query_outcome(result, self._cancellation_requested)
             self._query_running = False
             self._cancellation_requested = False
+            if outcome == "complete":
+                self._transaction_pending = transaction_pending_after_sql(
+                    self._transaction_pending, context.get("sql", ""), complete=True,
+                )
+            elif outcome in {"partial_failure", "cancelled", "interrupted"}:
+                self._transaction_pending = transaction_pending_after_sql(
+                    self._transaction_pending, context.get("sql", ""), partial=True,
+                )
+            self._update_connection_status()
             self.run_button.setEnabled(True)
             self.stop_button.setEnabled(False)
         if action in {"query", "table_preview"}:
@@ -1279,7 +1289,10 @@ class MainWindow(QMainWindow):
             return
         if action in {"commit", "rollback"}:
             self.status.setText(result.get("message", result.get("error", action.title())))
-            if not result.get("ok"):
+            if result.get("ok"):
+                self._transaction_pending = False
+                self._update_connection_status()
+            else:
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
             return
         if action == "export_csv":
@@ -1816,6 +1829,29 @@ class MainWindow(QMainWindow):
         self.status.setText("Local query history cleared and disabled.")
 
     def open_connection_dialog(self):
+        if self._query_running:
+            QMessageBox.warning(
+                self, "Query still running",
+                "Wait for the current query to finish or cancel it before changing connections. "
+                "This prevents queued work from running against an unexpected server.",
+            )
+            self.status.setText("Connection switch blocked while a query is running.")
+            return
+
+        if self._transaction_pending:
+            answer = QMessageBox.warning(
+                self,
+                "Uncommitted database changes",
+                "This session may contain uncommitted writes. Switching connections closes the "
+                "current session and MySQL may roll those changes back. Commit or Rollback first, "
+                "or continue only if you accept that risk. Cancelling this dialog leaves the current "
+                "connection and transaction unchanged.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
         dialog = ConnectionDialog(
             self.worker, self.repository, self.credentials, self,
             master_unlocked=True,
@@ -1828,6 +1864,8 @@ class MainWindow(QMainWindow):
         self.profile = profile
         self.config = config
         self.connect_result = connect_result
+        # The accepted switch has replaced the prior server session.
+        self._transaction_pending = False
         self._update_connection_status()
         self.refresh_schema()
 
@@ -1851,12 +1889,20 @@ class MainWindow(QMainWindow):
     def _update_connection_status(self):
         host = self.config.get("host", "MySQL")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
-        self.connection_badge.setText(f"●  {host} · Connected")
+        pending_suffix = " · Uncommitted writes" if self._transaction_pending else ""
+        self.connection_badge.setText(f"●  {host} · Connected{pending_suffix}")
+        self.connection_badge.setAccessibleName(
+            f"Connection status: connected to {host}"
+            + ("; uncommitted writes may be pending" if self._transaction_pending else "")
+        )
         details = (
             f"{host}:{self.config.get('port', 3306)} · {self.config.get('username', '')} · "
             f"Database: {schema} · Server: {self.connect_result.get('server_version', 'MySQL')} · "
-            f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}"
+            f"TLS: {self.config.get('tls_mode', 'Automatic TLS')}\n"
+            "All SQL query tabs use this active connection; switching changes their execution target."
         )
+        if self._transaction_pending:
+            details += "\nUncommitted writes may be pending on this session."
         self.connection_details.setText(
             f"{self.config.get('username', '')}@{host}:{self.config.get('port', 3306)} · {schema}"
         )
