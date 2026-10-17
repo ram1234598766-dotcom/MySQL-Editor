@@ -80,6 +80,19 @@ def _last_task_id(worker, action):
 def test_schema_switch_runs_on_worker_and_updates_context_only_after_success(tmp_path):
     window, repository, worker = _make_window(tmp_path)
     try:
+        same_profile_editor = window._current_editor()
+        window.new_query_tab("SELECT 2;")
+        different_profile_editor = window._current_editor()
+        window._bind_editor_connection_context(
+            different_profile_editor,
+            dict(
+                window._current_connection_context(),
+                profile_id="other-profile",
+                profile_name="Other profile",
+                schema="warehouse",
+            ),
+        )
+
         window._use_schema("analytics")
 
         action, payload, request_id = worker.submissions[-1]
@@ -101,6 +114,10 @@ def test_schema_switch_runs_on_worker_and_updates_context_only_after_success(tmp
         assert repository.profiles()[0].default_schema == "analytics"
         assert "analytics" in window.connection_details.text()
         assert window._current_connection_context()["schema"] == "analytics"
+        assert same_profile_editor._mysql_editor_connection_context["schema"] == "analytics"
+        assert different_profile_editor._mysql_editor_connection_context["schema"] == "warehouse"
+        assert different_profile_editor._mysql_editor_connection_context["profile_id"] == "other-profile"
+        assert "warehouse" in different_profile_editor.toolTip()
         assert worker.submissions[-1][0] == "schema"
         assert window._schema_request_id == _last_task_id(worker, "schema")
     finally:
