@@ -14,9 +14,12 @@ The release workflow attaches the following files when the package job succeeds:
 - **`MySQLEditor-Portable.exe`** — portable single-file executable.
 - **`MySQLEditor-Folder.zip`** — application-folder distribution for diagnostics or users who prefer the onedir package.
 - **`SHA256SUMS`** — SHA-256 hashes for the published packages and supporting release documents.
+- **`RELEASE-MANIFEST.json`** — source commit, project version, Windows build metadata, signing disclosure, and each package's relative path, byte size, and SHA-256 hash.
 - **`sbom.cdx.json`** — CycloneDX dependency inventory.
 - **`THIRD_PARTY_LICENSES.md`** — third-party license inventory.
 - **`WINDOWS_SIGNING.md`** — current signing status and instructions.
+
+The workflow writes `RELEASE-MANIFEST.json` from the final package files and the exact `GITHUB_SHA`; its file hashes and byte sizes can be compared against downloaded artifacts. `SHA256SUMS` also hashes the manifest itself. The manifest is provenance evidence, not a publisher signature or a safety guarantee.
 
 The Windows workflow also uploads the complete package folder and a simulated display-scale UI evidence artifact to GitHub Actions. These are useful for diagnostics; artifacts expire, while release assets remain available with the GitHub Release.
 
