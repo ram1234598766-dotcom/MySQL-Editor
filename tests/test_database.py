@@ -397,3 +397,21 @@ def test_commit_and_rollback_return_updated_transaction_state():
     }
     assert connection.rollback_calls == 1
     assert not connection.in_transaction
+
+
+
+def test_worker_progress_emits_the_task_id_that_caused_it():
+    worker = DatabaseWorker()
+    tagged = []
+    untagged = []
+    worker.task_activity.connect(lambda task_id, message: tagged.append((task_id, message)))
+    worker.activity.connect(lambda message: untagged.append(message))
+
+    worker._current_task_id = "query-1"
+    worker._report_activity("Fetched 5 result row(s) so far…")
+    assert tagged == [("query-1", "Fetched 5 result row(s) so far…")]
+    assert untagged == []
+
+    worker._current_task_id = None
+    worker._report_activity("No cancellable query is currently active.")
+    assert untagged == ["No cancellable query is currently active."]
