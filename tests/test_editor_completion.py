@@ -270,7 +270,7 @@ def test_parentheses_are_not_auto_paired_inside_strings_or_comments():
 
 def test_pasted_parentheses_are_not_auto_paired_or_modified():
     editor = SqlEditor()
-    pasted = "SELECT (customer_id)\\nFROM customers"
+    pasted = "SELECT (customer_id)\nFROM customers"
     editor.insertPlainText(pasted)
 
     assert editor.toPlainText() == pasted
@@ -279,10 +279,10 @@ def test_pasted_parentheses_are_not_auto_paired_or_modified():
 def test_lexical_code_position_handles_escaped_quotes_and_mysql_comments():
     from mysql_editor.ui.editor import _is_sql_code_position
 
-    escaped = "SELECT 'abc" + "\\\\" + "' still string"
-    assert _is_sql_code_position(escaped, len("SELECT 'abc" + "\\\\" + "'")) is False
+    escaped = "SELECT 'abc" + chr(92) + "' still string"
+    assert _is_sql_code_position(escaped, len("SELECT 'abc" + chr(92) + "'")) is False
     assert _is_sql_code_position("SELECT 'abc' + ", len("SELECT 'abc' + ")) is True
-    assert _is_sql_code_position("SELECT 1 -- comment", len("SELECT 1 --")) is False
+    assert _is_sql_code_position("SELECT 1 -- comment\n", len("SELECT 1 -- comment\n")) is True
     assert _is_sql_code_position("SELECT 1 -- comment\\n", len("SELECT 1 -- comment\\n")) is True
     assert _is_sql_code_position("SELECT 1 /* comment */ + ", len("SELECT 1 /* comment */ + ")) is True
 

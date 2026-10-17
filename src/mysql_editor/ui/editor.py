@@ -134,7 +134,7 @@ def _is_sql_code_position(text: str, cursor_position: int) -> bool:
         following = text[index + 1] if index + 1 < position else ""
 
         if in_line_comment:
-            if char == "\\n":
+            if char == "\n":
                 in_line_comment = False
             index += 1
             continue
@@ -654,7 +654,7 @@ class SqlEditor(QPlainTextEdit):
         ):
             selection_start = cursor.selectionStart()
             if cursor.hasSelection():
-                selected = cursor.selectedText().replace("\\u2029", "\\n")
+                selected = cursor.selectedText().replace("\u2029", "\n")
                 selected_length = len(selected.encode("utf-16-le")) // 2
                 cursor.insertText("(" + selected + ")")
                 cursor.setPosition(selection_start + 1)
