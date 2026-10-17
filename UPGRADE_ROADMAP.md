@@ -535,3 +535,12 @@ No software process can guarantee “zero errors.” The engineering target is t
 - [Windows signing status and instructions](WINDOWS_SIGNING.md)
 
 For implementation, read \`AGENTS.md\` and the relevant skills under \`.agents/skills/\`. Before changing code, read the current implementation, state acceptance criteria, add or update a regression test, run the narrow test first, and then run the relevant full checks. Never treat a source commit as a release, never say CI is green while it is running, and never claim visual QA or signing without evidence.
+
+### Implementation progress — 17 October 2026
+
+The following editor/UX items have now been implemented on `main` with regression coverage:
+- Shared dark-theme tokens and a persistent Reduce Motion preference, with subtle inspector navigation transitions.
+- Inline Find/Replace with match counts, case-sensitive search, wrap-around previous/next navigation, Replace, Replace all, and keyboard dismissal.
+- Live editor line/column and selection-length status in the bottom status strip.
+
+The CI workflow for each commit is the evidence source for lint, compilation, automated tests, the MySQL integration job, and Windows UI smoke. Full Windows packaging is tracked separately. High-DPI/manual visual QA on a physical Windows machine is still required; no theme-switching/light-theme, complete semantic completion, or full release-candidate milestone is implied by this progress note.

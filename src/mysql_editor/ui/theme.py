@@ -40,7 +40,9 @@ QLabel#pageTitle { font-size: 23px; font-weight: 700; }
 QLabel#panelTitle { font-size: 13px; font-weight: 650; }
 QLabel#sectionLabel { color: #aabbd2; font-size: 10px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
-QLabel#statusBar { background: #121a27; color: #c0ccdc; border-top: 1px solid #354760; padding: 7px 13px; }
+QWidget#statusStrip { background: #121a27; border-top: 1px solid #354760; }
+QLabel#statusBar { background: transparent; color: #c0ccdc; border: none; padding: 7px 13px; }
+QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: 10px; }
 QLabel#securityNotice, QFrame#securityCard { background: #151f2e; border: 1px solid #405675; border-radius: 9px; padding: 10px; color: #c0ccdc; }
 QFrame#separator { color: #40516a; max-height: 1px; }
 QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTreeWidget, QListWidget {

@@ -17,6 +17,7 @@
 - Added local persistence for window geometry, split-pane sizing, inspector selection, and SQL-editor font size.
 - SQL file read/write failures now show recoverable dialogs and preserve the current editor buffer.
 - Replaced modal Find/Replace prompts with an inline bar featuring match counts, case-sensitive search, previous/next navigation, Replace, and Replace all.
+- Added a live editor status indicator for line, column, and selected character count.
 - CSV exports are written to a temporary sibling file and atomically moved into place after a complete successful write; a failed export no longer truncates an existing destination.
 
 ## Known limitations

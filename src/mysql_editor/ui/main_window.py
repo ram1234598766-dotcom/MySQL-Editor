@@ -380,9 +380,23 @@ class MainWindow(QMainWindow):
         body.setSizes([1180, 310])
         outer.addWidget(body, 1)
 
+        status_strip = QWidget()
+        status_strip.setObjectName("statusStrip")
+        status_layout = QHBoxLayout(status_strip)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(0)
         self.status = QLabel("Ready")
         self.status.setObjectName("statusBar")
-        outer.addWidget(self.status)
+        self.editor_position = QLabel("Ln 1, Col 1")
+        self.editor_position.setObjectName("editorPosition")
+        self.editor_position.setAccessibleName("SQL editor cursor position and selection length")
+        self.editor_position.setMinimumWidth(165)
+        self.editor_position.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        status_layout.addWidget(self.status, 1)
+        status_layout.addWidget(self.editor_position)
+        outer.addWidget(status_strip)
         self.setCentralWidget(root)
         self._set_result_controls()
         self.refresh_history()
@@ -592,7 +606,35 @@ class MainWindow(QMainWindow):
         editor.document().setModified(False)
         editor.textChanged.connect(lambda ed=editor: self._update_tab_title(ed))
         editor.textChanged.connect(self._queue_find_count_refresh)
+        editor.cursorPositionChanged.connect(lambda ed=editor: self._update_editor_position(ed))
+        editor.selectionChanged.connect(lambda ed=editor: self._update_editor_position(ed))
+        self._update_editor_position(editor)
         editor.setFocus()
+
+    def _update_editor_position(self, editor: SqlEditor | None = None):
+        """Show the active editor cursor position and selected character count."""
+        if not hasattr(self, "editor_position"):
+            return
+        editor = editor or self._current_editor()
+        if editor is None:
+            self.editor_position.setText("No SQL editor")
+            self.editor_position.setToolTip("No SQL query tab is active.")
+            return
+        if editor is not self._current_editor():
+            return
+
+        cursor = editor.textCursor()
+        line = cursor.blockNumber() + 1
+        column = cursor.positionInBlock() + 1
+        selected_text = cursor.selectedText().replace("\\u2029", "\\n")
+        selected_length = len(selected_text)
+        label = f"Ln {line:,}, Col {column:,}"
+        if cursor.hasSelection():
+            label += f" · {selected_length:,} selected"
+        self.editor_position.setText(label)
+        self.editor_position.setToolTip(
+            f"Line {line}, column {column}; {selected_length:,} selected character(s)."
+        )
 
     def _update_tab_title(self, editor):
         index = self.editors.indexOf(editor)
@@ -622,6 +664,7 @@ class MainWindow(QMainWindow):
     def _update_editor_actions(self, *_):
         self._set_result_controls()
         self._refresh_find_count()
+        self._update_editor_position()
 
     def _set_result_controls(self):
         self.export_button.setEnabled(bool(self._current_result_id))

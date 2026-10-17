@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
@@ -102,6 +103,23 @@ def main():
         assert "information_schema.tables" in first._current_editor().toPlainText()
         first._current_editor().setPlainText("SELECT alpha, alpha;")
         first._current_editor().document().setModified(False)
+        editor = first._current_editor()
+        cursor = editor.textCursor()
+        cursor.setPosition(editor.toPlainText().index("alpha"))
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        editor.setTextCursor(cursor)
+        app.processEvents()
+        assert "5 selected" in first.editor_position.text()
+        assert first.editor_position.text().startswith("Ln 1, Col ")
+        cursor = editor.textCursor()
+        cursor.setPosition(0)
+        editor.setTextCursor(cursor)
+        app.processEvents()
+        assert first.editor_position.text() == "Ln 1, Col 1"
+        cursor.setPosition(editor.toPlainText().index(",") + 2)
+        editor.setTextCursor(cursor)
+        app.processEvents()
+        assert first.editor_position.text().startswith("Ln 1, Col ")
         first.show_find_replace(replace=True)
         first.find_bar.search_input.setText("alpha")
         first._refresh_find_count()
