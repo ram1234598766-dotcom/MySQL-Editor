@@ -11,6 +11,8 @@ def _normalize_choice(value: Any, allowed: tuple[int, ...], default: int) -> int
         parsed = int(value)
     except (TypeError, ValueError, OverflowError):
         return default
+    if isinstance(value, float) and value != parsed:
+        return default
     return parsed if parsed in allowed else default
 
 
