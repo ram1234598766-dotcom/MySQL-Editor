@@ -179,10 +179,12 @@ class ProductTourDialog(QDialog):
         self.next_button.setText("Finish tour  ✓" if self._index == len(self._pages) - 1 else "Next step  →")
         for index, label in enumerate(self.progress_labels):
             label.setProperty("current", index == self._index)
-            label.setStyleSheet(
-                "color: #50d9ee; font-size: 14px;" if index == self._index
-                else "color: #4a607c; font-size: 12px;"
-            )
+            # Dynamic properties select the shared theme rule for both Light and Dark.
+            # Repolish so Qt immediately applies the changed current/non-current state.
+            style = label.style()
+            style.unpolish(label)
+            style.polish(label)
+            label.update()
 
     def _go(self, index: int):
         index = max(0, min(index, len(self._pages) - 1))
