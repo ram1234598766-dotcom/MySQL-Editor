@@ -196,6 +196,11 @@ def main():
         assert editor._mysql_editor_connection_context == original_context
         assert first._current_connection_context()["profile_id"] == "qa-reporting"
 
+        # Expose the schema tree so Qt delivers the item expansion event in offscreen mode.
+        first.inspector_tabs.setCurrentIndex(0)
+        first.schema_tree.show()
+        app.processEvents()
+
         # Non-active schemas use placeholders and fetch object metadata only on expansion.
         first._fill_schema_tree({
             "ok": True,
