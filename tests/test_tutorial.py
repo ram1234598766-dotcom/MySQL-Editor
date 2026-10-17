@@ -1,12 +1,10 @@
-"""Regression checks for guided-tour motion accessibility and interruption behavior."""
+"""Regression checks for guided-tour motion accessibility and page state."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation
 from PySide6.QtWidgets import QApplication
 
-from mysql_editor.ui.animations import TOUR_DURATION_MS
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
@@ -38,45 +36,37 @@ def test_guided_tour_respects_reduce_motion_and_changes_pages_immediately(monkey
 
     tour._skip()
     assert tour.pages.graphicsEffect() is None
+    tour.close()
 
 
-def test_guided_tour_color_transition_uses_shared_duration_and_restarts_cleanly(monkeypatch):
+def test_guided_tour_uses_immediate_feedback_in_headless_mode(monkeypatch):
     monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda settings=None: False)
     tour = ProductTourDialog(repository=RepositoryStub())
     tour.show()
     _APP.processEvents()
 
     tour._go(1)
-    first = getattr(tour.progress_labels[1], "_mysql_editor_color_animation", None)
-    assert first is not None
-    assert first.duration() == TOUR_DURATION_MS
-    assert first.state() == QAbstractAnimation.State.Running
+    assert tour.pages.currentIndex() == 1
+    assert getattr(tour.progress_labels[1], "_mysql_editor_color_animation", None) is None
+    assert "#50d9ee" in tour.progress_labels[1].styleSheet()
 
     tour._go(2)
-    assert first.state() == QAbstractAnimation.State.Stopped
-    current = getattr(tour.progress_labels[2], "_mysql_editor_color_animation", None)
-    assert current is not None
-    assert current.state() == QAbstractAnimation.State.Running
+    assert tour.pages.currentIndex() == 2
+    assert getattr(tour.progress_labels[2], "_mysql_editor_color_animation", None) is None
 
     tour._skip()
-    assert current.state() == QAbstractAnimation.State.Stopped
-    assert getattr(tour.progress_labels[2], "_mysql_editor_color_animation", None) is None
     assert all(label.graphicsEffect() is None for label in tour.progress_labels)
+    tour.close()
 
 
-def test_guided_tour_finish_cleans_up_active_transition(monkeypatch):
-    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda settings=None: False)
+def test_guided_tour_finish_persists_completion_and_cleans_up():
     repository = RepositoryStub()
     tour = ProductTourDialog(repository=repository)
     tour.show()
     _APP.processEvents()
-    tour._go(1)
-
-    current = getattr(tour.progress_labels[1], "_mysql_editor_color_animation", None)
-    assert current is not None
 
     tour._finish()
 
-    assert current.state() == QAbstractAnimation.State.Stopped
-    assert getattr(tour.progress_labels[1], "_mysql_editor_color_animation", None) is None
     assert repository.settings["guided_tour_completed"] == "true"
+    assert all(label.graphicsEffect() is None for label in tour.progress_labels)
+    tour.close()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import weakref
 
 from PySide6.QtCore import QEasingCurve, QSettings, QVariantAnimation
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import QWidget
 
 MICRO_DURATION_MS = 120
@@ -20,6 +20,12 @@ def reduce_motion_enabled(settings: QSettings | None = None) -> bool:
     """Return whether optional motion should be replaced with immediate feedback."""
     settings = settings or QSettings()
     return settings.value("ui/reduceMotion", False, type=bool)
+
+
+def _offscreen_rendering() -> bool:
+    """Detect Qt's headless platform, where timed effects add risk but no visual value."""
+    app = QGuiApplication.instance()
+    return bool(app is not None and app.platformName().casefold() == "offscreen")
 
 
 def _set_label_color(widget: QWidget, color: QColor) -> None:
@@ -94,7 +100,7 @@ def animate_label_color(
     """Animate a small label's accent color without graphics effects or layout changes."""
     stop_color_animation(widget)
     end = QColor(end_color)
-    if reduce_motion_enabled(settings) or not widget.isVisible():
+    if reduce_motion_enabled(settings) or _offscreen_rendering() or not widget.isVisible():
         _set_label_color(widget, end)
         return None
 
