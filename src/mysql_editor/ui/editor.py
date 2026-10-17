@@ -737,6 +737,18 @@ class SqlEditor(QPlainTextEdit):
             return
         cursor = self.textCursor()
         cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        if not cursor.selectedText():
+            # Qt's WordUnderCursor can be empty when the caret is immediately before
+            # a closing backtick. Probe the previous character so the partial identifier
+            # is replaced rather than having the completion appended to it.
+            text = self.toPlainText()
+            python_position = _python_index_from_utf16(text, cursor.position())
+            if python_position < len(text) and text[python_position] == chr(96):
+                candidate = QTextCursor(self.textCursor())
+                candidate.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
+                candidate.select(QTextCursor.SelectionType.WordUnderCursor)
+                if _IDENTIFIER_COMPLETION.fullmatch(candidate.selectedText()):
+                    cursor = candidate
         cursor.insertText(completion)
         self.setTextCursor(cursor)
 
