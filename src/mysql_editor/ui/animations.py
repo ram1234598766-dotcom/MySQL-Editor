@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
 MICRO_DURATION_MS = 120
 STANDARD_DURATION_MS = 180
+TOUR_DURATION_MS = 260
 
 
 def reduce_motion_enabled(settings: QSettings | None = None) -> bool:
