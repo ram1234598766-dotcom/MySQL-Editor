@@ -611,3 +611,10 @@ Expanded the dependency security gate beyond `requirements.txt`: CI installs the
 ### Active schema session correctness — 17 October 2026
 
 The Phase 4 schema-selection flow now switches the live MySQL session via a worker-thread `USE` operation with safely quoted identifiers. Workspace and saved-profile context are updated only after the server accepts the switch. A rejected switch preserves the previous UI/profile context, and schema switches are refused while a query is running. Regression coverage checks quoted schema names, worker connection-context updates, failed switches, and the UI's context-preservation path. CI and Windows package validation are required before calling this fix complete; physical Windows visual QA remains separate.
+
+
+### Phase 5 export sort/filter acceptance — 17 October 2026
+
+Added `tests/test_export_sort_filter_semantics.py` to exercise the actual numeric-aware result proxy and the SQLite-backed CSV export together. The test sorts the visible preview, applies the app's case-insensitive filter, confirms the source model remains in fetch order, and verifies that CSV still contains every fetched row in that original order. This closes the remaining combined regression gap in the Phase 5 exit criteria.
+
+Related existing coverage includes bounded result-preview rendering, 25,000-row spool export timing, atomic replacement and preservation of an existing destination on failure, temporary-file cleanup, SQL NULL versus empty text, result row counts, per-statement metadata, cancellation/interruption distinctions, partial-script failure, and persistent export feedback. This records automated regression coverage; it does not replace real Windows display-scale QA.
