@@ -115,11 +115,15 @@ class ResultsFilterProxyModel(QSortFilterProxyModel):
     def lessThan(self, left, right):
         left_value = left.data(Qt.ItemDataRole.UserRole)
         right_value = right.data(Qt.ItemDataRole.UserRole)
-        # Explicit comparisons keep SQL NULL after real values in both sort directions.
-        if left_value is None:
-            return False
-        if right_value is None:
-            return True
+        if left_value is None or right_value is None:
+            if left_value is None and right_value is None:
+                return False
+            # QSortFilterProxyModel applies the requested sort direction to lessThan.
+            # Invert the NULL comparison for descending order so NULL stays at bottom.
+            nulls_descending = self.sortOrder() == Qt.SortOrder.DescendingOrder
+            if nulls_descending:
+                return left_value is None
+            return right_value is None
         return self._sort_key(left) < self._sort_key(right)
 
 
