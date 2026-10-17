@@ -707,7 +707,7 @@ def test_delimiter_script_is_rejected_before_opening_a_cursor():
     worker._connection = connection
     worker._report_activity = lambda _message: None
     result = worker._execute_script(
-        "SELECT 1;\\nDELIMITER $$\\n"
+        "SELECT 1;\nDELIMITER $$\n"
         "CREATE PROCEDURE p() BEGIN SELECT 2; END$$"
     )
 

@@ -93,11 +93,11 @@ def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
 
 def test_unsupported_delimiter_directive_is_detected_with_line_number():
     source = (
-        "SELECT 1;\\n"
-        "DELIMITER $$\\n"
-        "CREATE PROCEDURE refresh_stats()\\n"
-        "BEGIN\\n"
-        "  SELECT 2;\\n"
+        "SELECT 1;\n"
+        "DELIMITER $$\n"
+        "CREATE PROCEDURE refresh_stats()\n"
+        "BEGIN\n"
+        "  SELECT 2;\n"
         "END$$"
     )
     assert unsupported_delimiter_directive_line(source) == 2
@@ -110,9 +110,9 @@ def test_unsupported_delimiter_directive_is_detected_with_line_number():
 
 def test_delimiter_like_text_in_comments_and_literals_is_not_a_directive():
     source = (
-        "SELECT 'literal start\\nDELIMITER $$';\\n"
-        "-- DELIMITER //\\n"
-        "/* comment line\\nDELIMITER !\\n*/\\n"
+        "SELECT 'literal start\nDELIMITER $$';\n"
+        "-- DELIMITER //\n"
+        "/* comment line\nDELIMITER !\n*/\n"
         "SELECT delimiter FROM example_table;"
     )
     assert unsupported_delimiter_directive_line(source) is None
@@ -120,10 +120,10 @@ def test_delimiter_like_text_in_comments_and_literals_is_not_a_directive():
 
 
 def test_delimiter_word_inside_an_unfinished_sql_statement_is_not_a_client_command():
-    source = "SELECT\\n  DELIMITER AS a_column\\nFROM example_table;"
+    source = "SELECT\n  DELIMITER AS a_column\nFROM example_table;"
     assert unsupported_delimiter_directive_line(source) is None
 
 
 def test_regular_sql_with_comments_before_delimiter_line_is_still_detected():
-    source = "SELECT 1;\\n-- next client command\\n  delimiter //\\n"
+    source = "SELECT 1;\n-- next client command\n  delimiter //\n"
     assert unsupported_delimiter_directive_line(source) == 3

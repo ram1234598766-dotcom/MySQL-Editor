@@ -179,9 +179,7 @@ def _mask_sql_literals_and_comments(source: str) -> str:
         i += 1
     return "".join(chars)
 
-
-
-_DELIMITER_DIRECTIVE = re.compile(r"(?im)^[ \\t]*DELIMITER[ \\t]+\\S+")
+_DELIMITER_DIRECTIVE = re.compile(r"(?im)^[ \t]*DELIMITER[ \t]+\S+")
 
 
 def unsupported_delimiter_directive_line(source: str) -> int | None:
@@ -191,7 +189,7 @@ def unsupported_delimiter_directive_line(source: str) -> int | None:
         prior_buffer = masked[:match.start()].rsplit(";", 1)[-1]
         if prior_buffer.strip():
             continue
-        return masked.count("\\n", 0, match.start()) + 1
+        return masked.count("\n", 0, match.start()) + 1
     return None
 
 

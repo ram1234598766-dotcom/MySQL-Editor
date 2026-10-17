@@ -300,7 +300,7 @@ def test_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkey
         lambda _parent, title, message, *_args: warnings.append((title, message)),
     )
     script = (
-        "SELECT 1;\\nDELIMITER $$\\n"
+        "SELECT 1;\nDELIMITER $$\n"
         "CREATE PROCEDURE p() BEGIN SELECT 2; END$$"
     )
     try:
