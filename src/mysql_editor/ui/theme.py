@@ -162,7 +162,7 @@ def _system_prefers_dark() -> bool:
             from PySide6.QtCore import QSettings
 
             registry = QSettings(
-                r"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
                 QSettings.Format.NativeFormat,
             )
             return int(registry.value("AppsUseLightTheme", 1)) == 0
