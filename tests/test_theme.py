@@ -87,6 +87,7 @@ def test_light_theme_key_text_states_meet_wcag_aa_contrast():
     assert _contrast_ratio("#B42335", "#F8FAFC") >= 4.5  # danger
     assert _contrast_ratio("#1F6FEB", "#FFFFFF") >= 4.5  # focus ring
 
+
 def test_muted_result_text_token_meets_contrast_in_both_grid_themes():
     dark = color_for_theme("text_muted", "dark")
     light = color_for_theme("text_muted", "light")
