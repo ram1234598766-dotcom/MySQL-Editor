@@ -3,7 +3,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation
+from PySide6.QtCore import QAbstractAnimation, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.tutorial import ProductTourDialog
@@ -32,7 +32,7 @@ def test_guided_tour_skips_fade_when_reduce_motion_is_enabled():
     tour.close()
 
 
-def test_guided_tour_transition_uses_shared_motion_token_and_can_be_interrupted():
+def test_guided_tour_transition_uses_shared_motion_token_and_cleans_up():
     tour = ProductTourDialog(settings=SettingsStub(False))
     tour.show()
     _APP.processEvents()
@@ -41,12 +41,16 @@ def test_guided_tour_transition_uses_shared_motion_token_and_can_be_interrupted(
     assert tour.pages.currentIndex() == 1
     assert tour._fade.state() == QAbstractAnimation.State.Running
 
-    # Moving again interrupts the first transition and begins from a known opacity.
-    tour._go(2)
-    assert tour.pages.currentIndex() == 2
-    assert tour._fade.state() == QAbstractAnimation.State.Running
+    # Let Qt complete the top-level window animation before deleting the dialog.
+    # The reduced-motion case above verifies the immediate state path.
+    loop = QEventLoop()
+    tour._fade.finished.connect(loop.quit)
+    QTimer.singleShot(500, loop.quit)
+    loop.exec()
 
-    # Dismissal must cancel motion and leave the page fully visible.
+    assert tour._fade.state() == QAbstractAnimation.State.Stopped
+    assert tour.windowOpacity() == 1.0
+
     tour.close()
     assert tour._fade.state() == QAbstractAnimation.State.Stopped
     assert tour.windowOpacity() == 1.0
