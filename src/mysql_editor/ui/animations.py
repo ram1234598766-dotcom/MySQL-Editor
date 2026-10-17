@@ -20,6 +20,7 @@ def fade_in(widget: QWidget, settings: QSettings | None = None, duration_ms: int
         previous.stop()
         previous.deleteLater()
         widget._mysql_editor_fade_animation = None
+        widget.setGraphicsEffect(None)
 
     if reduce_motion_enabled(settings) or not widget.isVisible():
         return
