@@ -180,7 +180,7 @@ The local result cache may contain sensitive database contents. Treat it, copied
 ## Schema, history, and snippets
 
 ### Schema Explorer
-Refresh the schema tree to read database names and table/view objects visible to the MySQL account. Double-click a schema to select it as the default schema for this workspace. Double-click a table to request a preview capped at 1,000 rows. The visible objects depend on the privileges of the connected user.
+Refresh the schema tree to read database names and table/view objects visible to the MySQL account. Double-click or press Enter on a schema to select it as the default schema for this workspace. Double-click or press Enter on a table/view to request a preview capped at 1,000 rows. Right-click a schema to refresh/select it or copy its name. Right-click a table/view to copy its safely quoted qualified identifier, open a limited `SELECT * ... LIMIT 1000` in a new unsaved query tab, or request a preview. Generated SQL is not executed automatically. The visible objects depend on the privileges of the connected user.
 
 ### Query History
 Query history is **off by default**. It can be enabled in Settings. When enabled, SQL text, profile label, result status, duration, and timestamp are stored locally after heuristic redaction of common credential-like syntax. Redaction cannot guarantee that every possible secret or sensitive literal is detected. Avoid putting passwords, tokens, or confidential data directly in SQL text.

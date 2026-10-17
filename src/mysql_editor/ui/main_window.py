@@ -24,6 +24,7 @@ from mysql_editor.ui.editor import SqlEditor
 from mysql_editor.ui.find_replace_bar import FindReplaceBar, count_matches
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.result_tools import cell_detail_text, column_headers_tsv, rows_tsv, selected_cells_tsv
+from mysql_editor.ui.schema_tools import qualified_identifier, select_preview_sql
 
 
 class ResultsModel(QAbstractTableModel):
@@ -379,7 +380,9 @@ class MainWindow(QMainWindow):
         self.inspector_tabs.setMaximumWidth(360)
         self.schema_tree = QTreeWidget()
         self.schema_tree.setHeaderHidden(True)
-        self.schema_tree.itemDoubleClicked.connect(self._schema_item_activated)
+        self.schema_tree.itemActivated.connect(self._schema_item_activated)
+        self.schema_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.schema_tree.customContextMenuRequested.connect(self._show_schema_context)
         self.inspector_tabs.addTab(self.schema_tree, "Schema")
         self.history_list = QListWidget()
         self.history_list.itemDoubleClicked.connect(self._history_selected)
@@ -802,6 +805,7 @@ class MainWindow(QMainWindow):
         for database in result.get("databases", []):
             item = QTreeWidgetItem([("▾  " if database == active_schema else "▸  ") + database])
             item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema", "schema": database})
+            item.setToolTip(0, f"Database schema: {database}")
             if database == active_schema:
                 for record in result.get("objects", []):
                     name = record["name"]
@@ -810,6 +814,7 @@ class MainWindow(QMainWindow):
                     child.setData(0, Qt.ItemDataRole.UserRole, {
                         "kind": "table", "schema": database, "table": name, "object_type": kind,
                     })
+                    child.setToolTip(0, f"{kind}: {database}.{name}")
                     item.addChild(child)
                 item.setExpanded(True)
             self.schema_tree.addTopLevelItem(item)
@@ -861,15 +866,89 @@ class MainWindow(QMainWindow):
     def _schema_item_activated(self, item, _column):
         data = item.data(0, Qt.ItemDataRole.UserRole) or {}
         if data.get("kind") == "schema":
-            self.config["default_schema"] = data["schema"]
-            self.refresh_schema()
+            self._use_schema(data.get("schema", ""))
         elif data.get("kind") == "table":
-            self._dispatch("table_preview", {
-                "schema": data["schema"], "table": data["table"],
-            }, {
-                "profile_name": self.profile.get("name", "Connection"),
-                "sql": f"Preview {data['schema']}.{data['table']}",
-            })
+            self._preview_schema_table(data.get("schema", ""), data.get("table", ""))
+
+    def _use_schema(self, schema: str):
+        if not schema:
+            return
+        self.config["default_schema"] = schema
+        self.status.setText(f"Refreshing schema {schema}…")
+        self.refresh_schema()
+
+    def _preview_schema_table(self, schema: str, table: str):
+        if not schema or not table:
+            return
+        self._dispatch("table_preview", {"schema": schema, "table": table}, {
+            "profile_name": self.profile.get("name", "Connection"),
+            "sql": f"Preview {qualified_identifier(schema, table)}",
+        })
+
+    def _generate_select_for_table(self, schema: str, table: str):
+        if not schema or not table:
+            return
+        sql = select_preview_sql(schema, table)
+        self.new_query_tab(sql)
+        editor = self._current_editor()
+        if editor is not None:
+            editor.document().setModified(True)
+            self._update_tab_title(editor)
+            editor.setFocus()
+        self._set_workspace_nav("SQL Editor")
+        self.status.setText(
+            f"Generated a limited SELECT for {qualified_identifier(schema, table)}. "
+            "Review it before execution."
+        )
+
+    def _show_schema_context(self, point):
+        item = self.schema_tree.itemAt(point)
+        if item is None:
+            return
+        self.schema_tree.setCurrentItem(item)
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        kind = data.get("kind")
+        menu = QMenu(self)
+        if kind == "schema":
+            schema = str(data.get("schema", ""))
+            schema_action = menu.addAction(
+                "Refresh this schema" if schema == self._active_schema_name
+                else "Use as default schema and refresh"
+            )
+            copy_action = menu.addAction("Copy schema name")
+            chosen = menu.exec(self.schema_tree.viewport().mapToGlobal(point))
+            if chosen == schema_action:
+                self._use_schema(schema)
+            elif chosen == copy_action:
+                from PySide6.QtWidgets import QApplication
+                QApplication.clipboard().setText(schema)
+                self.status.setText(f"Copied schema name: {schema}")
+            return
+
+        if kind != "table":
+            return
+        schema = str(data.get("schema", ""))
+        table = str(data.get("table", ""))
+        object_type = str(data.get("object_type", "MySQL object"))
+        qualified = qualified_identifier(schema, table)
+        type_action = menu.addAction(f"{object_type} · {qualified}")
+        type_action.setEnabled(False)
+        menu.addSeparator()
+        copy_action = menu.addAction("Copy qualified identifier")
+        select_action = menu.addAction("Create SELECT preview in new tab")
+        preview_action = menu.addAction("Preview table now")
+        refresh_action = menu.addAction("Refresh schema")
+        chosen = menu.exec(self.schema_tree.viewport().mapToGlobal(point))
+        if chosen == copy_action:
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(qualified)
+            self.status.setText(f"Copied {qualified}")
+        elif chosen == select_action:
+            self._generate_select_for_table(schema, table)
+        elif chosen == preview_action:
+            self._preview_schema_table(schema, table)
+        elif chosen == refresh_action:
+            self._use_schema(schema)
 
     def _select_result(self, index: int, total_duration: int | None = None):
         if index < 0 or index >= len(self._query_results):
