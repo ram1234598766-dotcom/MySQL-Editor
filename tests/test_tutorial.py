@@ -22,7 +22,7 @@ class RepositoryStub:
 
 
 def test_guided_tour_respects_reduce_motion_and_changes_pages_immediately(monkeypatch):
-    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda: True)
+    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda settings=None: True)
     tour = ProductTourDialog(repository=RepositoryStub())
     tour.show()
     _APP.processEvents()
@@ -41,7 +41,7 @@ def test_guided_tour_respects_reduce_motion_and_changes_pages_immediately(monkey
 
 
 def test_guided_tour_color_transition_uses_shared_duration_and_restarts_cleanly(monkeypatch):
-    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda: False)
+    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda settings=None: False)
     tour = ProductTourDialog(repository=RepositoryStub())
     tour.show()
     _APP.processEvents()
@@ -65,7 +65,7 @@ def test_guided_tour_color_transition_uses_shared_duration_and_restarts_cleanly(
 
 
 def test_guided_tour_finish_cleans_up_active_transition(monkeypatch):
-    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda: False)
+    monkeypatch.setattr("mysql_editor.ui.animations.reduce_motion_enabled", lambda settings=None: False)
     repository = RepositoryStub()
     tour = ProductTourDialog(repository=repository)
     tour.show()
