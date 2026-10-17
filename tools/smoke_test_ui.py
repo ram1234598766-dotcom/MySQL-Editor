@@ -88,6 +88,11 @@ def main():
         assert first.commit_button.accessibleName() == "Commit active transaction"
         assert first.rollback_button.accessibleName() == "Roll back active transaction"
         assert first.export_button.accessibleName() == "Export fetched result rows to CSV"
+        export_semantics = "preserves MySQL fetch order and includes every fetched row"
+        assert export_semantics in first.export_button.accessibleDescription()
+        assert "ignores grid sorting and the visible-row filter" in first.export_button.accessibleDescription()
+        assert export_semantics in first.result_filter.toolTip()
+        assert "fetch order" in first.result_grid.accessibleDescription().lower()
         assert first.font().pointSize() >= 0
         assert editor.font().pointSize() == 10
 

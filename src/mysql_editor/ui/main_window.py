@@ -41,6 +41,12 @@ from mysql_editor.recent_files import (
 )
 
 
+CSV_EXPORT_SEMANTICS = (
+    "CSV export preserves MySQL fetch order and includes every fetched row; "
+    "it ignores grid sorting and the visible-row filter."
+)
+
+
 class ResultsModel(QAbstractTableModel):
     def __init__(self, headers=None, rows=None, parent=None):
         super().__init__(parent)
@@ -365,7 +371,7 @@ class MainWindow(QMainWindow):
         self.result_filter.setMinimumWidth(150)
         self.result_filter.setMaximumWidth(250)
         self.result_filter.setToolTip(
-            "Filters the visible grid only. CSV export still includes every fetched row."
+            "Filters the visible preview only. " + CSV_EXPORT_SEMANTICS
         )
         self.result_filter.textChanged.connect(self._filter_results)
         self.query_meta = QLabel("Ready")
@@ -388,9 +394,7 @@ class MainWindow(QMainWindow):
         self.rollback_button.clicked.connect(lambda: self._dispatch("rollback", {}))
         self.export_button = QPushButton("↓  Export CSV")
         self.export_button.setAccessibleName("Export fetched result rows to CSV")
-        self.export_button.setAccessibleDescription(
-            "Export all rows fetched for the selected result. The quick filter only changes the visible preview."
-        )
+        self.export_button.setAccessibleDescription(CSV_EXPORT_SEMANTICS)
         self.export_button.clicked.connect(self.export_results)
         toolbar.addWidget(self.results_title)
         toolbar.addWidget(self.result_picker)
@@ -407,7 +411,7 @@ class MainWindow(QMainWindow):
         self.result_grid.setAccessibleName("SQL query results table")
         self.result_grid.setAccessibleDescription(
             "Use the arrow keys to navigate cells. Double-click for full cell details. "
-            "CSV export includes every fetched row, regardless of the visible-row filter."
+            + CSV_EXPORT_SEMANTICS
         )
         self.result_proxy = ResultsFilterProxyModel(self)
         self.result_proxy.setSourceModel(self.result_model)
@@ -1609,10 +1613,13 @@ class MainWindow(QMainWindow):
             row_count = int(result.get("row_count", 0) or 0)
             path = str(result.get("path") or "the chosen destination")
             if update_status:
-                self.status.setText(f"CSV exported · {row_count:,} row(s)")
+                self.status.setText(
+                    f"CSV exported · {row_count:,} row(s) in MySQL fetch order"
+                )
             QMessageBox.information(
                 self, "CSV export complete",
-                f"Exported {row_count:,} row(s) to:\n{path}",
+                f"Exported {row_count:,} row(s) in MySQL fetch order to:\n{path}\n\n"
+                "Grid sorting and the visible-row filter do not change the exported rows.",
             )
         else:
             QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
@@ -1680,7 +1687,7 @@ class MainWindow(QMainWindow):
         copy_rows_action = menu.addAction("Copy selected rows")
         copy_headers_action = menu.addAction("Copy column headers")
         menu.addSeparator()
-        export_action = menu.addAction("Export result to CSV")
+        export_action = menu.addAction("Export fetched result to CSV (MySQL fetch order)")
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
         if chosen == details_action:
             self.show_cell_details(clicked)
