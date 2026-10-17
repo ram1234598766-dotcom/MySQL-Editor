@@ -145,6 +145,12 @@ def _python_index_from_utf16(text: str, utf16_position: int) -> int:
     return len(text)
 
 
+def _qt_position_from_python_index(text: str, python_index: int) -> int:
+    """Translate a Python string index to a Qt cursor offset in UTF-16 code units."""
+    bounded_index = max(0, min(python_index, len(text)))
+    return sum(2 if ord(char) > 0xFFFF else 1 for char in text[:bounded_index])
+
+
 def _cursor_is_in_sql_code(
     text: str, cursor_position: int, *, allow_backtick_identifier: bool = False
 ) -> bool:
@@ -736,19 +742,25 @@ class SqlEditor(QPlainTextEdit):
         if self._completer.widget() is not self:
             return
         cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
-        if not cursor.selectedText():
-            # Qt's WordUnderCursor can be empty when the caret is immediately before
-            # a closing backtick. Probe the previous character so the partial identifier
-            # is replaced rather than having the completion appended to it.
-            text = self.toPlainText()
-            python_position = _python_index_from_utf16(text, cursor.position())
-            if python_position < len(text) and text[python_position] == chr(96):
-                candidate = QTextCursor(self.textCursor())
-                candidate.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
-                candidate.select(QTextCursor.SelectionType.WordUnderCursor)
-                if _IDENTIFIER_COMPLETION.fullmatch(candidate.selectedText()):
-                    cursor = candidate
+        text = self.toPlainText()
+        python_position = _python_index_from_utf16(text, cursor.position())
+
+        # Select the identifier token explicitly instead of relying on Qt's
+        # WordUnderCursor at punctuation boundaries such as a closing backtick.
+        start = end = python_position
+        while start > 0 and re.fullmatch(r"[A-Za-z0-9_$]", text[start - 1]):
+            start -= 1
+        while end < len(text) and re.fullmatch(r"[A-Za-z0-9_$]", text[end]):
+            end += 1
+
+        if start < end:
+            cursor.setPosition(_qt_position_from_python_index(text, start))
+            cursor.setPosition(
+                _qt_position_from_python_index(text, end),
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+        else:
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
         cursor.insertText(completion)
         self.setTextCursor(cursor)
 

@@ -267,12 +267,14 @@ def test_backtick_quoted_column_completion_scopes_to_the_qualified_table_and_ins
         },
     )
     source = (
+        "SELECT '😀'; "
         "SELECT o.`order_i` FROM `orders` AS o "
         "JOIN `customers` AS c ON c.customer_id = o.order_id"
     )
     editor.setPlainText(source)
     cursor = editor.textCursor()
-    cursor.setPosition(source.index("order_i") + len("order_i"))
+    # Qt counts UTF-16 code units, so the astral emoji adds one extra cursor unit.
+    cursor.setPosition(source.index("order_i") + len("order_i") + 1)
     editor.setTextCursor(cursor)
 
     candidates = set(editor._context_completion_words())
