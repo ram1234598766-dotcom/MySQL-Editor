@@ -642,3 +642,26 @@ Automated evidence for code commit `53218aed6b218925aec450bcb44796e462a9bcd6`:
 **Remaining manual gates (not verified by CI):** physical-monitor Windows DPI behavior across real monitors, full keyboard-only walkthrough of every popup/menu/tree/result operation, a screen-reader spot check (for example, Narrator), and the actual PC's Credential Manager and MySQL/TLS environment. The screenshots use simulated Qt scaling on a native Windows runner and synthetic data; they are not a substitute for a hands-on acceptance pass.
 
 This phase's implementation and automated checks are complete. The manual Windows acceptance items remain part of the release-candidate gate in Phase 8. Preview binaries remain unsigned unless the specific release states otherwise; no Authenticode signing is claimed.
+
+### Phase 7 verification record — 17 October 2026
+
+**Automated status:** PASS for code commit `cc14e703fc815153a2add8f05f6dff7828df6125`. The implementation, tests, and packaged Windows build ran against this same source commit.
+
+Completed and regression-tested:
+- Guarded query cancellation with task, connection ID, and statement-generation checks before and immediately before dispatching `KILL QUERY`.
+- Moved network control-connection setup outside the worker-state lock while keeping the final statement check and cancellation dispatch serialized. A regression test simulates a statement transition while the control connection is opening.
+- Removed nested temporary result-cache artifacts during worker cleanup.
+- Expanded redaction for common MySQL account/password syntax in surfaced database errors.
+- Audited declared runtime dependencies and the installed test/build environment.
+- Separated read-only Windows build permissions from release publication permissions; pinned GitHub Actions to immutable SHAs and checked Dependabot's weekly updates.
+- Kept performance smoke budgets for startup, large SQL buffers, result previews, schema-column handling and disk-spooled export.
+
+Automated evidence for code commit `cc14e703fc815153a2add8f05f6dff7828df6125`:
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39053534568) — **PASS**: lint, Python compilation, unit tests on Python 3.12/3.13/3.14, legacy-import guard, MySQL 8.4 integration and Windows Qt UI smoke.
+- [Dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39053534463) — **PASS**.
+- [Windows package build](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39053534529) — **PASS**: application-folder package, portable EXE, Inno Setup installer, silent install/uninstall and shortcut cleanup, packaged application startup checks, output verification, CycloneDX SBOM, third-party license inventory, SHA-256 manifest and successful `MySQLEditor-Windows` Actions artifact upload (about 220 MB).
+
+**Not claimed as complete:** the generated Windows build is unsigned. Physical-PC validation is still required for real multi-monitor/high-DPI rendering, a full keyboard-only walkthrough, a Narrator/screen-reader spot check, actual Windows Credential Manager behavior, and external MySQL/TLS configurations. Simulated scaling captures and hosted-runner smoke tests do not replace these checks.
+
+The automated Phase 7 exit gate is complete. Phase 8 remains a separate release-candidate/manual-Windows-acceptance phase; do not describe the product as publisher-verified or fully release-certified until those checks are recorded.
+
