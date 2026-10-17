@@ -113,13 +113,13 @@ QLabel#brandSubtitle { color: #9cb0cc; font-size: 9px; font-weight: 650; letter-
 QLabel#logoMark { color: #47c8e1; font-size: 28px; font-weight: 700; }
 QLabel#pageTitle { font-size: @TYPE_PAGE_TITLE@px; font-weight: 700; }
 QLabel#panelTitle { font-size: @TYPE_PANEL_TITLE@px; font-weight: 650; }
-QLabel#sectionLabel { color: #aabbd2; font-size: 10px; font-weight: 700; padding: 4px 8px; }
+QLabel#sectionLabel { color: #aabbd2; font-size: @TYPE_CAPTION@px; font-weight: 700; padding: 4px 8px; }
 QLabel#connectionBadge { color: #3bd49b; background: #142d2b; border: 1px solid #426d62; border-radius: 8px; padding: 7px 10px; }
 QLabel#connectionBadge[connectionState="lost"] { color: #F07886; background: #3a1f26; border: 1px solid #8f3541; border-radius: 8px; padding: 7px 10px; }
 QWidget#statusStrip { background: #121a27; border-top: 1px solid #354760; }
 QLabel#statusBar { background: transparent; color: #c0ccdc; border: none; padding: 7px 13px; }
-QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: 10px; }
-QLabel#securityNotice, QFrame#securityCard { background: #151f2e; border: 1px solid #405675; border-radius: 9px; padding: 10px; color: #c0ccdc; }
+QLabel#editorPosition { background: transparent; color: #A6B6CB; border: none; padding: 7px 13px; font-family: "Cascadia Code"; font-size: @TYPE_CAPTION@px; }
+QLabel#securityNotice, QFrame#securityCard { background: #151f2e; border: 1px solid #405675; border-radius: @RADIUS_PANEL@px; padding: 10px; color: #c0ccdc; }
 QFrame#separator { color: #40516a; max-height: 1px; }
 QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTreeWidget, QListWidget {
   background: #080e17; color: #e8f1ff; border: 1px solid #405675;
@@ -142,24 +142,24 @@ QToolButton#navButton:hover { background: #18273b; color: #eef6ff; border-color:
 QToolButton#navButton:checked { background: #132b42; color: #62dff0; border: 1px solid #285c77; }
 QToolButton#navButton:focus { border: 1px solid #5bbdff; }
 QLabel#navHint { color: #7187a3; font-size: 9px; font-weight: 650; letter-spacing: 1px; padding-right: 5px; }
-QLabel#connectionDetails { color: #a7bad1; font-size: 10px; }
+QLabel#connectionDetails { color: #a7bad1; font-size: @TYPE_CAPTION@px; }
 QWidget#findReplaceBar { background: #101927; border: 1px solid #26364B; border-radius: @RADIUS_BUTTON@px; }
-QWidget#findReplaceBar QLabel#findMatchCount { color: #A6B6CB; font-size: 10px; padding: 4px; }
+QWidget#findReplaceBar QLabel#findMatchCount { color: #A6B6CB; font-size: @TYPE_CAPTION@px; padding: 4px; }
 QWidget#findReplaceBar QPushButton { padding: 5px 9px; min-height: 16px; }
 QWidget#findReplaceBar QCheckBox { color: #A6B6CB; spacing: 6px; }
 QSplitter::handle { background: #263e58; width: @SIZE_SPLITTER_HANDLE@px; height: @SIZE_SPLITTER_HANDLE@px; }
 QSplitter::handle:hover { background: #4a9bff; }
-QLabel#tourEyebrow { color: #58dcec; font-weight: 700; font-size: 10px; letter-spacing: 1.2px; }
-QLabel#tourStep { color: #91a9c4; font-weight: 700; font-size: 10px; }
+QLabel#tourEyebrow { color: #58dcec; font-weight: 700; font-size: @TYPE_CAPTION@px; letter-spacing: 1.2px; }
+QLabel#tourStep { color: #91a9c4; font-weight: 700; font-size: @TYPE_CAPTION@px; }
 QLabel#tourTitle { color: #f0f6ff; font-size: 23px; font-weight: 700; }
 QFrame#tourCard { background: #111d2d; border: 1px solid #2d425b; border-radius: @RADIUS_FEATURE@px; }
-QLabel#tourNumber { color: #5ddbec; font-size: 10px; font-weight: 750; }
-QLabel#tourCardTitle { color: #edf5ff; font-weight: 650; font-size: 12px; }
+QLabel#tourNumber { color: #5ddbec; font-size: @TYPE_CAPTION@px; font-weight: 750; }
+QLabel#tourCardTitle { color: #edf5ff; font-weight: 650; font-size: @TYPE_BODY@px; }
 QLabel#tourCardBody { color: #adc0d5; font-size: 11px; }
 QWidget#tourPage { background: transparent; }
 QLabel#tourProgress { padding: 0 2px; }
 QLabel#tourProgress[current="true"] { color: #58dcec; font-size: 14px; }
-QLabel#tourProgress[current="false"] { color: #7187a3; font-size: 12px; }
+QLabel#tourProgress[current="false"] { color: #7187a3; font-size: @TYPE_BODY@px; }
 QTabWidget::pane { background: #090f19; border: 1px solid #405675; border-radius: 7px; top: -1px; }
 QTabBar::tab { background: #172235; color: #b6c5d9; padding: @SPACE_TAB_VERTICAL@px @SPACE_TAB_HORIZONTAL@px; border: 1px solid #354760; border-top-left-radius: @RADIUS_CONTROL@px; border-top-right-radius: @RADIUS_CONTROL@px; margin-right: 3px; }
 QTabBar::tab:selected { background: #090f19; color: #e8f1ff; border-bottom-color: #090f19; }
@@ -196,9 +196,12 @@ _STYLE_METRIC_VALUES = {
     "@TYPE_BRAND_TITLE@": TYPOGRAPHY["brand_title_px"],
     "@TYPE_PAGE_TITLE@": TYPOGRAPHY["page_title_px"],
     "@TYPE_PANEL_TITLE@": TYPOGRAPHY["panel_title_px"],
+    "@TYPE_CAPTION@": TYPOGRAPHY["caption_px"],
+    "@TYPE_BODY@": TYPOGRAPHY["body_px"],
     "@RADIUS_COMPACT@": RADII["compact"],
     "@RADIUS_CONTROL@": RADII["control"],
     "@RADIUS_BUTTON@": RADII["button"],
+    "@RADIUS_PANEL@": RADII["panel"],
     "@RADIUS_FEATURE@": RADII["feature"],
     "@SIZE_BUTTON_MIN_HEIGHT@": COMPONENT_SIZES["button_min_height"],
     "@SIZE_TREE_ITEM_MIN_HEIGHT@": COMPONENT_SIZES["tree_item_min_height"],

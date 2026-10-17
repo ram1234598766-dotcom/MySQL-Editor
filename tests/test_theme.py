@@ -143,8 +143,11 @@ def test_design_metrics_are_named_and_resolved_into_shared_stylesheet():
     assert TYPOGRAPHY["app_family"] == "Segoe UI"
     assert TYPOGRAPHY["app_size_pt"] == 9
     assert TYPOGRAPHY["dialog_title_px"] == 20
+    assert TYPOGRAPHY["caption_px"] == 10
+    assert TYPOGRAPHY["body_px"] == 12
     assert RADII["button"] == 7
     assert RADII["control"] == 6
+    assert RADII["panel"] == 9
     assert COMPONENT_SIZES["button_min_height"] == 19
     assert COMPONENT_SIZES["tree_item_min_height"] == 25
     assert COMPONENT_SIZES["checkbox_indicator"] == 16
