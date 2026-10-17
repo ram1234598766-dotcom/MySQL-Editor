@@ -454,6 +454,19 @@ class MainWindow(QMainWindow):
         self.result_message.setAccessibleName("Query result summary and details")
         self.result_message.setWordWrap(True)
         result_layout.addWidget(self.result_message)
+        self.export_feedback = QLabel("")
+        self.export_feedback.setObjectName("statusSuccess")
+        self.export_feedback.setAccessibleName("CSV export status")
+        self.export_feedback.setAccessibleDescription(
+            "Persistent feedback for the most recent CSV export; errors remain visible until replaced."
+        )
+        self.export_feedback.setWordWrap(True)
+        self.export_feedback.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self.export_feedback.hide()
+        result_layout.addWidget(self.export_feedback)
         self.editor_results_split = QSplitter(Qt.Orientation.Vertical)
         self.editor_results_split.setObjectName("editorResultsSplit")
         self.editor_results_split.addWidget(self.editors)
@@ -1698,21 +1711,47 @@ class MainWindow(QMainWindow):
             self.status.setText(error)
 
     def _show_export_notification(self, result: dict, *, update_status: bool = True) -> None:
+        """Show persistent, non-modal feedback without interrupting query work."""
         if result.get("ok"):
-            row_count = int(result.get("row_count", 0) or 0)
+            try:
+                row_count = max(0, int(result.get("row_count", 0) or 0))
+            except (TypeError, ValueError):
+                row_count = 0
             path = str(result.get("path") or "the chosen destination")
+            self.export_feedback.setObjectName("statusSuccess")
+            self.export_feedback.setText(
+                f"CSV export complete · {row_count:,} row(s) saved to {path}. "
+                "Export preserves MySQL fetch order; grid sorting and the visible-row filter "
+                "do not change which rows are included."
+            )
+            self.export_feedback.setToolTip(
+                f"CSV saved to: {path}\n{CSV_EXPORT_NULL_SEMANTICS}"
+            )
+            self.export_feedback.setAccessibleDescription(
+                f"CSV export completed successfully. {row_count:,} row(s). "
+                f"Saved to {path}. {CSV_EXPORT_SEMANTICS}"
+            )
             if update_status:
                 self.status.setText(
-                    f"CSV exported · {row_count:,} row(s) in MySQL fetch order"
+                    f"CSV exported · {row_count:,} row(s); saved path shown in Results."
                 )
-            QMessageBox.information(
-                self, "CSV export complete",
-                f"Exported {row_count:,} row(s) in MySQL fetch order to:\n{path}\n\n"
-                "Grid sorting and the visible-row filter do not change the exported rows.\n\n"
-                + CSV_EXPORT_NULL_SEMANTICS,
-            )
         else:
-            QMessageBox.warning(self, "CSV export", result.get("error", "Export failed."))
+            error = redact_secrets(str(result.get("error") or "Export failed.")).strip()
+            if not error:
+                error = "Export failed."
+            self.export_feedback.setObjectName("statusDanger")
+            self.export_feedback.setText(f"CSV export failed · {error}")
+            self.export_feedback.setToolTip(error)
+            self.export_feedback.setAccessibleDescription(
+                f"CSV export failed. Error details: {error}"
+            )
+            if update_status:
+                self.status.setText("CSV export failed · see details in Results.")
+
+        style = self.export_feedback.style()
+        style.unpolish(self.export_feedback)
+        style.polish(self.export_feedback)
+        self.export_feedback.setVisible(True)
 
     def _flush_deferred_export_notifications(self) -> None:
         """Show export feedback only after the newer query has completed."""
@@ -1761,6 +1800,13 @@ class MainWindow(QMainWindow):
             self, "Export result grid", "mysql-query-results.csv", "CSV files (*.csv)"
         )
         if path:
+            # Clear stale feedback only once the user has committed to a new export.
+            self.export_feedback.clear()
+            self.export_feedback.hide()
+            self.export_feedback.setToolTip("")
+            self.export_feedback.setAccessibleDescription(
+                "CSV export status. Results will appear here when the export finishes."
+            )
             self._dispatch("export_csv", {"result_id": self._current_result_id, "path": path})
 
     def _show_result_context(self, point):
