@@ -124,7 +124,9 @@ def main():
         normalized_recent = os.path.abspath(recent_source)
         stored_recent_paths = first._recent_sql_paths()
         assert len(stored_recent_paths) == 1
-        assert os.path.normcase(stored_recent_paths[0]) == os.path.normcase(normalized_recent)
+        # Short Windows paths/aliases can differ from canonicalized paths but identify
+        # the same file; compare file identity instead of spelling.
+        assert Path(stored_recent_paths[0]).samefile(recent_source)
         assert private_sql not in repr(first._settings.value("ui/recentSqlFiles", []))
         first._refresh_recent_sql_menu()
         assert any(action.toolTip() == normalized_recent for action in first.recent_sql_menu.actions())
