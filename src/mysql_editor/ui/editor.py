@@ -410,6 +410,9 @@ class SqlEditor(QPlainTextEdit):
         self._completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         self._completer.setMaxVisibleItems(14)
         self._completer.setWrapAround(False)
+        self._completer.popup().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # The editor must retain strong keyboard focus while the popup is visible.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._completer.activated.connect(self.insert_completion)
         self._refresh_completions()
 
