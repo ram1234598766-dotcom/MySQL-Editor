@@ -248,15 +248,15 @@ def test_parentheses_auto_pair_wraps_selected_expression_without_losing_selectio
 
 def test_parentheses_are_not_auto_paired_inside_strings_or_comments():
     cases = [
-        ("SELECT 'value'", len("SELECT 'val"), "SELECT 'val("),
-        ('SELECT "value"', len('SELECT "val'), 'SELECT "val('),
-        ("SELECT " + chr(96) + "column" + chr(96), len("SELECT " + chr(96) + "col"),
-         "SELECT " + chr(96) + "col("),
-        ("SELECT value /* comment */", len("SELECT value /* com"), "SELECT value /* com("),
-        ("SELECT value -- comment", len("SELECT value -- com"), "SELECT value -- com("),
-        ("SELECT value # comment", len("SELECT value # com"), "SELECT value # com("),
+        ("SELECT 'value'", len("SELECT 'val")),
+        ('SELECT "value"', len('SELECT "val')),
+        ("SELECT " + chr(96) + "column" + chr(96), len("SELECT " + chr(96) + "col")),
+        ("SELECT value /* comment */", len("SELECT value /* com")),
+        ("SELECT value -- comment", len("SELECT value -- com")),
+        ("SELECT value # comment", len("SELECT value # com")),
     ]
-    for source, position, expected in cases:
+    for source, position in cases:
+        expected = source[:position] + "(" + source[position:]
         editor = SqlEditor()
         editor.setPlainText(source)
         cursor = editor.textCursor()

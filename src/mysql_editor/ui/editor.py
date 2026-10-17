@@ -148,7 +148,7 @@ def _is_sql_code_position(text: str, cursor_position: int) -> bool:
             continue
 
         if quote is not None:
-            if char == "\\\\":
+            if char == "\\":
                 index += 2
                 continue
             if char == quote:
