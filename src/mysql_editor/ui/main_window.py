@@ -1008,15 +1008,15 @@ class MainWindow(QMainWindow):
                 if risk == "high":
                     high.append((statement_number, explanation))
             if high:
-                reasons = "\\n".join(
+                reasons = "\n".join(
                     f"Statement {number}: {explanation}"
                     for number, explanation in high
                 )
                 answer = QMessageBox.warning(
                     self,
                     "High-impact SQL script",
-                    f"The script contains {len(high)} high-impact statement(s).\\n\\n"
-                    f"{reasons}\\n\\n"
+                    f"The script contains {len(high)} high-impact statement(s).\n\n"
+                    f"{reasons}\n\n"
                     "Review the full script and its scope before continuing. "
                     "This advisory is a safeguard, not a substitute for MySQL privileges.",
                     QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,

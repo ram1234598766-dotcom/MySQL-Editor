@@ -213,9 +213,9 @@ def test_multi_statement_high_impact_warning_numbers_risks_without_echoing_sql(
         title, message = warnings[0]
         assert title == "High-impact SQL script"
         assert "2 high-impact statement(s)" in message
-        assert "Statement 2:" in message
+        assert "\nStatement 2:" in message
         assert "DELETE has no top-level WHERE clause" in message
-        assert "Statement 3:" in message
+        assert "\nStatement 3:" in message
         assert "DROP can change schema" in message
         assert "private-value" not in message
         assert "audit_log" not in message
