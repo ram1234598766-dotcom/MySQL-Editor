@@ -309,10 +309,29 @@ class DatabaseWorker(QThread):
         if action == "disconnect":
             self._close_connection()
             return {"ok": True}
-        if action in {"query", "schema", "schema_objects", "table_preview", "commit", "rollback"} and self._connection is None:
+        if action in {"query", "schema", "schema_objects", "table_preview", "use_schema", "commit", "rollback"} and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
             return self._execute_script(str(payload.get("sql", "")))
+        if action == "use_schema":
+            # Switch the live session, not just the UI's idea of its default schema.
+            # MySQL identifiers cannot be bound as values, so quote the name explicitly.
+            schema = str(payload.get("schema", "") or "")
+            if not schema.strip():
+                return {"ok": False, "error": "A database schema name is required."}
+            cursor = self._connection.cursor()
+            try:
+                cursor.execute(f"USE {safe_identifier(schema)}")
+            finally:
+                cursor.close()
+            with self._lock:
+                if self._connection_config is not None:
+                    self._connection_config["database"] = schema
+            return {
+                "ok": True,
+                "schema": schema,
+                "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            }
         if action == "schema":
             return self._read_schema(str(payload.get("schema", "")))
         if action == "schema_objects":
