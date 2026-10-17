@@ -214,6 +214,30 @@ def main():
         assert submitted and submitted[-1][0] == "query"
         assert editor._mysql_editor_connection_context["profile_id"] == "qa-reporting"
 
+        # A pending transaction must be confirmed before a replacement connection is queued.
+        first._transaction_open = True
+        with patch("mysql_editor.ui.main_window.ConnectionDialog") as dialog_type:
+            first.open_connection_dialog()
+            before_connect = dialog_type.call_args.kwargs["before_connect"]
+            assert callable(before_connect)
+            candidate_config = {
+                "profile_id": "qa-production", "profile_name": "Production",
+                "host": "prod.example", "port": 3306, "username": "admin",
+                "tls_mode": "Automatic TLS", "default_schema": "main",
+            }
+            with patch(
+                "mysql_editor.ui.main_window.QMessageBox.warning",
+                return_value=QMessageBox.StandardButton.Cancel,
+            ) as warning:
+                assert before_connect(candidate_config) is False
+                assert "uncommitted transaction" in warning.call_args.args[1].lower()
+                assert first._transaction_open is True
+            with patch(
+                "mysql_editor.ui.main_window.QMessageBox.warning",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                assert before_connect(candidate_config) is True
+
         first.close()
         first_repo.close()
         settings.sync()
