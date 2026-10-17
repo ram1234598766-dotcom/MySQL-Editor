@@ -238,6 +238,15 @@ def main():
             ):
                 assert before_connect(candidate_config) is True
 
+        # A delayed progress signal from a finished task must be ignored.
+        with patch.object(first, "_on_activity") as consume_activity:
+            first._on_task_activity("already-finished-query", "Fetched 99,999 result row(s) so far…")
+            consume_activity.assert_not_called()
+            first._jobs["active-query-smoke"] = ("query", {})
+            first._on_task_activity("active-query-smoke", "Running 1 SQL statement(s)…")
+            consume_activity.assert_called_once_with("Running 1 SQL statement(s)…")
+            first._jobs.pop("active-query-smoke", None)
+
         first.close()
         first_repo.close()
         settings.sync()
