@@ -626,11 +626,21 @@ class SqlEditor(QPlainTextEdit):
             if comma_match:
                 clause_prefix = statement_prefix[:comma_match.start()]
                 last_select = max(
-                    (match.start() for match in re.finditer(r"\bSELECT\b", clause_prefix, re.IGNORECASE)),
+                    (
+                        match.start()
+                        for match in re.finditer(
+                            r"\bSELECT\b", clause_prefix, re.IGNORECASE
+                        )
+                    ),
                     default=-1,
                 )
                 last_from = max(
-                    (match.start() for match in re.finditer(r"\bFROM\b", clause_prefix, re.IGNORECASE)),
+                    (
+                        match.start()
+                        for match in re.finditer(
+                            r"\bFROM\b", clause_prefix, re.IGNORECASE
+                        )
+                    ),
                     default=-1,
                 )
                 if last_select > last_from:
