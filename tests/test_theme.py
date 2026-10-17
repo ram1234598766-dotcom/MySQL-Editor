@@ -13,7 +13,8 @@ def test_dark_theme_tokens_are_defined_and_stylesheet_has_no_unresolved_tokens()
     assert set(TOKENS) == expected
     assert all(value.startswith("#") and len(value) == 7 for value in TOKENS.values())
     assert "{" in STYLESHEET and "QMainWindow" in STYLESHEET
-    assert not any("{" + key + "}" in STYLESHEET for key in expected)
+    assert not any(f"@{key}@" in STYLESHEET for key in expected)
+    assert any(f"@{key}@" in STYLESHEET_TEMPLATE for key in expected)
 
 
 def test_dark_theme_uses_semantic_palette_values():
@@ -39,10 +40,10 @@ def test_light_theme_translates_shared_component_styles_and_preserves_contrast()
     light = stylesheet_for_theme("light")
     assert dark == STYLESHEET
     assert light != STYLESHEET
-    assert "QMainWindow, QDialog, QWidget { background: #F8FAFC; color: #243246; }" in light
+    assert "QMainWindow, QDialog, QWidget { background: #F8FAFC; color: #263548; }" in light
     assert "QPushButton#primaryButton { background: #087E8B; color: #F8FAFC;" in light
     assert "QMenu::item:selected { background: #225EA8; color: white; }" in light
-    assert "QTreeWidget::item:selected, QListWidget::item:selected { background: #D6E6F9;" in light
+    assert "QTreeWidget::item:selected, QListWidget::item:selected { background: #D6E3F2;" in light
     assert "#0B111B" not in light
     assert "#080e17" not in light
 
@@ -128,9 +129,24 @@ def test_guided_tour_progress_states_are_styled_by_shared_theme_in_both_palettes
 
     assert 'QLabel#tourProgress[current="true"]' in dark
     assert 'QLabel#tourProgress[current="false"]' in dark
-    assert "color: #58dcec; font-size: 14px;" in dark
-    assert "color: #7187a3; font-size: 12px;" in dark
+    assert "color: #37C7D8; font-size: 14px;" in dark
+    assert "color: #8093AC; font-size: 12px;" in dark
     assert 'QLabel#tourProgress[current="true"]' in light
     assert 'QLabel#tourProgress[current="false"]' in light
     assert "color: #087E8B; font-size: 14px;" in light
-    assert "color: #63748A; font-size: 12px;" in light
+    assert "color: #65748A; font-size: 12px;" in light
+
+
+def test_core_application_surfaces_resolve_from_semantic_tokens():
+    assert f"QMainWindow, QDialog, QWidget {{ background: {TOKENS['window_bg']}; color: {TOKENS['text_primary']}; }}" in STYLESHEET
+    assert f"QMenuBar {{ background: {TOKENS['surface_base']}; color: {TOKENS['text_primary']};" in STYLESHEET
+    assert f"QPushButton#primaryButton {{ background: {TOKENS['accent_primary']}; color: {TOKENS['window_bg']};" in STYLESHEET
+    assert f"QTabWidget::pane {{ background: {TOKENS['surface_base']}; border: 1px solid {TOKENS['border_subtle']};" in STYLESHEET
+    assert f"QTreeWidget::item:selected, QListWidget::item:selected {{ background: {TOKENS['surface_selected']};" in STYLESHEET
+
+
+def test_tour_progress_token_colors_keep_wcag_aa_contrast_in_both_themes():
+    assert _contrast_ratio(TOKENS["accent_primary"], TOKENS["window_bg"]) >= 4.5
+    assert _contrast_ratio(TOKENS["text_muted"], TOKENS["window_bg"]) >= 4.5
+    assert _contrast_ratio("#087E8B", "#F8FAFC") >= 4.5
+    assert _contrast_ratio("#65748A", "#F8FAFC") >= 4.5
