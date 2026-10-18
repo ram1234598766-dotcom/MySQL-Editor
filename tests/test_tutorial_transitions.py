@@ -38,8 +38,8 @@ def test_guided_tour_interruption_and_close_restore_page_stack():
     dialog = ProductTourDialog(settings=SettingsStub(False))
     try:
         dialog._go(1)
-        first_animation = dialog._fade
-        assert first_animation is not None
+        assert dialog._fade is not None
+        first_animation_id = id(dialog._fade)
         assert dialog.pages.graphicsEffect() is not None
 
         # Rapid navigation must detach the previous animation/effect before
@@ -47,7 +47,7 @@ def test_guided_tour_interruption_and_close_restore_page_stack():
         dialog._go(2)
         assert dialog.pages.currentIndex() == 2
         assert dialog._fade is not None
-        assert dialog._fade is not first_animation
+        assert id(dialog._fade) != first_animation_id
         assert dialog.pages.graphicsEffect() is not None
 
         # Closing while the second transition is active must restore the stack.
