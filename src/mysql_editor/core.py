@@ -31,6 +31,11 @@ _DELIMITER_PREFIX = re.compile(r"^[ \t]*DELIMITER\b", re.IGNORECASE)
 _DELIMITER_DIRECTIVE = re.compile(
     r"[ \t]*DELIMITER[ \t]+(\S+)[ \t]*", re.IGNORECASE
 )
+_COMPOUND_ROUTINE_START = re.compile(
+    r"^\s*CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:DEFINER\s*=\s+.*?)?"
+    r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b.*?\bBEGIN\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
@@ -149,6 +154,15 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
             continue
 
         if source.startswith(delimiter, i):
+            statement_code = "".join(masked_clean[start:i])
+            if delimiter == ";" and _COMPOUND_ROUTINE_START.match(statement_code):
+                leading = len(statement_code) - len(statement_code.lstrip())
+                line_number = source.count("\n", 0, start + leading) + 1
+                raise ScriptParseError(
+                    line_number,
+                    "compound stored-program bodies require DELIMITER to be set before "
+                    "the CREATE statement",
+                )
             raw = "".join(clean[start:i])
             trimmed = raw.strip()
             if trimmed:
@@ -160,6 +174,15 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
 
         i += 1
 
+    remaining_code = "".join(masked_clean[start:length])
+    if delimiter == ";" and _COMPOUND_ROUTINE_START.match(remaining_code):
+        leading = len(remaining_code) - len(remaining_code.lstrip())
+        line_number = source.count("\n", 0, start + leading) + 1
+        raise ScriptParseError(
+            line_number,
+            "compound stored-program bodies require DELIMITER to be set before "
+            "the CREATE statement",
+        )
     raw = "".join(clean[start:length])
     trimmed = raw.strip()
     if trimmed:
