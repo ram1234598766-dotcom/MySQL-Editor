@@ -739,7 +739,7 @@ class DatabaseWorker(QThread):
                     cursor.execute(query, params)
                 field_names = [str(description[0]) for description in (cursor.description or [])]
                 return [
-                    dict(zip(field_names, row))
+                    dict(zip(field_names, row, strict=False))
                     for row in cursor.fetchall()
                 ]
             finally:
