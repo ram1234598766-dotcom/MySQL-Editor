@@ -333,6 +333,18 @@ def test_workspace_navigation_and_sql_actions_support_keyboard_focus(
                 f"{button.accessibleName()!r} must accept keyboard focus"
             )
 
+        # Also verify that Tab moves between destinations, not just into one of them.
+        first_nav = nav_buttons[0]
+        first_nav.setFocus(Qt.FocusReason.OtherFocusReason)
+        _APP.processEvents()
+        for current, expected in zip(nav_buttons, nav_buttons[1:], strict=False):
+            QTest.keyClick(current, Qt.Key.Key_Tab)
+            _APP.processEvents()
+            assert _APP.focusWidget() is expected, (
+                f"Tab from {current.accessibleName()!r} should focus "
+                f"{expected.accessibleName()!r}"
+            )
+
         # Verify actual Tab traversal within the adjacent SQL action toolbar.
         editor = window._current_editor()
         editor.setPlainText("SELECT 1;")

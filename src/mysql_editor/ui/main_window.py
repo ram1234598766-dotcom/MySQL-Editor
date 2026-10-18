@@ -339,6 +339,7 @@ class MainWindow(QMainWindow):
             button.setText(f"{icon}  {label}")
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             button.setObjectName("navButton")
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.setMinimumHeight(38)
             button.setCheckable(label != "Connections")
             button.setAccessibleName(label)
