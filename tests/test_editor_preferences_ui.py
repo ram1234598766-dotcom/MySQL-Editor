@@ -229,3 +229,65 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
         repository.close()
         _APP.setStyleSheet(original_stylesheet)
         _APP.processEvents()
+
+def test_main_workspace_controls_expose_accessible_names(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "workspace-accessibility.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-a", "name": "Development", "host": "localhost",
+        "port": 3306, "username": "reader",
+    }
+    config = {
+        "host": "localhost", "port": 3306, "username": "reader",
+        "default_schema": "app_db", "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(
+        worker, repository, object(), profile, config, {"database": "app_db"}
+    )
+    controls = (
+        window.connection_badge,
+        window.tour_button,
+        window.connect_button,
+        window.disconnect_button,
+        window.format_button,
+        window.explain_button,
+        window.run_selection_button,
+        window.run_button,
+        window.editors,
+        window.result_picker,
+        window.result_filter,
+        window.query_meta,
+        window.stop_button,
+        window.commit_button,
+        window.rollback_button,
+        window.fetch_more_button,
+        window.export_button,
+        window.result_grid,
+        window.result_message,
+        window.export_feedback,
+        window.inspector_tabs,
+        window.schema_state_label,
+        window.schema_refresh_button,
+        window.schema_tree,
+        window.history_list,
+        window.saved_list,
+        window.status,
+        window.editor_position,
+    )
+    try:
+        missing = [
+            type(control).__name__
+            for control in controls
+            if not control.accessibleName().strip()
+        ]
+        assert not missing, (
+            "Interactive workspace controls and status regions need accessible names: "
+            f"{missing}"
+        )
+    finally:
+        window.close()
+        worker.shutdown()
+        repository.close()
+        _APP.processEvents()
