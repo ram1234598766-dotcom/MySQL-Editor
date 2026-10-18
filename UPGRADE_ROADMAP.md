@@ -720,3 +720,9 @@ Evidence on the tested PR head:
 
 The Windows workflow's artifact is a CI download, not a stable GitHub Release. This automated evidence does **not** complete Phase 8 manual acceptance: real-monitor DPI/multi-monitor checks, full keyboard-only operation across menus/popups/trees/results/dialogs, Narrator or another screen-reader check, real Windows Credential Manager behavior, MySQL/TLS validation on the intended machine, and Authenticode signing/verification when publisher trust is required remain outstanding.
 
+### Phase 1 forward-port — shared widget-state color tokens — 18 October 2026
+
+The current-main forward-port replaces recurring hard-coded colors in the shared Qt stylesheet with 61 named `STYLE_COLORS` tokens, resolved by the existing stylesheet token pipeline before Qt applies the style. This is a focused refactor: after token resolution, the dark stylesheet's literal rules are byte-for-byte equivalent to the pre-change template, and the existing dark/light color translation remains in place.
+
+Regression coverage rejects unresolved style tokens and raw hex literals inside the stylesheet template, checks representative token values, and verifies that focus/selection styling still translates into the light palette. This checkpoint is **pending full CI verification**; it does not claim that visual review on physical Windows displays is complete.
+
