@@ -296,6 +296,7 @@ Exit gate:
 **Goal:** Make context switching obvious and reduce accidental actions.
 
 Tasks:
+- Add a read-only Schema Object Inspector for tables and views, showing MySQL-generated DDL plus independently recoverable columns, indexes, constraints/foreign keys, and object properties; use worker-thread metadata queries, quoted identifiers, bound values, and explicit permission warnings.
 - Introduce a clearer connection-management view with create/edit/duplicate/delete profile actions and explicit current/last profile state. Confirm before deleting saved metadata or a stored credential.
 - Keep connection status visible and unambiguous; consider a configurable, semantic connection colour marker, never colour alone.
 - Make schema navigation refresh, error, empty and loading states explicit.
