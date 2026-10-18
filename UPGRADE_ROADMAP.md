@@ -705,3 +705,18 @@ The Windows workflow uploaded the `MySQLEditor-Windows` and `MySQLEditor-UI-Visu
 **Still not verified on a physical Windows PC:** 100%/125%/150%/200% display scaling and multi-monitor behavior; keyboard-only end-to-end use; Narrator/screen-reader behavior; real Windows Credential Manager behavior; and connection/TLS validation against the intended MySQL environment. Publisher trust is also not established by CI artifacts or SHA-256 hashes; the binaries must be Authenticode-signed and the signature verified if trusted publisher identity is required.
 
 Do not mark Phase 8 fully complete or promote a stable release until the manual checklist above in `RELEASE-CANDIDATE-CHECKLIST.md` has an evidence-backed outcome.
+
+### Phase 6 keyboard-navigation follow-up — 18 October 2026
+
+**Automated status: PASS** for PR #47's tested source commit `8b08fbf96f488fbb2a5b7c57577c12710ef35783`, merged to `main` as `b37e1e146d3526b298b31fe3c13205ae4323dbdc`.
+
+The follow-up exposed and fixed an actual keyboard-accessibility issue: placing workspace navigation buttons in an exclusive `QButtonGroup` removed Tab focus from unchecked navigation destinations. The navigation now retains independent keyboard focus stops while managing the selected appearance explicitly. Regression coverage verifies accessible names, keyboard focus, sequential Tab traversal across workspace destinations, and Tab traversal between SQL toolbar actions.
+
+Evidence on the tested PR head:
+
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39117894256) — **PASS**: Python 3.12, 3.13 and 3.14 tests, Windows Qt UI smoke, and MySQL 8.4 integration.
+- [Dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39117894250) — **PASS**.
+- [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39117894252) — **PASS**: application-folder build, portable EXE, installer, automated install/uninstall, packaged-app launch smoke, output validation, CycloneDX SBOM, provenance manifest, SHA-256 checksums, and Windows artifact upload.
+
+The Windows workflow's artifact is a CI download, not a stable GitHub Release. This automated evidence does **not** complete Phase 8 manual acceptance: real-monitor DPI/multi-monitor checks, full keyboard-only operation across menus/popups/trees/results/dialogs, Narrator or another screen-reader check, real Windows Credential Manager behavior, MySQL/TLS validation on the intended machine, and Authenticode signing/verification when publisher trust is required remain outstanding.
+
