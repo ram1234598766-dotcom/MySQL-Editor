@@ -1051,10 +1051,16 @@ def _schema_inspector_connection(*, object_type="BASE TABLE", show_create_error=
                     raise RuntimeError(show_create_error)
                 self.description = [("Object",), ("Create " + ("View" if object_type == "VIEW" else "Table"),)]
                 tick = chr(96)
-                self.rows = [
-                    ("teams", "CREATE TABLE " + tick + "teams" + tick +
-                     " (" + tick + "team_id" + tick + " int NOT NULL)")
-                ]
+                if object_type == "VIEW":
+                    self.rows = [
+                        ("team_view", "CREATE VIEW " + tick + "team_view" + tick +
+                         " AS select 1 AS team_id")
+                    ]
+                else:
+                    self.rows = [
+                        ("teams", "CREATE TABLE " + tick + "teams" + tick +
+                         " (" + tick + "team_id" + tick + " int NOT NULL)")
+                    ]
             elif "information_schema.COLUMNS" in query:
                 self.description = [(name,) for name in column_fields]
                 self.rows = [
@@ -1106,7 +1112,10 @@ def test_schema_inspector_reads_ddl_columns_indexes_constraints_and_properties()
     connection, queries, cursors, safe_identifier = _schema_inspector_connection()
     worker._connection = connection
 
-    result = worker._inspect_schema_object("analytics", "teams", "BASE TABLE")
+    result = worker._dispatch(
+        "inspect_schema_object",
+        {"schema": "analytics", "table": "teams", "object_type": "BASE TABLE"},
+    )
 
     assert result["ok"] is True
     assert result["object_type"] == "BASE TABLE"
@@ -1198,3 +1207,21 @@ def test_schema_inspector_reports_missing_or_invisible_objects_without_running_o
     assert result["ok"] is False
     assert "not found or is no longer visible" in result["error"]
     assert len(queries) == 1
+
+
+def test_schema_inspector_uses_show_create_view_for_views():
+    worker = DatabaseWorker()
+    connection, queries, _cursors, safe_identifier = _schema_inspector_connection(object_type="VIEW")
+    worker._connection = connection
+
+    result = worker._dispatch(
+        "inspect_schema_object",
+        {"schema": "analytics", "table": "team_view", "object_type": "VIEW"},
+    )
+
+    assert result["ok"] is True
+    assert result["object_type"] == "VIEW"
+    assert result["definition"].startswith("CREATE VIEW")
+    assert queries[1][0] == (
+        f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
+    )
