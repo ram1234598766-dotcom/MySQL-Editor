@@ -183,6 +183,7 @@ def test_comments_before_a_standalone_delimiter_command_are_preserved():
         ("DELIMITER\nSELECT 1;", 1),
         ("SELECT 1;\nDELIMITER $$ extra\nSELECT 2;", 2),
         ("DELIMITER // -- trailing text\nSELECT 1//", 1),
+        ("DELIMITER $$'bad\nSELECT 1$$", 1),
     ],
 )
 def test_malformed_delimiter_directive_fails_closed(source, line):
