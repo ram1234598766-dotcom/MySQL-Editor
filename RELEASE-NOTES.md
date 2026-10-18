@@ -37,6 +37,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 - Direct local-to-server MySQL connections, saved profiles, duplicate/delete profile actions, and saved database passwords stored through Windows Credential Manager rather than plaintext application storage.
 - Explicit Automatic TLS, Verify server identity, and Disabled TLS policies; strict verification can use a supplied CA file.
 - Schema Explorer supports database/table/view navigation, refresh, safe identifier copying, limited table preview, and generating a SELECT in a new tab.
+- Right-click a table or view and choose **Inspect DDL and metadata** to open a read-only inspector for the MySQL-generated CREATE definition, columns, indexes, constraints, and available object properties. The inspector reports metadata-permission or unsupported-section warnings without changing the object or its data.
 - The active connection and schema context are visible in the workspace. Query execution is blocked when a query is already running or a disconnect is pending.
 
 ### Results and query feedback
@@ -61,6 +62,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 - **Unsigned binary:** Windows may show SmartScreen or unknown-publisher warnings. Do not bypass a warning solely because the file is hosted on GitHub. Review the repository and release, and compare a package's SHA-256 hash against `SHA256SUMS`. A matching hash detects file mismatches; it does not prove software safety.
 - **Manual Windows QA remains necessary:** automated/offscreen and runner-based tests cannot certify every display scale, hardware configuration, real Windows Credential Manager state, installer-upgrade path, or remote MySQL/TLS environment.
 - **Result paging:** only the initial 2,000 rows are loaded into the grid at query completion; use **Fetch +1,000** to retrieve further pages from the local result cache. CSV export remains complete even if additional pages were not loaded.
+- **Schema metadata permissions:** the object inspector depends on metadata MySQL exposes to the connected account. A CREATE definition or individual metadata section may be unavailable due to privileges or server version; the inspector reports the limitation and keeps other sections available where possible.
 - **MySQL server required:** MySQL Editor is a client and does not install or automatically start the database server.
 - **TLS:** Automatic TLS can encrypt traffic without verifying server identity. Prefer Verify server identity for remote or untrusted networks. Disabled TLS should only be used when its lack of transport encryption is understood and accepted.
 - **Cancellation:** stopping a query is best-effort and depends on server state, permissions and network conditions.
