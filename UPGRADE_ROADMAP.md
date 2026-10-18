@@ -689,3 +689,17 @@ Automated acceptance added:
 - The complete CSV export assertion remains over every spooled row, regardless of paging.
 
 The phase is complete only when lint/compile, Python 3.12–3.14 tests, MySQL 8.4 integration, Windows Qt smoke, and the Windows installer/EXE packaging workflow all pass on the exact PR head. The resulting build is an Actions artifact until separately published by the release workflow.
+
+
+
+### Phase 1 — shared widget-state colour tokens — 18 October 2026
+
+**Status: implementation checkpoint; phase exit gate not yet claimed.**
+
+The existing theme foundation already centralizes the main palette, spacing, typography, radii, component dimensions, SQL syntax palettes, and shared stylesheet. This increment extends that foundation by naming recurring widget-state colours that had remained embedded directly in the stylesheet, including menu and selection colours, input borders, focus indicators, disabled controls, navigation states, result-table selection, tree selection, scrollbars, and checkbox states.
+
+The stylesheet resolves those named values before Qt applies it, so the existing dark/light translation and theme-switch behavior remain intact. A focused regression test checks that the shared colour values resolve and that the light theme still translates key focus and selection colours.
+
+**Still required before Phase 1 can be called complete:** run the candidate's full lint/compile/test matrix and Windows packaging workflow; inspect generated dark/light captures at the simulated 100%, 125%, 150%, and 200% scales; review remaining one-off widget styling and migrate only where a shared semantic token is appropriate; and perform physical-Windows visual checks when available. Passing token tests alone does not prove that every screen is visually consistent or that the logo renders crisply on every display.
+
+**Roadmap numbering clarification:** `PHASE0_BASELINE_AUDIT.md` contains an earlier “Phase 1” label for MySQL-client script-parser work. That label describes a separate parser workstream and is not the canonical UX phase sequence in this document. The parser work is tracked by its own implementation/tests; this document's Phase 1 remains theme-token and component-style consolidation.
