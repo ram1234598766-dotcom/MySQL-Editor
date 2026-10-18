@@ -226,3 +226,21 @@ def test_current_statement_source_keeps_delimiter_context_for_routine_execution(
     assert execution_source.startswith("DELIMITER //")
     assert len(split_sql_statements(execution_source)) == 1
     assert "CREATE PROCEDURE example()" in split_sql_statements(execution_source)[0]
+
+
+def test_current_statement_source_does_not_include_previous_statements():
+    source = (
+        "DELIMITER //\n"
+        "CREATE PROCEDURE example()\n"
+        "BEGIN\n"
+        "  SELECT 1;\n"
+        "END//\n"
+        "SELECT 2//"
+    )
+    position = source.index("SELECT 2")
+
+    execution_source = current_statement_source(source, position)
+
+    assert execution_source.startswith("DELIMITER //")
+    assert "CREATE PROCEDURE" not in execution_source
+    assert split_sql_statements(execution_source) == ["SELECT 2"]
