@@ -73,8 +73,10 @@ class SchemaObjectInspectorDialog(QDialog):
         schema = str(self.metadata.get("schema") or "")
         table = str(self.metadata.get("table") or "")
         object_type = str(self.metadata.get("object_type") or "MySQL object")
-        quote = lambda value: chr(96) + value.replace(chr(96), chr(96) * 2) + chr(96)
-        qualified = f"{quote(schema)}.{quote(table)}"
+        def quote_identifier(value: str) -> str:
+            return chr(96) + value.replace(chr(96), chr(96) * 2) + chr(96)
+
+        qualified = f"{quote_identifier(schema)}.{quote_identifier(table)}"
         self.setWindowTitle(f"Object Inspector — {qualified}")
         self.setMinimumSize(760, 520)
         self.resize(1080, 700)
