@@ -14,7 +14,7 @@ class StatementSpan:
     sql: str
     start: int
     end: int
-    client_prefix_start: int | None = None
+    active_delimiter: str | None = None
 
 
 class ScriptParseError(ValueError):
@@ -66,7 +66,6 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
     start = 0
     i = 0
     delimiter = ";"
-    delimiter_context_start: int | None = None
     state = "normal"
 
     while i < length:
@@ -94,7 +93,6 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
                 clean[position] = " "
                 masked_clean[position] = " "
             delimiter = next_delimiter
-            delimiter_context_start = i if next_delimiter != ";" else None
             i = line_end
             continue
 
@@ -170,7 +168,7 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
             trimmed = raw.strip()
             if trimmed:
                 left = len(raw) - len(raw.lstrip())
-                yield StatementSpan(trimmed, start + left, i, delimiter_context_start)
+                yield StatementSpan(trimmed, start + left, i, delimiter if delimiter != ";" else None)
             start = i + len(delimiter)
             i = start
             continue
@@ -190,7 +188,7 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
     trimmed = raw.strip()
     if trimmed:
         left = len(raw) - len(raw.lstrip())
-        yield StatementSpan(trimmed, start + left, length, delimiter_context_start)
+        yield StatementSpan(trimmed, start + left, length, delimiter if delimiter != ";" else None)
 
 
 def split_sql_statements(source: str) -> list[str]:
@@ -223,8 +221,10 @@ def current_statement_source(source: str, cursor_position: int) -> str:
     span = _span_at_cursor(source, cursor_position)
     if span is None:
         return ""
-    if span.client_prefix_start is not None:
-        return source[span.client_prefix_start:span.end].strip()
+    if span.active_delimiter is not None:
+        # Recreate only the client directive needed to preserve the statement's separator
+        # semantics; do not include preceding statements from the full editor buffer.
+        return f"DELIMITER {span.active_delimiter}\n{span.sql}"
     return span.sql
 
 _DESTRUCTIVE = re.compile(
