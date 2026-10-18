@@ -127,6 +127,25 @@ def test_mysql_query_schema_transaction_and_csv_round_trip(worker, tmp_path):
     assert schema["ok"] is True
     assert any(obj["name"] == "editor_integration_rows" for obj in schema["objects"])
 
+    procedure = worker._dispatch(
+        "query",
+        {"sql": """
+            DROP PROCEDURE IF EXISTS editor_delimiter_test;
+            DELIMITER //
+            CREATE PROCEDURE editor_delimiter_test()
+            BEGIN
+                SET @editor_delimiter_probe = 'semicolon;inside';
+                SELECT @editor_delimiter_probe AS marker;
+            END//
+            DELIMITER ;
+            CALL editor_delimiter_test();
+            DROP PROCEDURE editor_delimiter_test;
+        """},
+    )
+    assert procedure["ok"] is True, procedure.get("error")
+    assert len(procedure["results"]) == 4
+    assert procedure["results"][2]["rows"] == [["semicolon;inside"]]
+
     transaction = worker._dispatch(
         "query",
         {"sql": """
