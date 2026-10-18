@@ -60,7 +60,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 ### Current product limitations that should inform the plan
 
 - SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
-- The SQL script splitter is being upgraded to support standalone MySQL-client DELIMITER directives and compound stored-program bodies; until the current parser work is merged and verified, the main-branch limitation remains in effect.
+- The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
 - Result display is capped at 2,000 rows per query result; table preview is capped at 1,000 rows. CSV export is based on the fetched result spool.
 - Query cancellation is best-effort and depends on server permissions/state.
 - Some MySQL DDL implicitly commits.
