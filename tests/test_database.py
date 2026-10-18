@@ -1003,3 +1003,225 @@ def test_failed_schema_switch_does_not_update_worker_connection_context():
     finally:
         worker._cleanup_resources()
 
+
+def _schema_inspector_connection(*, object_type="BASE TABLE", show_create_error=None, properties_rows=None):
+    from mysql_editor.database import safe_identifier
+
+    queries = []
+    cursor_instances = []
+
+    properties_fields = [
+        "TABLE_TYPE", "ENGINE", "ROW_FORMAT", "TABLE_ROWS", "DATA_LENGTH",
+        "INDEX_LENGTH", "AUTO_INCREMENT", "CREATE_TIME", "UPDATE_TIME", "TABLE_COMMENT",
+    ]
+    column_fields = [
+        "ORDINAL_POSITION", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE",
+        "COLUMN_DEFAULT", "COLUMN_KEY", "EXTRA", "CHARACTER_SET_NAME",
+        "COLLATION_NAME", "COLUMN_COMMENT",
+    ]
+    index_fields = [
+        "Table", "Non_unique", "Key_name", "Seq_in_index", "Column_name",
+        "Collation", "Cardinality", "Sub_part", "Packed", "Null", "Index_type",
+        "Comment", "Index_comment", "Visible",
+    ]
+    constraint_fields = [
+        "CONSTRAINT_NAME", "CONSTRAINT_TYPE", "COLUMN_NAME", "ORDINAL_POSITION",
+        "REFERENCED_TABLE_SCHEMA", "REFERENCED_TABLE_NAME", "REFERENCED_COLUMN_NAME",
+    ]
+
+    class Cursor:
+        def __init__(self):
+            self.rows = []
+            self.description = []
+            self.closed = False
+            cursor_instances.append(self)
+
+        def execute(self, query, params=None):
+            queries.append((query, params))
+            if query.startswith("SELECT TABLE_TYPE, ENGINE"):
+                self.description = [(name,) for name in properties_fields]
+                self.rows = list(properties_rows) if properties_rows is not None else [
+                    (
+                        object_type, "InnoDB", "Dynamic", 3, 16384, 8192, 4,
+                        None, None, "team records",
+                    )
+                ]
+            elif query.startswith("SHOW CREATE TABLE") or query.startswith("SHOW CREATE VIEW"):
+                if show_create_error:
+                    raise RuntimeError(show_create_error)
+                self.description = [("Object",), ("Create " + ("View" if object_type == "VIEW" else "Table"),)]
+                tick = chr(96)
+                if object_type == "VIEW":
+                    self.rows = [
+                        ("team_view", "CREATE VIEW " + tick + "team_view" + tick +
+                         " AS select 1 AS team_id")
+                    ]
+                else:
+                    self.rows = [
+                        ("teams", "CREATE TABLE " + tick + "teams" + tick +
+                         " (" + tick + "team_id" + tick + " int NOT NULL)")
+                    ]
+            elif "information_schema.COLUMNS" in query:
+                self.description = [(name,) for name in column_fields]
+                self.rows = [
+                    (
+                        1, "team_id", "int unsigned", "NO", None, "PRI",
+                        "auto_increment", None, None, "Primary identifier",
+                    ),
+                    (
+                        2, "team_name", "varchar(80)", "NO", "unknown", "",
+                        "", "utf8mb4", "utf8mb4_0900_ai_ci", "Team display name",
+                    ),
+                ]
+            elif query.startswith("SHOW INDEX FROM"):
+                self.description = [(name,) for name in index_fields]
+                self.rows = [
+                    (
+                        "teams", 0, "PRIMARY", 1, "team_id", "A", 3,
+                        None, None, "", "BTREE", "", "", "YES",
+                    ),
+                    (
+                        "teams", 1, "idx_team_name", 1, "team_name", "A", 3,
+                        24, None, "YES", "BTREE", "", "team-name lookup", "YES",
+                    ),
+                ]
+            elif "FROM information_schema.TABLE_CONSTRAINTS AS tc" in query:
+                self.description = [(name,) for name in constraint_fields]
+                self.rows = [
+                    ("PRIMARY", "PRIMARY KEY", "team_id", 1, None, None, None),
+                    ("fk_team_owner", "FOREIGN KEY", "owner_id", 1, "analytics", "owners", "owner_id"),
+                ]
+            else:
+                raise AssertionError(f"Unexpected metadata query: {query}")
+
+        def fetchall(self):
+            return list(self.rows)
+
+        def close(self):
+            self.closed = True
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    return Connection(), queries, cursor_instances, safe_identifier
+
+
+def test_schema_inspector_reads_ddl_columns_indexes_constraints_and_properties():
+    worker = DatabaseWorker()
+    connection, queries, cursors, safe_identifier = _schema_inspector_connection()
+    worker._connection = connection
+
+    result = worker._dispatch(
+        "inspect_schema_object",
+        {"schema": "analytics", "table": "teams", "object_type": "BASE TABLE"},
+    )
+
+    assert result["ok"] is True
+    assert result["object_type"] == "BASE TABLE"
+    tick = chr(96)
+    assert result["definition"] == (
+        "CREATE TABLE " + tick + "teams" + tick + " (" + tick + "team_id" + tick + " int NOT NULL)"
+    )
+    assert result["properties"]["Storage engine"] == "InnoDB"
+    assert result["properties"]["Row format"] == "Dynamic"
+    assert result["properties"]["Comment"] == "team records"
+    assert result["columns"][0] == {
+        "position": 1,
+        "name": "team_id",
+        "type": "int unsigned",
+        "nullable": "NO",
+        "default": None,
+        "key": "PRI",
+        "extra": "auto_increment",
+        "charset": "",
+        "collation": "",
+        "comment": "Primary identifier",
+    }
+    assert result["indexes"][0]["name"] == "PRIMARY"
+    assert result["indexes"][0]["unique"] == "Yes"
+    assert result["indexes"][1]["name"] == "idx_team_name"
+    assert result["indexes"][1]["unique"] == "No"
+    assert result["indexes"][1]["prefix_length"] == 24
+    assert result["constraints"][0]["type"] == "PRIMARY KEY"
+    assert result["constraints"][1]["referenced_table"] == "owners"
+    assert result["warnings"] == []
+    assert queries[0][1] == ("analytics", "teams")
+    assert queries[1][0] == (
+        f"SHOW CREATE TABLE {safe_identifier('analytics')}.{safe_identifier('teams')}"
+    )
+    assert queries[2][1] == ("analytics", "teams")
+    assert queries[3][0] == (
+        f"SHOW INDEX FROM {safe_identifier('teams')} FROM {safe_identifier('analytics')}"
+    )
+    assert queries[4][1] == ("analytics", "teams")
+    assert all(cursor.closed for cursor in cursors)
+
+
+def test_schema_inspector_quotes_identifiers_and_uses_bound_metadata_values():
+    worker = DatabaseWorker()
+    connection, queries, _cursors, safe_identifier = _schema_inspector_connection()
+    worker._connection = connection
+    schema = "odd" + chr(96) + "schema"
+    table = "teams" + chr(96) + " archive"
+
+    result = worker._inspect_schema_object(schema, table, "BASE TABLE")
+
+    assert result["ok"] is True
+    assert queries[0][1] == (schema, table)
+    assert queries[1][0] == (
+        f"SHOW CREATE TABLE {safe_identifier(schema)}.{safe_identifier(table)}"
+    )
+    assert queries[2][1] == (schema, table)
+    assert queries[4][1] == (schema, table)
+
+
+def test_schema_inspector_keeps_partial_metadata_when_definition_permission_is_denied():
+    worker = DatabaseWorker()
+    connection, queries, _cursors, safe_identifier = _schema_inspector_connection(
+        object_type="VIEW",
+        show_create_error="SHOW VIEW command denied for this account",
+    )
+    worker._connection = connection
+
+    result = worker._inspect_schema_object("analytics", "team_view", "VIEW")
+
+    assert result["ok"] is True
+    assert result["object_type"] == "VIEW"
+    assert result["definition"] == ""
+    assert result["columns"]
+    assert any("Definition unavailable" in warning for warning in result["warnings"])
+    assert "SHOW VIEW command denied" in "\n".join(result["warnings"])
+    assert queries[1][0] == (
+        f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
+    )
+
+
+def test_schema_inspector_reports_missing_or_invisible_objects_without_running_other_queries():
+    worker = DatabaseWorker()
+    connection, queries, _cursors, _safe_identifier = _schema_inspector_connection(properties_rows=[])
+    worker._connection = connection
+
+    result = worker._inspect_schema_object("analytics", "missing_table", "BASE TABLE")
+
+    assert result["ok"] is False
+    assert "not found or is no longer visible" in result["error"]
+    assert len(queries) == 1
+
+
+def test_schema_inspector_uses_show_create_view_for_views():
+    worker = DatabaseWorker()
+    connection, queries, _cursors, safe_identifier = _schema_inspector_connection(object_type="VIEW")
+    worker._connection = connection
+
+    result = worker._dispatch(
+        "inspect_schema_object",
+        {"schema": "analytics", "table": "team_view", "object_type": "VIEW"},
+    )
+
+    assert result["ok"] is True
+    assert result["object_type"] == "VIEW"
+    assert result["definition"].startswith("CREATE VIEW")
+    assert queries[1][0] == (
+        f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
+    )
