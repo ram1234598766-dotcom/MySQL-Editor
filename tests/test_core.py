@@ -1,6 +1,8 @@
+import pytest
+
 from mysql_editor.core import (
-    classify_statement, current_statement, redact_secrets, split_sql_statements,
-    unsupported_delimiter_directive_line, unsupported_delimiter_message,
+    ScriptParseError, classify_statement, current_statement, iter_statement_spans,
+    redact_secrets, split_sql_statements,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -91,39 +93,101 @@ def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
     assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
 
 
-def test_unsupported_delimiter_directive_is_detected_with_line_number():
+
+def test_split_supports_custom_delimiters_for_compound_stored_programs():
     source = (
-        "SELECT 1;\n"
-        "DELIMITER $$\n"
-        "CREATE PROCEDURE refresh_stats()\n"
+        "DELIMITER //\n"
+        "CREATE PROCEDURE example()\n"
         "BEGIN\n"
-        "  SELECT 2;\n"
-        "END$$"
+        "  SET @delimiter_probe = 'contains;semicolon';\n"
+        "  SELECT @delimiter_probe;\n"
+        "END//\n"
+        "DELIMITER ;\n"
+        "SELECT 7;"
     )
-    assert unsupported_delimiter_directive_line(source) == 2
-    message = unsupported_delimiter_message(source)
-    assert message is not None
-    assert "line 2" in message
-    assert "entire script was rejected" in message
-    assert "no part was submitted" in message
+
+    spans = list(iter_statement_spans(source))
+
+    assert [span.sql for span in spans] == [
+        "CREATE PROCEDURE example()\n"
+        "BEGIN\n"
+        "  SET @delimiter_probe = 'contains;semicolon';\n"
+        "  SELECT @delimiter_probe;\n"
+        "END",
+        "SELECT 7",
+    ]
+    assert source[spans[0].start:spans[0].end] == spans[0].sql
+    assert source[spans[1].start:spans[1].end] == spans[1].sql
+    assert "DELIMITER" not in "\n".join(span.sql for span in spans)
 
 
-def test_delimiter_like_text_in_comments_and_literals_is_not_a_directive():
+def test_split_supports_multiple_delimiter_changes_and_cursor_context():
     source = (
-        "SELECT 'literal start\nDELIMITER $$';\n"
+        "DELIMITER $$\n"
+        "SELECT 1$$\n"
+        "DELIMITER //\n"
+        "SELECT 2//\n"
+        "DELIMITER ;\n"
+        "SELECT 3;"
+    )
+
+    assert split_sql_statements(source) == ["SELECT 1", "SELECT 2", "SELECT 3"]
+    assert current_statement(source, source.index("SELECT 2") + 3) == "SELECT 2"
+
+
+def test_delimiter_like_text_inside_literals_and_comments_is_not_a_directive():
+    source = (
+        "SELECT 'literal;\nDELIMITER $$\ncontinues';\n"
         "-- DELIMITER //\n"
         "/* comment line\nDELIMITER !\n*/\n"
         "SELECT delimiter FROM example_table;"
     )
-    assert unsupported_delimiter_directive_line(source) is None
-    assert unsupported_delimiter_message(source) is None
+
+    statements = split_sql_statements(source)
+
+    assert len(statements) == 2
+    assert "DELIMITER $$" in statements[0]
+    assert "SELECT delimiter FROM example_table" in statements[1]
+    assert "DELIMITER //" in statements[1]
+    assert "DELIMITER !" in statements[1]
 
 
-def test_delimiter_word_inside_an_unfinished_sql_statement_is_not_a_client_command():
+def test_delimiter_word_inside_an_unfinished_sql_statement_is_not_a_directive():
     source = "SELECT\n  DELIMITER AS a_column\nFROM example_table;"
-    assert unsupported_delimiter_directive_line(source) is None
+
+    assert split_sql_statements(source) == [
+        "SELECT\n  DELIMITER AS a_column\nFROM example_table"
+    ]
 
 
-def test_regular_sql_with_comments_before_delimiter_line_is_still_detected():
-    source = "SELECT 1;\n-- next client command\n  delimiter //\n"
-    assert unsupported_delimiter_directive_line(source) == 3
+def test_comments_before_a_standalone_delimiter_command_are_preserved():
+    source = (
+        "SELECT 1;\n"
+        "-- next client command\n"
+        "DELIMITER //\n"
+        "SELECT 2//\n"
+        "DELIMITER ;\n"
+    )
+
+    statements = split_sql_statements(source)
+
+    assert statements[0] == "SELECT 1"
+    assert "next client command" in statements[1]
+    assert "SELECT 2" in statements[1]
+    assert "DELIMITER" not in statements[1]
+
+
+@pytest.mark.parametrize(
+    ("source", "line"),
+    [
+        ("DELIMITER\nSELECT 1;", 1),
+        ("SELECT 1;\nDELIMITER $$ extra\nSELECT 2;", 2),
+        ("DELIMITER // -- trailing text\nSELECT 1//", 1),
+    ],
+)
+def test_malformed_delimiter_directive_fails_closed(source, line):
+    with pytest.raises(ScriptParseError, match=f"line {line}") as caught:
+        split_sql_statements(source)
+
+    assert caught.value.line == line
+    assert "script was not submitted" in str(caught.value).lower()
