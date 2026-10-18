@@ -724,5 +724,14 @@ The Windows workflow's artifact is a CI download, not a stable GitHub Release. T
 
 The current-main forward-port replaces recurring hard-coded colors in the shared Qt stylesheet with 61 named `STYLE_COLORS` tokens, resolved by the existing stylesheet token pipeline before Qt applies the style. This is a focused refactor: after token resolution, the dark stylesheet's literal rules are byte-for-byte equivalent to the pre-change template, and the existing dark/light color translation remains in place.
 
-Regression coverage rejects unresolved style tokens and raw hex literals inside the stylesheet template, checks representative token values, and verifies that focus/selection styling still translates into the light palette. This checkpoint is **pending full CI verification**; it does not claim that visual review on physical Windows displays is complete.
+Regression coverage rejects unresolved style tokens and raw hex literals inside the stylesheet template, checks representative token values, and verifies that focus/selection styling still translates into the light palette.
 
+**Automated status: PASS** for implementation commit `39a4fc03bf67a7cc814474d15b3836ac8d3b6790`, merged to `main` as `2e1dfb3393f09c9d217f6512892de815cdfd17f3`.
+
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39120179594) — **PASS**: lint, compile, tests on Python 3.12/3.13/3.14, Windows Qt UI smoke, and MySQL 8.4 integration.
+- [Dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39120179576) — **PASS**.
+- [Windows packages](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39120179535) — **PASS**: onedir application, portable EXE, installer, silent install/uninstall, package launch, expected outputs, CycloneDX SBOM, provenance, checksums, and artifact upload.
+
+This completes the automated stylesheet-token regression gate. It does **not** substitute for human visual review on real Windows displays: physical DPI/high-DPI rendering, contrast and clipping checks remain under Phase 8. CI artifacts are not a stable GitHub Release.
+
+**Workstream numbering note:** `PHASE0_BASELINE_AUDIT.md` uses an earlier “Phase 1” label for MySQL-client script-parser work. That is a separate parser workstream, not the canonical UX roadmap's Phase 1 (shared theme tokens and component styling).
