@@ -689,3 +689,16 @@ Automated acceptance added:
 - The complete CSV export assertion remains over every spooled row, regardless of paging.
 
 The phase is complete only when lint/compile, Python 3.12–3.14 tests, MySQL 8.4 integration, Windows Qt smoke, and the Windows installer/EXE packaging workflow all pass on the exact PR head. The resulting build is an Actions artifact until separately published by the release workflow.
+
+
+### Advanced capability upgrade — Phase 3: Schema Object Inspector — 18 October 2026
+
+The Schema Explorer context menu now offers **Inspect DDL and metadata** for tables and views. A new read-only dialog presents the MySQL-generated \`CREATE TABLE\` or \`CREATE VIEW\` statement, column attributes, index parts, constraint and foreign-key columns, and server-reported object properties. It uses the active database worker; the UI remains non-blocking while the server gathers metadata.
+
+The worker quotes schema/object identifiers for SHOW statements and binds schema/object values in information_schema queries. Metadata sections are independently recoverable: when CREATE definition, indexes, columns, or constraints are not exposed by the account or server, the dialog surfaces a warning and retains any sections that could be read. Missing/invisible objects and connection loss remain explicit failures. Inspection is read-only and never executes the displayed CREATE statement.
+
+Acceptance coverage includes:
+- Worker tests for quoted identifiers, metadata query parameters, DDL selection for tables/views, column and index normalization, constraints, partial-permission warnings, and missing/invisible objects.
+- Dialog tests for read-only definition text, metadata tabs, copy DDL, empty sections, and warning presentation.
+- Main-window tests for dispatching inspection to the worker, opening the dialog on completion, and blocking inspection while another SQL statement is active.
+- Full lint/compile, Python 3.12–3.14 tests, disposable MySQL 8.4 integration, Windows Qt smoke, dependency audit, and exact-head Windows packaging/installer tests.
