@@ -135,16 +135,16 @@ def test_mysql_query_schema_transaction_and_csv_round_trip(worker, tmp_path):
             CREATE PROCEDURE editor_delimiter_test()
             BEGIN
                 SET @editor_delimiter_probe = 'semicolon;inside';
-                SELECT @editor_delimiter_probe AS marker;
             END//
             DELIMITER ;
             CALL editor_delimiter_test();
+            SELECT @editor_delimiter_probe AS marker;
             DROP PROCEDURE editor_delimiter_test;
         """},
     )
     assert procedure["ok"] is True, procedure.get("error")
-    assert len(procedure["results"]) == 4
-    assert procedure["results"][2]["rows"] == [["semicolon;inside"]]
+    assert len(procedure["results"]) == 5
+    assert procedure["results"][3]["rows"] == [["semicolon;inside"]]
 
     transaction = worker._dispatch(
         "query",
