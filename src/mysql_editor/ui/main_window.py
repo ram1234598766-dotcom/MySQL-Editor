@@ -354,10 +354,6 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda checked=False, value=label: self._navigate(value))
             navigation_layout.addWidget(button)
             self.workspace_nav_buttons[label] = button
-        # QButtonGroup can leave unchecked exclusive buttons outside the Tab chain.
-        # Normalize the policy after every navigation control has joined the group.
-        for button in self.workspace_nav_buttons.values():
-            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         navigation_layout.addStretch(1)
         privacy_hint = QLabel("LOCAL WORKSPACE  ·  DIRECT MYSQL CONNECTION")
         privacy_hint.setObjectName("navHint")
@@ -996,6 +992,10 @@ class MainWindow(QMainWindow):
         button = self.workspace_nav_buttons.get(destination)
         if button is not None and button.isCheckable():
             button.setChecked(True)
+        # Re-checking an exclusive navigation button can reset sibling focus policies.
+        # Reapply the policy after selection changes so every destination stays in the Tab chain.
+        for nav_button in self.workspace_nav_buttons.values():
+            nav_button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def _navigate(self, destination: str):
         if destination == "SQL Editor":
