@@ -13,7 +13,7 @@ dependencies = [
   "mysql-connector-python>=9.2,<27",
   "keyring>=25.5,<27",
   "argon2-cffi>=23.1,<26",
-  "sqlglot>=26,<30",
+  "sqlglot>=26,<31",
   "platformdirs>=4.3,<5",
   "Pillow>=11,<14",
 ]
