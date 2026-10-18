@@ -1,8 +1,8 @@
 import pytest
 
 from mysql_editor.core import (
-    ScriptParseError, classify_statement, current_statement, iter_statement_spans,
-    redact_secrets, split_sql_statements,
+    ScriptParseError, classify_statement, current_statement, current_statement_source,
+    iter_statement_spans, redact_secrets, split_sql_statements,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -207,3 +207,22 @@ def test_compound_routine_without_an_early_delimiter_fails_closed():
 
     assert caught.value.line == 1
     assert "script was not submitted" in str(caught.value).lower()
+
+
+def test_current_statement_source_keeps_delimiter_context_for_routine_execution():
+    source = (
+        "DELIMITER //\n"
+        "CREATE PROCEDURE example()\n"
+        "BEGIN\n"
+        "  SET @value = 'one;two';\n"
+        "END//\n"
+        "DELIMITER ;\n"
+        "SELECT 7;"
+    )
+    position = source.index("CREATE PROCEDURE")
+
+    assert current_statement(source, position).startswith("CREATE PROCEDURE")
+    execution_source = current_statement_source(source, position)
+    assert execution_source.startswith("DELIMITER //")
+    assert len(split_sql_statements(execution_source)) == 1
+    assert "CREATE PROCEDURE example()" in split_sql_statements(execution_source)[0]
