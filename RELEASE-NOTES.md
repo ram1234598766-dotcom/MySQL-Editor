@@ -44,7 +44,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 - CSV export writes atomically, uses fetched rows rather than only visible filtered rows, and preserves server-fetch order after grid sorting.
 - CSV uses an unquoted `\\N` token for SQL NULL; empty text stays an empty field. Backslash-leading text is escaped so it remains distinguishable from NULL.
 - Query lifecycle feedback distinguishes execution, fetching, cancellation requests, confirmed interruption, partial script failure, and export progress where the worker can report it.
-- Unsupported standalone MySQL client `DELIMITER` scripts are rejected before execution rather than silently split incorrectly.
+- Standalone MySQL client `DELIMITER` directives such as `//` and `$$` are handled as client commands, not sent to the server. Compound stored-program bodies stay intact across internal semicolons; malformed directives and routine bodies that would be split under the default delimiter fail closed before any part of the script is submitted.
 
 ### Presentation, preferences and reliability
 - Shared semantic dark-theme styling, System/Light/Dark appearance selection, editor font and tab-width preferences, result-row sizing, and a persistent Reduce Motion option.
@@ -63,7 +63,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 - **TLS:** Automatic TLS can encrypt traffic without verifying server identity. Prefer Verify server identity for remote or untrusted networks. Disabled TLS should only be used when its lack of transport encryption is understood and accepted.
 - **Cancellation:** stopping a query is best-effort and depends on server state, permissions and network conditions.
 - **Safety prompts and redaction:** mutation warnings and query-history redaction are heuristic aids, not security boundaries. Use least-privilege database accounts and avoid putting secrets in SQL text.
-- **Stored-program scripts:** MySQL client `DELIMITER` directives and compound stored-program parsing are not implemented; the app rejects unsupported delimiter scripts instead of attempting to execute them.
+- **Stored-program parsing scope:** statement splitting recognizes standalone `DELIMITER` changes and protects compound routine bodies, but is not a complete MySQL grammar or semantic validator. The MySQL server remains authoritative for SQL syntax, features, and permissions.
 - **Local unlock:** the master password unlocks this installation only. It is not an online account and does not synchronize to another device.
 - **Scope:** Android APK/AAB, cloud relay, cross-device synchronization, analytics, ads and telemetry are not included.
 
