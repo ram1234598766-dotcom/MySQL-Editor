@@ -14,24 +14,99 @@ class StatementSpan:
     sql: str
     start: int
     end: int
+    active_delimiter: str | None = None
+
+
+class ScriptParseError(ValueError):
+    """A script error that prevents the complete script from being submitted."""
+
+    def __init__(self, line: int, detail: str) -> None:
+        self.line = line
+        super().__init__(
+            f"MySQL script parsing failed on line {line}: {detail}. "
+            "The script was not submitted."
+        )
+
+
+_DELIMITER_PREFIX = re.compile(r"^[ \t]*DELIMITER\b", re.IGNORECASE)
+_DELIMITER_DIRECTIVE = re.compile(
+    r"[ \t]*DELIMITER[ \t]+(\S+)[ \t]*", re.IGNORECASE
+)
+_COMPOUND_ROUTINE_START = re.compile(
+    r"^\s*CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:DEFINER\s*=\s*.*?)?"
+    r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b.*?\bBEGIN\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
-    """Split ordinary SQL on real semicolons, not semicolons in strings/comments.
+    """Split SQL on the active separator, interpreting standalone DELIMITER client commands.
 
-    MySQL DELIMITER directives and compound stored-program bodies are not interpreted in v1.
+    Client directives are blanked in a same-length working copy, so statement offsets continue
+    to refer to the original editor buffer. This is a statement-boundary scanner, not a full
+    MySQL grammar or semantic validator.
     """
+    length = len(source)
+    masked = _mask_sql_literals_and_comments(source)
+    masked_clean = list(masked)
+    clean = list(source)
+    directive_lines: dict[int, tuple[str, int, int]] = {}
+    line_offset = 0
+
+    for line_number, raw_line in enumerate(source.splitlines(keepends=True), start=1):
+        line = raw_line.rstrip("\r\n")
+        line_end = line_offset + len(line)
+        masked_line = masked[line_offset:line_end]
+        # Requiring the directive to be visible in both strings excludes quoted text and
+        # directives that merely appear inside line or block comments.
+        if _DELIMITER_PREFIX.match(line) and _DELIMITER_PREFIX.match(masked_line):
+            directive_lines[line_offset] = (line, line_end, line_number)
+        line_offset += len(raw_line)
+
     start = 0
     i = 0
+    delimiter = ";"
     state = "normal"
-    length = len(source)
+
     while i < length:
+        directive = directive_lines.get(i)
+        if directive and state == "normal" and not "".join(masked_clean[start:i]).strip():
+            line, line_end, line_number = directive
+            match = _DELIMITER_DIRECTIVE.fullmatch(line)
+            if match is None:
+                raise ScriptParseError(
+                    line_number,
+                    "expected DELIMITER followed by exactly one non-whitespace token "
+                    "on its own line",
+                )
+            next_delimiter = match.group(1)
+            if (
+                any(char in next_delimiter for char in ("'", '"', chr(96)))
+                or next_delimiter.startswith("#")
+                or next_delimiter.startswith("--")
+                or next_delimiter.startswith("/*")
+            ):
+                raise ScriptParseError(
+                    line_number,
+                    "the delimiter must not contain quote characters or begin with "
+                    "SQL comment syntax",
+                )
+            for position in range(i, line_end):
+                clean[position] = " "
+                masked_clean[position] = " "
+            delimiter = next_delimiter
+            i = line_end
+            continue
+
         ch = source[i]
         nxt = source[i + 1] if i + 1 < length else ""
+
         if state == "line":
             if ch in "\r\n":
                 state = "normal"
             i += 1
             continue
+
         if state == "block":
             if ch == "*" and nxt == "/":
                 state = "normal"
@@ -39,6 +114,7 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
             else:
                 i += 1
             continue
+
         if state in ("single", "double", "identifier"):
             terminator = {"single": "'", "double": '"', "identifier": chr(96)}[state]
             if ch == "\\" and state != "identifier" and i + 1 < length:
@@ -51,17 +127,22 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
                 state = "normal"
             i += 1
             continue
+
         if ch == "#" or (
-            ch == "-" and nxt == "-" and
-            (i + 2 >= length or source[i + 2].isspace())
+            ch == "-" and nxt == "-"
+            and (i + 2 >= length or source[i + 2].isspace())
         ):
             state = "line"
             i += 2 if ch == "-" else 1
             continue
+
         if ch == "/" and nxt == "*":
             state = "block"
             i += 2
             continue
+
+        # Comment and quote openers take priority over a custom separator that begins with
+        # the same characters. Separators are only active in normal SQL text.
         if ch == "'":
             state = "single"
             i += 1
@@ -74,33 +155,79 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
             state = "identifier"
             i += 1
             continue
-        if ch == ";":
-            raw = source[start:i]
+
+        if source.startswith(delimiter, i):
+            statement_code = "".join(masked_clean[start:i])
+            if delimiter == ";" and _COMPOUND_ROUTINE_START.match(statement_code):
+                leading = len(statement_code) - len(statement_code.lstrip())
+                line_number = source.count("\n", 0, start + leading) + 1
+                raise ScriptParseError(
+                    line_number,
+                    "compound stored-program bodies require DELIMITER to be set before "
+                    "the CREATE statement",
+                )
+            raw = "".join(clean[start:i])
             trimmed = raw.strip()
             if trimmed:
                 left = len(raw) - len(raw.lstrip())
-                yield StatementSpan(trimmed, start + left, i)
-            start = i + 1
+                yield StatementSpan(trimmed, start + left, i, delimiter if delimiter != ";" else None)
+            start = i + len(delimiter)
+            i = start
+            continue
+
         i += 1
-    raw = source[start:]
+
+    remaining_code = "".join(masked_clean[start:length])
+    if delimiter == ";" and _COMPOUND_ROUTINE_START.match(remaining_code):
+        leading = len(remaining_code) - len(remaining_code.lstrip())
+        line_number = source.count("\n", 0, start + leading) + 1
+        raise ScriptParseError(
+            line_number,
+            "compound stored-program bodies require DELIMITER to be set before "
+            "the CREATE statement",
+        )
+    raw = "".join(clean[start:length])
     trimmed = raw.strip()
     if trimmed:
         left = len(raw) - len(raw.lstrip())
-        yield StatementSpan(trimmed, start + left, length)
+        yield StatementSpan(trimmed, start + left, length, delimiter if delimiter != ";" else None)
+
 
 def split_sql_statements(source: str) -> list[str]:
+    """Return every SQL statement, excluding client-only DELIMITER directives."""
     return [span.sql for span in iter_statement_spans(source)]
 
-def current_statement(source: str, cursor_position: int) -> str:
+
+def _span_at_cursor(source: str, cursor_position: int) -> StatementSpan | None:
     spans = list(iter_statement_spans(source))
     for span in spans:
         if span.start <= cursor_position <= span.end:
-            return span.sql
-    # Cursor commonly rests immediately after a semicolon or on trailing whitespace.
+            return span
+    # Cursor commonly rests immediately after a delimiter or on trailing whitespace.
     for span in reversed(spans):
-        if span.end <= cursor_position and source[span.end:cursor_position].strip() in ("", ";"):
-            return span.sql
-    return ""
+        if span.end <= cursor_position:
+            gap = source[span.end:cursor_position]
+            if not any(ch.isalnum() or ch == "_" for ch in gap):
+                return span
+    return None
+
+
+def current_statement(source: str, cursor_position: int) -> str:
+    """Return the statement under the cursor without client delimiter directives."""
+    span = _span_at_cursor(source, cursor_position)
+    return span.sql if span is not None else ""
+
+
+def current_statement_source(source: str, cursor_position: int) -> str:
+    """Return the statement under the cursor with the delimiter context needed to execute it."""
+    span = _span_at_cursor(source, cursor_position)
+    if span is None:
+        return ""
+    if span.active_delimiter is not None:
+        # Recreate only the client directive needed to preserve the statement's separator
+        # semantics; do not include preceding statements from the full editor buffer.
+        return f"DELIMITER {span.active_delimiter}\n{span.sql}"
+    return span.sql
 
 _DESTRUCTIVE = re.compile(
     r"^\s*(DROP|TRUNCATE|ALTER)\b|^\s*(GRANT|REVOKE)\b|"
@@ -178,33 +305,6 @@ def _mask_sql_literals_and_comments(source: str) -> str:
             continue
         i += 1
     return "".join(chars)
-
-_DELIMITER_DIRECTIVE = re.compile(r"(?im)^[ \t]*DELIMITER[ \t]+\S+")
-
-
-def unsupported_delimiter_directive_line(source: str) -> int | None:
-    """Find a MySQL-client DELIMITER command at an empty SQL-buffer boundary."""
-    masked = _mask_sql_literals_and_comments(source)
-    for match in _DELIMITER_DIRECTIVE.finditer(masked):
-        prior_buffer = masked[:match.start()].rsplit(";", 1)[-1]
-        if prior_buffer.strip():
-            continue
-        return masked.count("\n", 0, match.start()) + 1
-    return None
-
-
-def unsupported_delimiter_message(source: str) -> str | None:
-    """Explain why a submitted script with a DELIMITER client command is rejected."""
-    line = unsupported_delimiter_directive_line(source)
-    if line is None:
-        return None
-    return (
-        f"MySQL client DELIMITER directive detected on line {line}. MySQL Editor does not "
-        "parse DELIMITER commands or compound stored-program bodies. The entire script was "
-        "rejected; no part was submitted. Remove the directive and run ordinary SQL, or use "
-        "a MySQL client that supports DELIMITER for procedures, functions, and triggers."
-    )
-
 
 _TOP_LEVEL_COMMANDS = frozenset({
     "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP",

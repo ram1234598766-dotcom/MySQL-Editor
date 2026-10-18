@@ -60,7 +60,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 ### Current product limitations that should inform the plan
 
 - SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
-- The SQL statement splitter does not fully implement MySQL client DELIMITER directives or compound stored-program bodies.
+- The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
 - Result display is capped at 2,000 rows per query result; table preview is capped at 1,000 rows. CSV export is based on the fetched result spool.
 - Query cancellation is best-effort and depends on server permissions/state.
 - Some MySQL DDL implicitly commits.
@@ -280,7 +280,7 @@ Tasks, in priority order:
 5. Replace simplistic Find/Replace prompts with a compact, keyboard-accessible find bar, match count, next/previous and case-sensitivity controls.
 6. Improve the editor status surface with line/column, current selection length, file dirty state and a clear active-connection indicator.
 7. Add configurable editor font, tab width, line numbers and current-line highlight; consider minimap only if it can be built without harming performance.
-8. Keep statement boundaries consistent with the parser/splitter, and document unsupported DELIMITER/stored-program syntax rather than silently splitting it incorrectly.
+8. Keep statement boundaries consistent with the script parser; malformed DELIMITER directives must fail closed instead of silently splitting stored-program bodies.
 
 Tests:
 - Multiline comments, escaped quotes, Unicode, punctuation, alias collisions, large buffers, empty buffers, pasted multiline SQL, completion popup focus, keyboard-only completion, and invalid schema metadata.
@@ -571,9 +571,9 @@ Contextual column completion now remains scoped to the relevant schema tables af
 The cell-details dialog now offers an explicit **Copy full value** action for long or wide cells. The clipboard receives the original cell text rather than the dialog's explanatory NULL label; SQL NULL uses the app's established `NULL` clipboard marker and empty text remains an empty clipboard string. Tests cover the dialog action and scalar formatting.
 
 
-### Fail-closed handling for unsupported DELIMITER scripts — 17 October 2026
+### Fail-closed handling for malformed DELIMITER scripts — 18 October 2026
 
-Standalone MySQL client `DELIMITER` directives are detected after masking strings and comments. The SQL Editor warns before queueing the script, and the database worker repeats the guard for non-UI callers. Rejection returns no result entries, preserves the current transaction state, and occurs before opening a statement cursor. Regression tests cover comment/literal false positives and ensure a submitted script is rejected as a whole.
+Phase 1 now recognizes standalone MySQL-client `DELIMITER` changes only when the preceding script buffer contains no executable statement. The active separator is applied outside strings, quoted identifiers, and comments; directive lines are removed from statements while source offsets are preserved. Malformed directives return a source-line-aware error before the UI queues SQL or the worker opens a cursor. Regression and MySQL 8.4 integration tests cover compound stored-program execution, delimiter changes, false positives in comments/literals, and rejection without partial submission.
 
 
 ### Automated theme and SQL syntax contrast gates — 17 October 2026

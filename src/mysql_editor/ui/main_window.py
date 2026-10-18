@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from mysql_editor.core import (
-    classify_statement, current_statement, format_sql, redact_secrets, redact_sql_secrets,
-    split_sql_statements, unsupported_delimiter_message,
+    ScriptParseError, classify_statement, current_statement, current_statement_source, format_sql,
+    redact_secrets, redact_sql_secrets, split_sql_statements,
 )
 from mysql_editor.database import DatabaseWorker
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
@@ -1245,26 +1245,32 @@ class MainWindow(QMainWindow):
             return cursor.selectedText().replace("\u2029", "\n")
         if whole_script:
             return editor.toPlainText()
-        return current_statement(editor.toPlainText(), cursor.position())
+        return current_statement_source(editor.toPlainText(), cursor.position())
 
     def execute_current(self, selection_only: bool = False):
-        self._execute_sql(self._query_for_run(selection_only=selection_only))
+        try:
+            sql = self._query_for_run(selection_only=selection_only)
+        except ScriptParseError as exc:
+            self._report_script_parse_error(exc)
+            return
+        self._execute_sql(sql)
 
     def execute_script(self):
         self._execute_sql(self._query_for_run(whole_script=True))
+
+    def _report_script_parse_error(self, error: ScriptParseError) -> None:
+        self.status.setText("SQL not submitted · script parsing failed.")
+        QMessageBox.warning(self, "SQL script parsing failed", str(error))
 
     def _execute_sql(self, sql: str):
         if self._query_running:
             self._report_query_busy("submit")
             return
-        unsupported = unsupported_delimiter_message(sql)
-        if unsupported:
-            self.status.setText(
-                "SQL not submitted · unsupported MySQL client DELIMITER directive."
-            )
-            QMessageBox.warning(self, "Unsupported MySQL client directive", unsupported)
+        try:
+            statements = split_sql_statements(sql)
+        except ScriptParseError as exc:
+            self._report_script_parse_error(exc)
             return
-        statements = split_sql_statements(sql)
         if not statements:
             QMessageBox.information(
                 self, "No SQL selected", "Place the cursor inside a statement or select SQL to run."
@@ -1328,7 +1334,11 @@ class MainWindow(QMainWindow):
         editor = self._current_editor()
         if not editor:
             return
-        sql = current_statement(editor.toPlainText(), editor.textCursor().position()).strip()
+        try:
+            sql = current_statement(editor.toPlainText(), editor.textCursor().position()).strip()
+        except ScriptParseError as exc:
+            self._report_script_parse_error(exc)
+            return
         if not sql:
             QMessageBox.information(self, "Explain SELECT", "Place the cursor inside a SELECT statement.")
             return

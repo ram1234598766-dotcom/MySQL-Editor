@@ -867,7 +867,7 @@ def test_csv_export_distinguishes_sql_null_empty_text_and_literal_null_token(tmp
 
 
 
-def test_delimiter_script_is_rejected_before_opening_a_cursor():
+def test_malformed_delimiter_script_fails_before_opening_a_cursor():
     class Connection:
         in_transaction = True
 
@@ -876,22 +876,20 @@ def test_delimiter_script_is_rejected_before_opening_a_cursor():
 
         def cursor(self):
             self.cursor_calls += 1
-            raise AssertionError("Unsupported client directives must fail before SQL execution")
+            raise AssertionError("Malformed scripts must fail before SQL execution")
 
     worker = DatabaseWorker()
     connection = Connection()
     worker._connection = connection
     worker._report_activity = lambda _message: None
     result = worker._execute_script(
-        "SELECT 1;\nDELIMITER $$\n"
-        "CREATE PROCEDURE p() BEGIN SELECT 2; END$$"
+        "SELECT 1;\nDELIMITER $$ extra\nSELECT 2;"
     )
 
     assert result["ok"] is False
     assert result["results"] == []
     assert "line 2" in result["error"]
-    assert "entire script was rejected" in result["error"]
-    assert "no part was submitted" in result["error"]
+    assert "script was not submitted" in result["error"]
     assert result["transaction_open"] is True
     assert connection.cursor_calls == 0
 

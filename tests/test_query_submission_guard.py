@@ -288,7 +288,7 @@ def test_cell_detail_copy_button_copies_full_value_null_marker_and_empty_text(
 
 
 
-def test_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkeypatch):
+def test_malformed_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkeypatch):
     window, repository, worker = _make_window(tmp_path)
     warnings = []
     monkeypatch.setattr(
@@ -296,10 +296,7 @@ def test_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkey
         "warning",
         lambda _parent, title, message, *_args: warnings.append((title, message)),
     )
-    script = (
-        "SELECT 1;\nDELIMITER $$\n"
-        "CREATE PROCEDURE p() BEGIN SELECT 2; END$$"
-    )
+    script = "SELECT 1;\nDELIMITER $$ extra\nSELECT 2;"
     try:
         before = len(worker.submissions)
         window._execute_sql(script)
@@ -307,9 +304,9 @@ def test_delimiter_script_is_rejected_before_queueing_any_query(tmp_path, monkey
         assert len(worker.submissions) == before
         assert not any(action == "query" for action, _payload, _task_id in worker.submissions)
         assert len(warnings) == 1
-        assert warnings[0][0] == "Unsupported MySQL client directive"
+        assert warnings[0][0] == "SQL script parsing failed"
         assert "line 2" in warnings[0][1]
-        assert "entire script was rejected" in warnings[0][1]
+        assert "script was not submitted" in warnings[0][1].lower()
         assert "not submitted" in window.status.text().lower()
     finally:
         window.close()

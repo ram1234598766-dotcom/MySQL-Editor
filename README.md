@@ -372,8 +372,8 @@ Confirm that Remember this connection was selected and Windows Credential Manage
 ### Query results look incomplete
 The grid previews up to 2,000 rows per result; table preview is capped at 1,000 rows. CSV export is intended to contain all rows fetched into the current result spool and is not reduced by the quick filter. Ensure the query completed and the correct result entry is selected.
 
-### A procedure script uses DELIMITER
-MySQL Editor does not interpret MySQL client `DELIMITER` commands or fully parse compound stored-program bodies. When a standalone `DELIMITER` directive is detected, the app rejects the entire submitted script before sending any statement to MySQL, rather than splitting it into pieces and risking partial execution. Run procedure/function/trigger scripts in a MySQL client that supports `DELIMITER`, or submit ordinary SQL without the client directive.
+### Stored procedures and DELIMITER
+MySQL Editor recognizes standalone MySQL-client `DELIMITER` directives at statement boundaries, uses the active delimiter to keep compound routine bodies together, and removes the client-only directive lines before sending SQL to MySQL. You can switch delimiters (for example, to `//` or `$$`) and restore `;` later in the same script. Malformed delimiter commands fail before the script is queued, so earlier statements are not submitted accidentally. This is a statement-boundary parser, not a full MySQL grammar or semantic validator; the server remains authoritative for SQL validity and permissions.
 
 ### Windows flags the installer or executable
 Unsigned preview packages can display unknown-publisher warnings. Verify the repository, release notes, and SHA-256 hash when available before deciding whether to run a downloaded artifact. Do not treat a successful build as proof that a file is signed.
@@ -383,7 +383,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 
 ## Known limitations
 
-- MySQL DELIMITER directives and compound stored-program parsing are not implemented. Standalone DELIMITER directives are rejected before execution; stored-program scripts still require a client that understands MySQL client commands.
+- Script splitting supports standalone MySQL-client DELIMITER changes and compound stored-program boundaries, but it is not a full MySQL grammar or semantic validator. Malformed directives fail closed before submission.
 - Table preview is limited to 1,000 rows; the result grid displays up to 2,000 rows per result.
 - Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
 - Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.
