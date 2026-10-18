@@ -339,7 +339,6 @@ class MainWindow(QMainWindow):
             button.setText(f"{icon}  {label}")
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             button.setObjectName("navButton")
-            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.setMinimumHeight(38)
             button.setCheckable(label != "Connections")
             button.setAccessibleName(label)
@@ -355,6 +354,10 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda checked=False, value=label: self._navigate(value))
             navigation_layout.addWidget(button)
             self.workspace_nav_buttons[label] = button
+        # QButtonGroup can leave unchecked exclusive buttons outside the Tab chain.
+        # Normalize the policy after every navigation control has joined the group.
+        for button in self.workspace_nav_buttons.values():
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         navigation_layout.addStretch(1)
         privacy_hint = QLabel("LOCAL WORKSPACE  ·  DIRECT MYSQL CONNECTION")
         privacy_hint.setObjectName("navHint")
