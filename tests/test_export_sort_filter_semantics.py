@@ -141,3 +141,45 @@ def test_appending_pages_preserves_fetch_order_and_updates_the_sorted_filter_pro
         model.deleteLater()
         proxy.deleteLater()
         _APP.processEvents()
+
+def test_result_proxy_sort_is_numeric_aware_and_keeps_nulls_at_bottom():
+    model = ResultsModel(
+        ["value"],
+        [[10], [None], [2], ["11"], ["alpha"], ["Beta"]],
+    )
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(model)
+    try:
+        proxy.sort(0, Qt.SortOrder.AscendingOrder)
+        _APP.processEvents()
+        ascending = [proxy.index(row, 0).data() for row in range(proxy.rowCount())]
+        assert ascending == ["2", "10", "11", "alpha", "Beta", "(NULL)"]
+
+        proxy.sort(0, Qt.SortOrder.DescendingOrder)
+        _APP.processEvents()
+        descending = [proxy.index(row, 0).data() for row in range(proxy.rowCount())]
+        assert descending == ["Beta", "alpha", "11", "10", "2", "(NULL)"]
+    finally:
+        model.deleteLater()
+        proxy.deleteLater()
+        _APP.processEvents()
+
+
+def test_result_proxy_sort_keeps_null_last_when_all_non_null_values_are_numeric():
+    model = ResultsModel(["value"], [[None], [10], [2]])
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(model)
+    try:
+        for order, expected in (
+            (Qt.SortOrder.AscendingOrder, ["2", "10", "(NULL)"]),
+            (Qt.SortOrder.DescendingOrder, ["10", "2", "(NULL)"]),
+        ):
+            proxy.sort(0, order)
+            _APP.processEvents()
+            assert [
+                proxy.index(row, 0).data() for row in range(proxy.rowCount())
+            ] == expected
+    finally:
+        model.deleteLater()
+        proxy.deleteLater()
+        _APP.processEvents()
