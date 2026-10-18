@@ -4,12 +4,20 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.ui.tutorial import ProductTourDialog
 
 
 _APP = QApplication.instance() or QApplication([])
+
+
+def _dispose_tour(tour):
+    tour.close()
+    tour.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _APP.processEvents()
 
 
 class SettingsStub:
@@ -30,13 +38,14 @@ def test_guided_tour_reduce_motion_skips_page_animation():
         assert dialog._fade_effect is None
         assert dialog.pages.graphicsEffect() is None
     finally:
-        dialog.close()
-        _APP.processEvents()
+        _dispose_tour(dialog)
 
 
 def test_guided_tour_interruption_and_close_restore_page_stack():
     dialog = ProductTourDialog(settings=SettingsStub(False))
     try:
+        dialog.show()
+        _APP.processEvents()
         dialog._go(1)
         assert dialog._fade is not None
         first_animation_id = id(dialog._fade)
@@ -56,5 +65,4 @@ def test_guided_tour_interruption_and_close_restore_page_stack():
         assert dialog._fade_effect is None
         assert dialog.pages.graphicsEffect() is None
     finally:
-        dialog.close()
-        _APP.processEvents()
+        _dispose_tour(dialog)
