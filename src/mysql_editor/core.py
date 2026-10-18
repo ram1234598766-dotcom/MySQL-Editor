@@ -33,7 +33,7 @@ _DELIMITER_DIRECTIVE = re.compile(
     r"[ \t]*DELIMITER[ \t]+(\S+)[ \t]*", re.IGNORECASE
 )
 _COMPOUND_ROUTINE_START = re.compile(
-    r"^\s*CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:DEFINER\s*=\s+.*?)?"
+    r"^\s*CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:DEFINER\s*=\s*.*?)?"
     r"(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b.*?\bBEGIN\b",
     re.IGNORECASE | re.DOTALL,
 )
