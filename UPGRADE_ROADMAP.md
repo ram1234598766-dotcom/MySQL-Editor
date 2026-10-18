@@ -61,7 +61,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 
 - SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
 - The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
-- Result display is capped at 2,000 rows per query result; table preview is capped at 1,000 rows. CSV export is based on the fetched result spool.
+- Query results initially load up to 2,000 rows; additional pages are read from the local result spool on demand. Table preview remains capped at 1,000 rows, and CSV export reads the full fetched result spool in server-fetch order.
 - Query cancellation is best-effort and depends on server permissions/state.
 - Some MySQL DDL implicitly commits.
 - Risk detection and history redaction are heuristic; neither is a complete parser or security boundary.
@@ -674,3 +674,18 @@ The Windows release workflow now runs a release-specific test matrix on Python 3
 Added `tools/create_release_manifest.py` with regression tests. It requires the onedir executable, portable executable, installer, folder ZIP, CycloneDX SBOM, release notes, signing disclosure, and third-party license inventory. It records the exact source SHA, project version, platform/toolchain metadata, per-artifact byte sizes and SHA-256 digests, and the current unsigned state. It rejects missing/tiny executables, malformed source SHAs, invalid SBOM metadata, and invalid/incomplete folder archives. `SHA256SUMS` includes the manifest and all final executables. The manifest does not replace a trusted Authenticode signature.
 
 Automated status is determined by the release workflow run on the exact candidate commit. This record does not mark a release ready by itself. **Still pending outside CI:** hands-on Windows display-scale checks, keyboard-only coverage, a Narrator/screen-reader check, real Credential Manager behavior, and connection/TLS validation against the target MySQL environment. See [RELEASE-CANDIDATE-CHECKLIST.md](RELEASE-CANDIDATE-CHECKLIST.md) for the test record to complete before a stable release.
+
+
+### Advanced capability upgrade — Phase 2: result pagination — 18 October 2026
+
+The result grid now has a **Fetch +1,000** action. It requests the next bounded page from the worker-owned SQLite result spool; it never reruns, rewrites, or appends a LIMIT/OFFSET clause to the user's SQL. The initial preview remains capped at 2,000 rows, and the additional page size is clamped to 1,000 rows. Paging remains available after disconnect while the current worker cache exists, because it is a local cache read rather than a MySQL action.
+
+The result model appends rows incrementally without resetting the model. Sorting remains a proxy-model operation, the active quick filter continues to apply to appended rows, and each result retains its own loaded-page state when switching between statement results. CSV export remains independent of the UI preview and reads the complete spooled result in server-fetch order.
+
+Automated acceptance added:
+- Worker tests for ordered page boundaries, a clamped page size, invalid/expired results and negative offsets.
+- UI tests for the first and final page, preventing duplicate page requests, disallowing paging while a query is active, and retaining the current filter while rows are appended.
+- A regression test that verifies appended rows are inserted incrementally while the proxy continues to sort/filter and the source model preserves server-fetch order.
+- The complete CSV export assertion remains over every spooled row, regardless of paging.
+
+The phase is complete only when lint/compile, Python 3.12–3.14 tests, MySQL 8.4 integration, Windows Qt smoke, and the Windows installer/EXE packaging workflow all pass on the exact PR head. The resulting build is an Actions artifact until separately published by the release workflow.
