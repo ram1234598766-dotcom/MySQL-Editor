@@ -191,3 +191,19 @@ def test_malformed_delimiter_directive_fails_closed(source, line):
 
     assert caught.value.line == line
     assert "script was not submitted" in str(caught.value).lower()
+
+
+def test_compound_routine_without_an_early_delimiter_fails_closed():
+    source = (
+        "CREATE PROCEDURE example()\n"
+        "BEGIN\n"
+        "  SELECT 1;\n"
+        "  DELIMITER $$\n"
+        "END$$"
+    )
+
+    with pytest.raises(ScriptParseError, match="DELIMITER to be set before") as caught:
+        split_sql_statements(source)
+
+    assert caught.value.line == 1
+    assert "script was not submitted" in str(caught.value).lower()
