@@ -359,7 +359,10 @@ class DatabaseWorker(QThread):
                 payload.get("offset", 0),
                 payload.get("limit", RESULT_PAGE_ROWS),
             )
-        if action in {"query", "schema", "schema_objects", "table_preview", "use_schema", "commit", "rollback"} and self._connection is None:
+        if action in {
+            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
+            "use_schema", "commit", "rollback",
+        } and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
             return self._execute_script(str(payload.get("sql", "")))
@@ -388,6 +391,12 @@ class DatabaseWorker(QThread):
             return self._read_schema_objects(str(payload.get("schema", "")))
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
+        if action == "inspect_schema_object":
+            return self._inspect_schema_object(
+                str(payload.get("schema", "") or ""),
+                str(payload.get("table", "") or ""),
+                str(payload.get("object_type", "") or ""),
+            )
         if action == "commit":
             self._connection.commit()
             return {
@@ -706,6 +715,262 @@ class DatabaseWorker(QThread):
             "ok": True, "schema": schema, "objects": objects,
             "columns_by_table": columns_by_table,
             "column_metadata_truncated": column_metadata_truncated,
+        }
+
+    def _inspect_schema_object(
+        self, schema: str, table: str, object_type: str = ""
+    ) -> dict[str, Any]:
+        """Read table/view definition and metadata without executing object SQL."""
+        schema = str(schema or "")
+        table = str(table or "")
+        if not schema or not table:
+            return {"ok": False, "error": "A schema and table/view name are required."}
+        if self._connection is None:
+            return {"ok": False, "error": "Not connected to a MySQL server."}
+
+        warnings: list[str] = []
+
+        def read_rows(query: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
+            cursor = self._connection.cursor()
+            try:
+                if params is None:
+                    cursor.execute(query)
+                else:
+                    cursor.execute(query, params)
+                field_names = [str(description[0]) for description in (cursor.description or [])]
+                return [
+                    dict(zip(field_names, row, strict=False))
+                    for row in cursor.fetchall()
+                ]
+            finally:
+                cursor.close()
+
+        def field(record: dict[str, Any], *names: str) -> Any:
+            lowered = {str(key).casefold(): value for key, value in record.items()}
+            for name in names:
+                if name.casefold() in lowered:
+                    return lowered[name.casefold()]
+            return None
+
+        def text_value(value: Any, *, null: str = "") -> str:
+            return null if value is None else str(value)
+
+        def query_failure(section: str, exc: Exception) -> dict[str, Any] | None:
+            """Return a terminal connection-loss result, or record an optional metadata warning."""
+            detail = safe_db_error(exc)
+            if is_connection_lost(exc):
+                return {
+                    "ok": False,
+                    "schema": schema,
+                    "table": table,
+                    "object_type": object_type,
+                    "definition": "",
+                    "properties": {},
+                    "columns": [],
+                    "indexes": [],
+                    "constraints": [],
+                    "warnings": warnings + [f"{section}: {detail}"],
+                    "error": detail,
+                    "connection_lost": True,
+                }
+            warnings.append(f"{section}: {detail}")
+            return None
+
+        try:
+            properties_rows = read_rows(
+                "SELECT TABLE_TYPE, ENGINE, ROW_FORMAT, TABLE_ROWS, DATA_LENGTH, "
+                "INDEX_LENGTH, AUTO_INCREMENT, CREATE_TIME, UPDATE_TIME, TABLE_COMMENT "
+                "FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                (schema, table),
+            )
+        except Exception as exc:
+            terminal = query_failure("Object properties unavailable", exc)
+            if terminal is not None:
+                return terminal
+            return {
+                "ok": False,
+                "schema": schema,
+                "table": table,
+                "object_type": object_type,
+                "definition": "",
+                "properties": {},
+                "columns": [],
+                "indexes": [],
+                "constraints": [],
+                "warnings": warnings,
+                "error": (
+                    "Could not read this object's metadata. Check the MySQL account's "
+                    "metadata permissions and confirm the object still exists."
+                ),
+            }
+
+        if not properties_rows:
+            return {
+                "ok": False,
+                "schema": schema,
+                "table": table,
+                "object_type": object_type,
+                "definition": "",
+                "properties": {},
+                "columns": [],
+                "indexes": [],
+                "constraints": [],
+                "warnings": [],
+                "error": (
+                    f"{safe_identifier(schema)}.{safe_identifier(table)} was not found "
+                    "or is no longer visible to this MySQL account."
+                ),
+            }
+
+        raw_properties = properties_rows[0]
+        actual_type = text_value(field(raw_properties, "TABLE_TYPE"), null=object_type or "MySQL object")
+        normalized_type = "VIEW" if actual_type.casefold() == "view" else "BASE TABLE"
+        properties = {
+            "Object type": actual_type,
+            "Storage engine": field(raw_properties, "ENGINE"),
+            "Row format": field(raw_properties, "ROW_FORMAT"),
+            "Estimated rows": field(raw_properties, "TABLE_ROWS"),
+            "Data size (bytes)": field(raw_properties, "DATA_LENGTH"),
+            "Index size (bytes)": field(raw_properties, "INDEX_LENGTH"),
+            "Next auto-increment": field(raw_properties, "AUTO_INCREMENT"),
+            "Created": field(raw_properties, "CREATE_TIME"),
+            "Last updated": field(raw_properties, "UPDATE_TIME"),
+            "Comment": field(raw_properties, "TABLE_COMMENT"),
+        }
+
+        definition = ""
+        ddl_query = (
+            f"SHOW CREATE VIEW {safe_identifier(schema)}.{safe_identifier(table)}"
+            if normalized_type == "VIEW"
+            else f"SHOW CREATE TABLE {safe_identifier(schema)}.{safe_identifier(table)}"
+        )
+        try:
+            ddl_rows = read_rows(ddl_query)
+            if ddl_rows:
+                ddl_record = ddl_rows[0]
+                ddl_field = next(
+                    (
+                        key for key in ddl_record
+                        if str(key).casefold().startswith("create ")
+                    ),
+                    None,
+                )
+                if ddl_field is not None:
+                    definition = text_value(ddl_record.get(ddl_field))
+                else:
+                    values = list(ddl_record.values())
+                    definition = text_value(values[1]) if len(values) > 1 else ""
+            if not definition:
+                warnings.append("Definition: MySQL returned no CREATE statement for this object.")
+        except Exception as exc:
+            terminal = query_failure("Definition unavailable", exc)
+            if terminal is not None:
+                return terminal
+
+        columns: list[dict[str, Any]] = []
+        try:
+            column_rows = read_rows(
+                "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, "
+                "COLUMN_DEFAULT, COLUMN_KEY, EXTRA, CHARACTER_SET_NAME, COLLATION_NAME, "
+                "COLUMN_COMMENT "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                "ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            for record in column_rows:
+                columns.append({
+                    "position": field(record, "ORDINAL_POSITION"),
+                    "name": text_value(field(record, "COLUMN_NAME")),
+                    "type": text_value(field(record, "COLUMN_TYPE")),
+                    "nullable": text_value(field(record, "IS_NULLABLE")),
+                    "default": field(record, "COLUMN_DEFAULT"),
+                    "key": text_value(field(record, "COLUMN_KEY")),
+                    "extra": text_value(field(record, "EXTRA")),
+                    "charset": text_value(field(record, "CHARACTER_SET_NAME")),
+                    "collation": text_value(field(record, "COLLATION_NAME")),
+                    "comment": text_value(field(record, "COLUMN_COMMENT")),
+                })
+        except Exception as exc:
+            terminal = query_failure("Column metadata unavailable", exc)
+            if terminal is not None:
+                return terminal
+
+        indexes: list[dict[str, Any]] = []
+        try:
+            index_rows = read_rows(
+                f"SHOW INDEX FROM {safe_identifier(table)} FROM {safe_identifier(schema)}"
+            )
+            for record in index_rows:
+                non_unique = field(record, "Non_unique")
+                try:
+                    unique = int(non_unique) == 0
+                except (TypeError, ValueError, OverflowError):
+                    unique = False
+                indexes.append({
+                    "name": text_value(field(record, "Key_name")),
+                    "unique": "Yes" if unique else "No",
+                    "position": field(record, "Seq_in_index"),
+                    "column": field(record, "Column_name"),
+                    "expression": field(record, "Expression"),
+                    "collation": field(record, "Collation"),
+                    "cardinality": field(record, "Cardinality"),
+                    "prefix_length": field(record, "Sub_part"),
+                    "type": text_value(field(record, "Index_type")),
+                    "visible": text_value(
+                        field(record, "Visible"),
+                        null="Not reported by this MySQL version",
+                    ),
+                    "comment": text_value(field(record, "Index_comment", "Comment")),
+                })
+        except Exception as exc:
+            terminal = query_failure("Index metadata unavailable", exc)
+            if terminal is not None:
+                return terminal
+
+        constraints: list[dict[str, Any]] = []
+        try:
+            constraint_rows = read_rows(
+                "SELECT tc.CONSTRAINT_NAME, tc.CONSTRAINT_TYPE, kcu.COLUMN_NAME, "
+                "kcu.ORDINAL_POSITION, kcu.REFERENCED_TABLE_SCHEMA, "
+                "kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME "
+                "FROM information_schema.TABLE_CONSTRAINTS AS tc "
+                "LEFT JOIN information_schema.KEY_COLUMN_USAGE AS kcu "
+                "ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA "
+                "AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA "
+                "AND tc.TABLE_NAME = kcu.TABLE_NAME "
+                "AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME "
+                "WHERE tc.TABLE_SCHEMA = %s AND tc.TABLE_NAME = %s "
+                "ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
+                (schema, table),
+            )
+            for record in constraint_rows:
+                constraints.append({
+                    "name": text_value(field(record, "CONSTRAINT_NAME")),
+                    "type": text_value(field(record, "CONSTRAINT_TYPE")),
+                    "column": text_value(field(record, "COLUMN_NAME")),
+                    "position": field(record, "ORDINAL_POSITION"),
+                    "referenced_schema": text_value(field(record, "REFERENCED_TABLE_SCHEMA")),
+                    "referenced_table": text_value(field(record, "REFERENCED_TABLE_NAME")),
+                    "referenced_column": text_value(field(record, "REFERENCED_COLUMN_NAME")),
+                })
+        except Exception as exc:
+            terminal = query_failure("Constraint metadata unavailable", exc)
+            if terminal is not None:
+                return terminal
+
+        return {
+            "ok": True,
+            "schema": schema,
+            "table": table,
+            "object_type": actual_type,
+            "definition": definition,
+            "properties": properties,
+            "columns": columns,
+            "indexes": indexes,
+            "constraints": constraints,
+            "warnings": warnings,
         }
 
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
