@@ -23,7 +23,7 @@ class ScriptParseError(ValueError):
     def __init__(self, line: int, detail: str) -> None:
         self.line = line
         super().__init__(
-            f"Invalid MySQL DELIMITER directive on line {line}: {detail}. "
+            f"MySQL script parsing failed on line {line}: {detail}. "
             "The script was not submitted."
         )
 
@@ -81,13 +81,15 @@ def iter_statement_spans(source: str) -> Iterator[StatementSpan]:
                 )
             next_delimiter = match.group(1)
             if (
-                next_delimiter[0] in {"'", '"', chr(96), "#"}
+                any(char in next_delimiter for char in ("'", '"', chr(96)))
+                or next_delimiter.startswith("#")
                 or next_delimiter.startswith("--")
                 or next_delimiter.startswith("/*")
             ):
                 raise ScriptParseError(
                     line_number,
-                    "the delimiter cannot begin with SQL quote or comment syntax",
+                    "the delimiter must not contain quote characters or begin with "
+                    "SQL comment syntax",
                 )
             for position in range(i, line_end):
                 clean[position] = " "
