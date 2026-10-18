@@ -179,8 +179,10 @@ def current_statement(source: str, cursor_position: int) -> str:
             return span.sql
     # Cursor commonly rests immediately after a delimiter or on trailing whitespace.
     for span in reversed(spans):
-        if span.end <= cursor_position and not source[span.end:cursor_position].strip():
-            return span.sql
+        if span.end <= cursor_position:
+            gap = source[span.end:cursor_position]
+            if not any(ch.isalnum() or ch == "_" for ch in gap):
+                return span.sql
     return ""
 
 _DESTRUCTIVE = re.compile(
