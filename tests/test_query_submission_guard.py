@@ -62,6 +62,83 @@ def _make_window(tmp_path):
     return window, repository, worker
 
 
+def test_fetch_more_rows_uses_local_cache_and_preserves_active_filter(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "paged-result",
+        "kind": "rows",
+        "headers": ["name"],
+        "rows": [["Alpha"], ["Bravo"]],
+        "row_count": 4,
+        "preview_truncated": True,
+        "duration_ms": 7,
+    }
+    window._query_results = [item]
+    try:
+        window._select_result(0, total_duration=12)
+        assert window.fetch_more_button.isEnabled()
+        assert window.fetch_more_button.text() == "Fetch +2"
+        window.result_filter.setText("alpha")
+        assert window.result_proxy.rowCount() == 1
+
+        # Paging is temporarily disabled while a SQL statement is active.
+        before = len(worker.submissions)
+        window._query_running = True
+        window._set_result_controls()
+        assert not window.fetch_more_button.isEnabled()
+        window.fetch_more_result_rows()
+        assert len(worker.submissions) == before
+        window._query_running = False
+        window._set_result_controls()
+
+        window.fetch_more_result_rows()
+        job_id = worker.submissions[-1][2]
+        action, payload, _task_id = worker.submissions[-1]
+        assert action == "fetch_result_page"
+        assert payload == {
+            "result_id": "paged-result",
+            "offset": 2,
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+        assert window.fetch_more_button.text() == "Loading…"
+        assert not window.fetch_more_button.isEnabled()
+
+        # Repeated clicks while a page is outstanding cannot enqueue duplicate reads.
+        window.fetch_more_result_rows()
+        assert len(worker.submissions) == before + 1
+        assert not any(
+            submitted_action == "query"
+            for submitted_action, _submitted_payload, _submitted_id in worker.submissions[before:]
+        )
+
+        window._on_worker_completed(
+            job_id,
+            "fetch_result_page",
+            {
+                "ok": True,
+                "result_id": "paged-result",
+                "offset": 2,
+                "rows": [["Alpha again"], ["Delta"]],
+                "row_count": 4,
+                "page_size": 1000,
+                "has_more": False,
+            },
+        )
+
+        assert item["rows"] == [["Alpha"], ["Bravo"], ["Alpha again"], ["Delta"]]
+        assert window.result_model.rowCount() == 4
+        assert window.result_filter.text() == "alpha"
+        assert window.result_proxy.rowCount() == 2
+        assert window.fetch_more_button.text() == "All Rows Loaded"
+        assert not window.fetch_more_button.isEnabled()
+        assert "SQL was not rerun" in window.status.text()
+        assert "all 4 fetched row(s)" in window.result_message.text()
+    finally:
+        window._query_running = False
+        window.close()
+        repository.close()
+
+
 def test_second_sql_submission_is_rejected_while_query_is_active(tmp_path):
     window, repository, worker = _make_window(tmp_path)
     try:
