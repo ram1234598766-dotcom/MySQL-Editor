@@ -41,7 +41,8 @@ The Windows workflow also uploads the complete package folder and a simulated di
 
 ### Results and query feedback
 - Multiple statement results, sortable preview grid, case-insensitive visible-row filter, row/column copy actions, and a cell-details view with **Copy full value**.
-- CSV export writes atomically, uses fetched rows rather than only visible filtered rows, and preserves server-fetch order after grid sorting.
+- Large query results initially load up to 2,000 rows. The **Fetch +1,000** button adds up to 1,000 rows from the local result cache without rerunning or changing the SQL.
+- CSV export writes atomically, uses every fetched row in the spool rather than only loaded/filtered grid rows, and preserves server-fetch order after grid sorting or paging.
 - CSV uses an unquoted `\\N` token for SQL NULL; empty text stays an empty field. Backslash-leading text is escaped so it remains distinguishable from NULL.
 - Query lifecycle feedback distinguishes execution, fetching, cancellation requests, confirmed interruption, partial script failure, and export progress where the worker can report it.
 - Standalone MySQL client `DELIMITER` directives such as `//` and `$$` are handled as client commands, not sent to the server. Compound stored-program bodies stay intact across internal semicolons; malformed directives and routine bodies that would be split under the default delimiter fail closed before any part of the script is submitted.
@@ -59,6 +60,7 @@ The Windows workflow also uploads the complete package folder and a simulated di
 
 - **Unsigned binary:** Windows may show SmartScreen or unknown-publisher warnings. Do not bypass a warning solely because the file is hosted on GitHub. Review the repository and release, and compare a package's SHA-256 hash against `SHA256SUMS`. A matching hash detects file mismatches; it does not prove software safety.
 - **Manual Windows QA remains necessary:** automated/offscreen and runner-based tests cannot certify every display scale, hardware configuration, real Windows Credential Manager state, installer-upgrade path, or remote MySQL/TLS environment.
+- **Result paging:** only the initial 2,000 rows are loaded into the grid at query completion; use **Fetch +1,000** to retrieve further pages from the local result cache. CSV export remains complete even if additional pages were not loaded.
 - **MySQL server required:** MySQL Editor is a client and does not install or automatically start the database server.
 - **TLS:** Automatic TLS can encrypt traffic without verifying server identity. Prefer Verify server identity for remote or untrusted networks. Disabled TLS should only be used when its lack of transport encryption is understood and accepted.
 - **Cancellation:** stopping a query is best-effort and depends on server state, permissions and network conditions.
