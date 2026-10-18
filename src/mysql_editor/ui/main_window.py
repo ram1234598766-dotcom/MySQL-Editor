@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QApplication, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -328,8 +328,6 @@ class MainWindow(QMainWindow):
         navigation_layout = QHBoxLayout(navigation)
         navigation_layout.setContentsMargins(16, 6, 16, 6)
         navigation_layout.setSpacing(6)
-        self.workspace_nav_group = QButtonGroup(self)
-        self.workspace_nav_group.setExclusive(True)
         self.workspace_nav_buttons: dict[str, QToolButton] = {}
         for label, icon in [
             ("SQL Editor", "▤"), ("Connections", "◇"), ("Schema explorer", "▦"),
@@ -341,6 +339,7 @@ class MainWindow(QMainWindow):
             button.setObjectName("navButton")
             button.setMinimumHeight(38)
             button.setCheckable(label != "Connections")
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.setAccessibleName(label)
             button.setToolTip({
                 "SQL Editor": "Return to the SQL editor",
@@ -349,8 +348,6 @@ class MainWindow(QMainWindow):
                 "Query history": "Review opt-in local query history",
                 "Saved queries": "Open saved SQL snippets",
             }[label])
-            if label != "Connections":
-                self.workspace_nav_group.addButton(button)
             button.clicked.connect(lambda checked=False, value=label: self._navigate(value))
             navigation_layout.addWidget(button)
             self.workspace_nav_buttons[label] = button
@@ -989,9 +986,11 @@ class MainWindow(QMainWindow):
             )
 
     def _set_workspace_nav(self, destination: str):
-        button = self.workspace_nav_buttons.get(destination)
-        if button is not None and button.isCheckable():
-            button.setChecked(True)
+        # Navigation buttons are separate Tab stops, not a radio group. Manage the
+        # selected visual state directly so Qt cannot remove Tab focus from siblings.
+        for label, button in self.workspace_nav_buttons.items():
+            if button.isCheckable():
+                button.setChecked(label == destination)
 
     def _navigate(self, destination: str):
         if destination == "SQL Editor":
