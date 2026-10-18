@@ -245,3 +245,17 @@ def test_current_statement_source_does_not_include_previous_statements():
     assert execution_source.startswith("DELIMITER //")
     assert "CREATE PROCEDURE" not in execution_source
     assert split_sql_statements(execution_source) == ["SELECT 2"]
+
+
+def test_definer_routine_without_delimiter_fails_closed_even_without_spaces():
+    source = (
+        "CREATE DEFINER='routine_user'@'localhost' PROCEDURE example()\n"
+        "BEGIN\n"
+        "  SELECT 1;\n"
+        "END"
+    )
+
+    with pytest.raises(ScriptParseError, match="DELIMITER to be set before") as caught:
+        split_sql_statements(source)
+
+    assert caught.value.line == 1
