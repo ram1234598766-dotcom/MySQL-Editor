@@ -5,7 +5,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.storage import LocalRepository
@@ -247,6 +248,7 @@ def test_main_workspace_controls_expose_accessible_names(tmp_path, monkeypatch):
         worker, repository, object(), profile, config, {"database": "app_db"}
     )
     controls = (
+        *window.workspace_nav_buttons.values(),
         window.connection_badge,
         window.tour_button,
         window.connect_button,
@@ -286,6 +288,77 @@ def test_main_workspace_controls_expose_accessible_names(tmp_path, monkeypatch):
             "Interactive workspace controls and status regions need accessible names: "
             f"{missing}"
         )
+    finally:
+        window.close()
+        worker.shutdown()
+        repository.close()
+        _APP.processEvents()
+
+
+
+def test_workspace_navigation_and_sql_actions_support_keyboard_focus(
+    tmp_path, monkeypatch,
+):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "workspace-keyboard-focus.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-keyboard", "name": "Development", "host": "localhost",
+        "port": 3306, "username": "reader",
+    }
+    config = {
+        "host": "localhost", "port": 3306, "username": "reader",
+        "default_schema": "app_db", "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(
+        worker, repository, object(), profile, config, {"database": "app_db"}
+    )
+    try:
+        window.resize(1280, 820)
+        window.show()
+        _APP.processEvents()
+
+        # Every workspace destination must participate in keyboard focus navigation.
+        nav_buttons = tuple(window.workspace_nav_buttons.values())
+        assert nav_buttons
+        for button in nav_buttons:
+            assert button.accessibleName().strip()
+            assert button.focusPolicy() & Qt.FocusPolicy.TabFocus, (
+                f"{button.accessibleName()!r} must be reachable with Tab"
+            )
+            button.setFocus(Qt.FocusReason.OtherFocusReason)
+            _APP.processEvents()
+            assert _APP.focusWidget() is button, (
+                f"{button.accessibleName()!r} must accept keyboard focus"
+            )
+
+        # Verify actual Tab traversal within the adjacent SQL action toolbar.
+        editor = window._current_editor()
+        editor.setPlainText("SELECT 1;")
+        _APP.processEvents()
+        actions = (
+            window.format_button,
+            window.explain_button,
+            window.run_selection_button,
+            window.run_button,
+        )
+        visible_enabled = [
+            control for control in actions
+            if control.isVisible() and control.isEnabled()
+        ]
+        assert len(visible_enabled) >= 2, "At least two SQL actions should be keyboard reachable"
+        first = visible_enabled[0]
+        first.setFocus(Qt.FocusReason.OtherFocusReason)
+        _APP.processEvents()
+        assert _APP.focusWidget() is first
+        for current, expected in zip(visible_enabled, visible_enabled[1:], strict=False):
+            QTest.keyClick(current, Qt.Key.Key_Tab)
+            _APP.processEvents()
+            assert _APP.focusWidget() is expected, (
+                f"Tab from {current.accessibleName()!r} should focus "
+                f"{expected.accessibleName()!r}"
+            )
     finally:
         window.close()
         worker.shutdown()
