@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from mysql_editor.core import (
-    ScriptParseError, classify_statement, current_statement, format_sql,
+    ScriptParseError, classify_statement, current_statement, current_statement_source, format_sql,
     redact_secrets, redact_sql_secrets, split_sql_statements,
 )
 from mysql_editor.database import DatabaseWorker
@@ -1245,7 +1245,7 @@ class MainWindow(QMainWindow):
             return cursor.selectedText().replace("\u2029", "\n")
         if whole_script:
             return editor.toPlainText()
-        return current_statement(editor.toPlainText(), cursor.position())
+        return current_statement_source(editor.toPlainText(), cursor.position())
 
     def execute_current(self, selection_only: bool = False):
         try:
