@@ -918,7 +918,10 @@ class DatabaseWorker(QThread):
                     "cardinality": field(record, "Cardinality"),
                     "prefix_length": field(record, "Sub_part"),
                     "type": text_value(field(record, "Index_type")),
-                    "visible": field(record, "Visible"),
+                    "visible": text_value(
+                        field(record, "Visible"),
+                        null="Not reported by this MySQL version",
+                    ),
                     "comment": text_value(field(record, "Index_comment", "Comment")),
                 })
         except Exception as exc:
