@@ -43,6 +43,7 @@ from mysql_editor.ui.preferences import (
 )
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
+from mysql_editor.ui.schema_inspector import SchemaObjectInspectorDialog
 from mysql_editor.recent_files import (
     MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
 )
@@ -936,7 +937,10 @@ class MainWindow(QMainWindow):
         self._set_editor_font_size(10)
 
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
-        database_actions = {"query", "schema", "schema_objects", "table_preview", "use_schema", "commit", "rollback"}
+        database_actions = {
+            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
+            "use_schema", "commit", "rollback",
+        }
         if action in database_actions and (
             not self._connection_available or self._disconnect_pending
         ):
@@ -1763,6 +1767,22 @@ class MainWindow(QMainWindow):
             "Review it before execution."
         )
 
+    def _inspect_schema_object(self, schema: str, table: str, object_type: str = "") -> None:
+        if not schema or not table:
+            return
+        if self._query_running:
+            self.status.setText(
+                "Object inspection paused · wait for the active SQL statement to finish."
+            )
+            return
+        task_id = self._dispatch(
+            "inspect_schema_object",
+            {"schema": schema, "table": table, "object_type": object_type},
+            {"schema": schema, "table": table, "object_type": object_type},
+        )
+        if task_id:
+            self.status.setText(f"Reading definition and metadata for {qualified_identifier(schema, table)}…")
+
     def _show_schema_context(self, point):
         item = self.schema_tree.itemAt(point)
         if item is None:
@@ -1797,6 +1817,7 @@ class MainWindow(QMainWindow):
         type_action.setEnabled(False)
         menu.addSeparator()
         copy_action = menu.addAction("Copy qualified identifier")
+        inspect_action = menu.addAction("Inspect DDL and metadata…")
         select_action = menu.addAction("Create SELECT preview in new tab")
         preview_action = menu.addAction("Preview table now")
         refresh_action = menu.addAction("Refresh schema")
@@ -1805,6 +1826,8 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QApplication
             QApplication.clipboard().setText(qualified)
             self.status.setText(f"Copied {qualified}")
+        elif chosen == inspect_action:
+            self._inspect_schema_object(schema, table, object_type)
         elif chosen == select_action:
             self._generate_select_for_table(schema, table)
         elif chosen == preview_action:
@@ -1971,6 +1994,27 @@ class MainWindow(QMainWindow):
                 self.status.setText(
                     f"Loaded {len(page_rows):,} additional row(s) from the local result cache · "
                     f"{len(loaded_rows):,} of {total:,} shown. SQL was not rerun."
+                )
+            return
+        if action == "inspect_schema_object":
+            schema = str(context.get("schema") or result.get("schema") or "")
+            table = str(context.get("table") or result.get("table") or "")
+            qualified = qualified_identifier(schema, table) if schema and table else "the selected object"
+            if not result.get("ok"):
+                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                message = detail or "MySQL could not return metadata for this object."
+                self.status.setText(f"Object inspection failed · {message}")
+                QMessageBox.warning(self, "Object Inspector", message)
+                return
+            dialog = SchemaObjectInspectorDialog(result, self)
+            dialog.exec()
+            if result.get("warnings"):
+                self.status.setText(
+                    f"Opened read-only metadata for {qualified} · some sections are unavailable; see Messages."
+                )
+            else:
+                self.status.setText(
+                    f"Inspected {qualified} · no MySQL object or row data was changed."
                 )
             return
         if action == "schema_objects":
