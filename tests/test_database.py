@@ -1,5 +1,5 @@
 from mysql_editor.database import (
-    DatabaseWorker, is_connection_lost, is_query_interrupted, safe_db_error,
+    DatabaseWorker, RESULT_PAGE_ROWS, is_connection_lost, is_query_interrupted, safe_db_error,
 )
 
 
@@ -76,6 +76,76 @@ def _csv_spool():
         );
     """)
     return SimpleNamespace(_spool=spool)
+
+
+def test_fetch_result_page_reads_bounded_pages_from_the_local_spool(tmp_path):
+    import csv
+    import json
+
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    result_id = "large-result"
+    total = 3505
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["row_number"]), "SELECT row_number", total),
+    )
+    worker._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [(result_id, index, json.dumps([index])) for index in range(total)],
+    )
+    worker._spool.commit()
+
+    try:
+        first_page = worker._dispatch(
+            "fetch_result_page",
+            {"result_id": result_id, "offset": 2000, "limit": 9000},
+        )
+        assert first_page["ok"] is True
+        assert first_page["offset"] == 2000
+        assert first_page["row_count"] == total
+        assert first_page["page_size"] == RESULT_PAGE_ROWS
+        assert len(first_page["rows"]) == RESULT_PAGE_ROWS
+        assert first_page["rows"][0] == [2000]
+        assert first_page["rows"][-1] == [2999]
+        assert first_page["has_more"] is True
+
+        final_page = worker._dispatch(
+            "fetch_result_page",
+            {"result_id": result_id, "offset": 3000, "limit": 9000},
+        )
+        assert final_page["ok"] is True
+        assert len(final_page["rows"]) == 505
+        assert final_page["rows"][0] == [3000]
+        assert final_page["rows"][-1] == [3504]
+        assert final_page["has_more"] is False
+
+        # Paging reads a copy of rows; the spool and CSV export stay complete.
+        destination = tmp_path / "all-rows.csv"
+        exported = DatabaseWorker._export_csv(worker, result_id, str(destination))
+        assert exported["ok"] is True
+        assert exported["row_count"] == total
+        with destination.open(encoding="utf-8-sig", newline="") as handle:
+            exported_rows = list(csv.reader(handle))
+        assert len(exported_rows) == total + 1
+        assert exported_rows[1] == ["0"]
+        assert exported_rows[-1] == ["3504"]
+
+        missing = worker._dispatch(
+            "fetch_result_page",
+            {"result_id": "missing-result", "offset": 0},
+        )
+        assert missing["ok"] is False
+        assert "expired" in missing["error"].lower()
+        negative = worker._dispatch(
+            "fetch_result_page",
+            {"result_id": result_id, "offset": -1},
+        )
+        assert negative["ok"] is False
+        assert "negative" in negative["error"].lower()
+    finally:
+        worker._cleanup_resources()
 
 
 def test_csv_export_replaces_existing_file_only_after_success(tmp_path):
