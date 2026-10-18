@@ -21,7 +21,7 @@ def test_shared_style_colors_are_resolved():
     assert "@TYPE_" not in STYLESHEET
     assert "@RADIUS_" not in STYLESHEET
     assert "@SIZE_" not in STYLESHEET
-    assert not re.search(r"#[0-9A-Fa-f]{3,8}\\b", _STYLESHEET_TEMPLATE)
+    assert not re.search(r"#[0-9A-Fa-f]{3,8}\b", _STYLESHEET_TEMPLATE)
 
 
 def test_shared_style_colors_translate_to_light_theme():
