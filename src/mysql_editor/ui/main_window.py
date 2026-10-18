@@ -21,7 +21,7 @@ from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source, format_sql,
     redact_secrets, redact_sql_secrets, split_sql_statements,
 )
-from mysql_editor.database import DatabaseWorker
+from mysql_editor.database import DatabaseWorker, RESULT_PAGE_ROWS
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
 from mysql_editor.ui.animations import fade_in
 from mysql_editor.ui.connection_context import (
@@ -83,6 +83,17 @@ class ResultsModel(QAbstractTableModel):
         self.headers = list(headers)
         self.rows = list(rows)
         self.endResetModel()
+
+    def append_rows(self, rows) -> None:
+        """Append a result page without resetting existing rows or selection state."""
+        additions = [list(row) for row in rows]
+        if not additions:
+            return
+        first = len(self.rows)
+        last = first + len(additions) - 1
+        self.beginInsertRows(QModelIndex(), first, last)
+        self.rows.extend(additions)
+        self.endInsertRows()
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.rows)
@@ -194,6 +205,7 @@ class MainWindow(QMainWindow):
         self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
+        self._result_page_load_pending = None
         self._result_base_message = "Ready. Run a query to view results."
         self._query_results: list[dict] = []
         self._last_duration = 0
@@ -458,6 +470,15 @@ class MainWindow(QMainWindow):
         self.rollback_button.setAccessibleName("Roll back active transaction")
         self.rollback_button.setToolTip("Roll back the current transaction when MySQL permits it.")
         self.rollback_button.clicked.connect(lambda: self._dispatch("rollback", {}))
+        self.fetch_more_button = QPushButton("Fetch +1,000")
+        self.fetch_more_button.setObjectName("fetchMoreRowsButton")
+        self.fetch_more_button.setAccessibleName("Fetch more result rows from the local result cache")
+        self.fetch_more_button.setToolTip(
+            "Append up to 1,000 more already-fetched rows from the local result cache. "
+            "This does not rerun or modify SQL. CSV export still includes every fetched row."
+        )
+        self.fetch_more_button.setEnabled(False)
+        self.fetch_more_button.clicked.connect(self.fetch_more_result_rows)
         self.export_button = QPushButton("↓  Export CSV")
         self.export_button.setAccessibleName("Export fetched result rows to CSV")
         self.export_button.setAccessibleDescription(CSV_EXPORT_SEMANTICS)
@@ -469,6 +490,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.stop_button)
         toolbar.addWidget(self.commit_button)
         toolbar.addWidget(self.rollback_button)
+        toolbar.addWidget(self.fetch_more_button)
         toolbar.addWidget(self.export_button)
         result_layout.addLayout(toolbar)
         self.result_model = ResultsModel(
@@ -942,6 +964,7 @@ class MainWindow(QMainWindow):
         if action == "query":
             self._cancellation_requested = False
             self._query_running = True
+            self._set_result_controls()
             self.run_button.setEnabled(False)
             self.stop_button.setEnabled(True)
             self.commit_button.setEnabled(False)
@@ -950,6 +973,8 @@ class MainWindow(QMainWindow):
             self.status.setText("Query queued…")
         elif action == "export_csv":
             self.status.setText("CSV export queued…")
+        elif action == "fetch_result_page":
+            self.status.setText("Loading additional rows from the local result cache…")
         return job_id
 
     def _report_query_busy(self, operation: str) -> None:
@@ -1233,8 +1258,99 @@ class MainWindow(QMainWindow):
         self._refresh_find_count()
         self._update_editor_position()
 
+    def _result_item_by_id(self, result_id: str | None):
+        if not result_id:
+            return None
+        return next(
+            (item for item in self._query_results if item.get("result_id") == result_id),
+            None,
+        )
+
     def _set_result_controls(self):
         self.export_button.setEnabled(bool(self._current_result_id))
+        item = self._result_item_by_id(self._current_result_id)
+        rows = item.get("rows", []) if item else []
+        try:
+            total = max(len(rows), int(item.get("row_count", len(rows)) or 0)) if item else 0
+        except (TypeError, ValueError, OverflowError):
+            total = len(rows)
+        loaded = len(rows)
+        has_more = bool(
+            item
+            and str(item.get("kind", "")).casefold() == "rows"
+            and loaded < total
+            and not item.get("page_load_unavailable")
+        )
+        pending = self._result_page_load_pending is not None
+        if pending:
+            self.fetch_more_button.setText("Loading…")
+            self.fetch_more_button.setToolTip(
+                "Loading the next page from the local result cache. SQL is not rerun."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif self._query_running and has_more:
+            self.fetch_more_button.setText("Query Running…")
+            self.fetch_more_button.setToolTip(
+                "Fetching another page is paused until the active SQL operation completes."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif has_more:
+            next_count = min(RESULT_PAGE_ROWS, total - loaded)
+            self.fetch_more_button.setText(f"Fetch +{next_count:,}")
+            self.fetch_more_button.setToolTip(
+                f"Append the next {next_count:,} row(s) from the local result cache. "
+                "This does not rerun or modify SQL. CSV export still includes every fetched row."
+            )
+            self.fetch_more_button.setEnabled(True)
+        elif item and str(item.get("kind", "")).casefold() == "rows" and not item.get("page_load_unavailable"):
+            self.fetch_more_button.setText("All Rows Loaded")
+            self.fetch_more_button.setToolTip(
+                "All fetched rows are already loaded in the grid. CSV export keeps server-fetch order."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif item and item.get("page_load_unavailable"):
+            self.fetch_more_button.setText("Fetch Unavailable")
+            self.fetch_more_button.setToolTip(
+                "The local result cache could not supply more rows. Run the query again to rebuild it."
+            )
+            self.fetch_more_button.setEnabled(False)
+        else:
+            self.fetch_more_button.setText("Fetch +1,000")
+            self.fetch_more_button.setToolTip(
+                "Load another page from the local result cache when a result contains more than the displayed rows."
+            )
+            self.fetch_more_button.setEnabled(False)
+
+    def fetch_more_result_rows(self) -> None:
+        """Append the next spool page without re-executing the SQL statement."""
+        if self._query_running or self._result_page_load_pending is not None:
+            return
+        result_id = self._current_result_id
+        item = self._result_item_by_id(result_id)
+        if not item or str(item.get("kind", "")).casefold() != "rows":
+            self._set_result_controls()
+            return
+        rows = item.get("rows", [])
+        try:
+            total = max(len(rows), int(item.get("row_count", len(rows)) or 0))
+        except (TypeError, ValueError, OverflowError):
+            total = len(rows)
+        offset = len(rows)
+        if offset >= total or item.get("page_load_unavailable"):
+            self._set_result_controls()
+            return
+        job_id = self._dispatch(
+            "fetch_result_page",
+            {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS},
+            {"result_id": result_id, "offset": offset},
+        )
+        if job_id:
+            self._result_page_load_pending = {
+                "job_id": job_id,
+                "result_id": result_id,
+                "offset": offset,
+            }
+            self._set_result_controls()
 
     def _query_for_run(self, selection_only=False, whole_script=False):
         editor = self._current_editor()
@@ -1795,6 +1911,68 @@ class MainWindow(QMainWindow):
                 self.refresh_history()
             if action == "query":
                 self._flush_deferred_export_notifications()
+            return
+        if action == "fetch_result_page":
+            pending_page = self._result_page_load_pending
+            if pending_page and pending_page.get("job_id") == job_id:
+                self._result_page_load_pending = None
+            result_id = str(context.get("result_id") or "")
+            item = self._result_item_by_id(result_id)
+            if not result.get("ok"):
+                if item is not None:
+                    item["page_load_unavailable"] = True
+                if not self._query_running:
+                    detail = str(result.get("error") or "The local result cache could not supply more rows.")
+                    self.status.setText("Could not fetch more rows · " + detail)
+                self._set_result_controls()
+                return
+            if item is None:
+                self._set_result_controls()
+                return
+            loaded_rows = item.setdefault("rows", [])
+            try:
+                expected_offset = max(0, int(context.get("offset", 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                expected_offset = -1
+            if expected_offset != len(loaded_rows):
+                if not self._query_running:
+                    self.status.setText(
+                        "Additional rows were not added because this result changed while paging. "
+                        "Run the query again if more rows are needed."
+                    )
+                self._set_result_controls()
+                return
+            page_rows = [list(row) for row in (result.get("rows") or [])]
+            try:
+                total = max(0, int(result.get("row_count", item.get("row_count", len(loaded_rows))) or 0))
+            except (TypeError, ValueError, OverflowError):
+                total = max(len(loaded_rows), int(item.get("row_count", len(loaded_rows)) or 0))
+            if not page_rows and expected_offset < total:
+                item["page_load_unavailable"] = True
+                if not self._query_running:
+                    self.status.setText(
+                        "No additional rows were returned by the local result cache. Run the query again."
+                    )
+                self._set_result_controls()
+                return
+            loaded_rows.extend(page_rows)
+            item["row_count"] = total
+            item["preview_truncated"] = len(loaded_rows) < total
+            if self._current_result_id == result_id:
+                self.result_model.append_rows(page_rows)
+                self._result_fetched_row_count = total
+                if self.result_filter.text().strip():
+                    self._filter_results(self.result_filter.text())
+                else:
+                    self._set_result_message(
+                        result_summary_message(item, len(loaded_rows), total)
+                    )
+            self._set_result_controls()
+            if not self._query_running and self._current_result_id == result_id:
+                self.status.setText(
+                    f"Loaded {len(page_rows):,} additional row(s) from the local result cache · "
+                    f"{len(loaded_rows):,} of {total:,} shown. SQL was not rerun."
+                )
             return
         if action == "schema_objects":
             item = self._schema_expand_items.get(job_id)

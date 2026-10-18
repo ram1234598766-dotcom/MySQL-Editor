@@ -19,6 +19,7 @@ from mysql_editor.core import ScriptParseError, redact_sql_secrets, safe_identif
 
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
+RESULT_PAGE_ROWS = 1000
 
 CSV_NULL_TOKEN = r"\N"  # noqa: S105 - CSV marker, not a credential.
 
@@ -350,6 +351,14 @@ class DatabaseWorker(QThread):
         if action == "disconnect":
             self._close_connection()
             return {"ok": True}
+        # Reading already-fetched rows from the local SQLite spool does not require
+        # an active MySQL connection and never re-executes the user's SQL.
+        if action == "fetch_result_page":
+            return self._fetch_result_page(
+                str(payload.get("result_id", "") or ""),
+                payload.get("offset", 0),
+                payload.get("limit", RESULT_PAGE_ROWS),
+            )
         if action in {"query", "schema", "schema_objects", "table_preview", "use_schema", "commit", "rollback"} and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
@@ -394,6 +403,88 @@ class DatabaseWorker(QThread):
         if action == "export_csv":
             return self._export_csv(str(payload["result_id"]), str(payload["path"]))
         return {"ok": False, "error": f"Unknown worker action: {action}"}
+
+    def _fetch_result_page(
+        self, result_id: str, offset: Any = 0, limit: Any = RESULT_PAGE_ROWS
+    ) -> dict[str, Any]:
+        """Read a bounded page from a fetched result without contacting MySQL."""
+        if self._spool is None:
+            return {
+                "ok": False,
+                "error": "The result cache is no longer available.",
+                "result_id": result_id,
+                "offset": 0,
+                "rows": [],
+            }
+        try:
+            page_offset = int(offset)
+        except (TypeError, ValueError, OverflowError):
+            return {
+                "ok": False, "error": "The result page offset is invalid.",
+                "result_id": result_id, "offset": 0, "rows": [],
+            }
+        if page_offset < 0:
+            return {
+                "ok": False, "error": "The result page offset cannot be negative.",
+                "result_id": result_id, "offset": page_offset, "rows": [],
+            }
+        try:
+            page_limit = int(limit)
+        except (TypeError, ValueError, OverflowError):
+            page_limit = RESULT_PAGE_ROWS
+        page_limit = min(RESULT_PAGE_ROWS, max(1, page_limit))
+        chosen_result_id = str(result_id or "").strip()
+        if not chosen_result_id:
+            return {
+                "ok": False, "error": "A result identifier is required.",
+                "result_id": chosen_result_id, "offset": page_offset, "rows": [],
+            }
+        try:
+            meta = self._spool.execute(
+                "SELECT row_count FROM result_meta WHERE result_id=?",
+                (chosen_result_id,),
+            ).fetchone()
+            if meta is None:
+                return {
+                    "ok": False,
+                    "error": "This query result has expired. Run the query again.",
+                    "result_id": chosen_result_id,
+                    "offset": page_offset,
+                    "rows": [],
+                }
+            total_rows = max(0, int(meta[0] or 0))
+            if page_offset > total_rows:
+                return {
+                    "ok": False,
+                    "error": "The requested result page is beyond the end of this result.",
+                    "result_id": chosen_result_id,
+                    "offset": page_offset,
+                    "rows": [],
+                    "row_count": total_rows,
+                }
+            page = self._spool.execute(
+                "SELECT values_json FROM result_rows "
+                "WHERE result_id=? ORDER BY row_idx LIMIT ? OFFSET ?",
+                (chosen_result_id, page_limit, page_offset),
+            ).fetchall()
+            rows = [json.loads(value_json) for (value_json,) in page]
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "result_id": chosen_result_id,
+                "offset": page_offset,
+                "rows": [],
+            }
+        return {
+            "ok": True,
+            "result_id": chosen_result_id,
+            "offset": page_offset,
+            "rows": rows,
+            "row_count": total_rows,
+            "page_size": page_limit,
+            "has_more": page_offset + len(rows) < total_rows,
+        }
 
     def _save_rows(self, result_id: str, headers: list[str], statement: str, rows: list[list[Any]]) -> None:
         assert self._spool is not None
