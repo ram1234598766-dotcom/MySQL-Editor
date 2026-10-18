@@ -100,3 +100,44 @@ def test_sorting_and_filtering_preview_preserve_complete_csv_fetch_order(tmp_pat
         model.deleteLater()
         proxy.deleteLater()
         _APP.processEvents()
+
+
+def test_appending_pages_preserves_fetch_order_and_updates_the_sorted_filter_proxy():
+    source_rows = [["zeta", 30], ["Alpha", 10]]
+    page_one = [["Match row", 20]]
+    page_two = [["match second", 15]]
+    model = ResultsModel(["name", "rank"], source_rows)
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(model)
+    proxy.setFilterKeyColumn(-1)
+    proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+    proxy.sort(1, Qt.SortOrder.AscendingOrder)
+    proxy.setFilterFixedString("MATCH")
+    _APP.processEvents()
+    inserted = []
+    model.rowsInserted.connect(
+        lambda _parent, first, last: inserted.append((first, last))
+    )
+
+    try:
+        assert proxy.rowCount() == 0
+
+        model.append_rows(page_one)
+        _APP.processEvents()
+        assert inserted == [(2, 2)]
+        assert model.rows == source_rows + page_one
+        assert proxy.rowCount() == 1
+        assert proxy.index(0, 0).data() == "Match row"
+
+        model.append_rows(page_two)
+        _APP.processEvents()
+        assert inserted == [(2, 2), (3, 3)]
+        assert model.rows == source_rows + page_one + page_two
+        assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == [
+            "match second",
+            "Match row",
+        ]
+    finally:
+        model.deleteLater()
+        proxy.deleteLater()
+        _APP.processEvents()
