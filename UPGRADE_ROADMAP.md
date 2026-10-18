@@ -689,3 +689,19 @@ Automated acceptance added:
 - The complete CSV export assertion remains over every spooled row, regardless of paging.
 
 The phase is complete only when lint/compile, Python 3.12–3.14 tests, MySQL 8.4 integration, Windows Qt smoke, and the Windows installer/EXE packaging workflow all pass on the exact PR head. The resulting build is an Actions artifact until separately published by the release workflow.
+
+### Phase 4–8 automated verification checkpoint — 18 October 2026
+
+**Verified source commit:** `bfa4c9eb0d30d088f5c0388d48b0626dac1a8b4b`
+
+The transaction-safe connection-switch regression tests are merged on `main`. The following GitHub Actions workflows completed successfully for this exact source commit:
+
+- Desktop CI: Python 3.12, 3.13, and 3.14 test jobs; Windows Qt UI smoke; MySQL 8.4 integration.
+- Desktop dependency security audit.
+- Windows packages: release test matrix, MySQL 8.4 integration, dependency audit, application-folder build, portable executable build, Inno Setup installer build, installer install/uninstall smoke test, packaged-app launch smoke test, expected-output verification, SBOM and release manifest generation, and SHA-256 checksums.
+
+The Windows workflow uploaded the `MySQLEditor-Windows` and `MySQLEditor-UI-Visual-QA` Actions artifacts. These are CI artifacts, not a stable GitHub Release. The successful packaging run does not constitute hands-on acceptance.
+
+**Still not verified on a physical Windows PC:** 100%/125%/150%/200% display scaling and multi-monitor behavior; keyboard-only end-to-end use; Narrator/screen-reader behavior; real Windows Credential Manager behavior; and connection/TLS validation against the intended MySQL environment. Publisher trust is also not established by CI artifacts or SHA-256 hashes; the binaries must be Authenticode-signed and the signature verified if trusted publisher identity is required.
+
+Do not mark Phase 8 fully complete or promote a stable release until the manual checklist above in `RELEASE-CANDIDATE-CHECKLIST.md` has an evidence-backed outcome.
