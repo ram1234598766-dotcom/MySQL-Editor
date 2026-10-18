@@ -1,5 +1,5 @@
 from mysql_editor.ui.theme import (
-    COMPONENT_SIZES, EDITOR_PALETTES, RADII, SPACING, STYLESHEET, TOKENS, TYPOGRAPHY,
+    COMPONENT_SIZES, EDITOR_PALETTES, RADII, SPACING, STYLESHEET, STYLE_COLORS, TOKENS, TYPOGRAPHY,
     color_for_theme, normalize_theme, resolve_theme, stylesheet_for_theme,
 )
 
