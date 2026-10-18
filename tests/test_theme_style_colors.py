@@ -1,4 +1,11 @@
-from mysql_editor.ui.theme import STYLE_COLORS, STYLESHEET, stylesheet_for_theme
+import re
+
+from mysql_editor.ui.theme import (
+    STYLE_COLORS,
+    STYLESHEET,
+    _STYLESHEET_TEMPLATE,
+    stylesheet_for_theme,
+)
 
 
 def test_shared_style_colors_are_resolved():
@@ -14,6 +21,7 @@ def test_shared_style_colors_are_resolved():
     assert "@TYPE_" not in STYLESHEET
     assert "@RADIUS_" not in STYLESHEET
     assert "@SIZE_" not in STYLESHEET
+    assert not re.search(r"#[0-9A-Fa-f]{3,8}\\b", _STYLESHEET_TEMPLATE)
 
 
 def test_shared_style_colors_translate_to_light_theme():
