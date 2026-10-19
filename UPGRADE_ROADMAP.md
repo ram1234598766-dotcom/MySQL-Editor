@@ -367,6 +367,7 @@ Tasks:
 - Test credential save/read/delete errors and missing or invalid Windows Credential Manager backend behavior.
 - Exercise SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
 - Test result spool cleanup on normal shutdown and exceptional shutdown; keep fetched rows and CSV files treated as sensitive.
+- Implement an optional stable-release update check that is disabled by default, uses a bounded background HTTPS request, validates release versions and canonical project release URLs, has no automatic download/install path, and sends no database or usage data.
 - Audit all user-visible database errors for useful context and secret redaction without exposing raw credentials.
 - Run \`pip-audit\`, review dependency licence inventory, keep a deliberate version support matrix and update dependencies in small, tested batches.
 - Avoid broad “upgrade everything to latest” changes without checking Python/Qt/connector/PyInstaller/Inno Setup compatibility.
@@ -377,6 +378,7 @@ Exit gate:
 - No known blocking regression remains in the release-candidate test suite.
 - Dependency audit result is reviewed; failures are resolved or explicitly documented before release.
 - Tests prove cleanup/recovery behaviour; visual finish does not substitute for reliability.
+- Update-check tests prove the default state makes no network request, non-stable/unsafe metadata is rejected, time/response size are bounded, and release URLs are restricted to this repository.
 
 ### Phase 8 — Release candidate and real Windows QA
 
@@ -769,7 +771,7 @@ The signing-configuration check ran successfully on this main build, but the sig
 1. **SQL parser:** Adopt SQLGlot, with a custom MySQL `DELIMITER` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
 2. **SSH tunneling:** Defer to a later phase. Do not include SSH tunneling in the initial Windows desktop scope.
 3. **Platform:** Windows 10 and Windows 11 only for this roadmap.
-4. **Update checker:** Optional and disabled by default. Do not initiate update checks unless the user explicitly enables the feature.
+4. **Update checker:** Automatic startup checks are optional and disabled by default. A user-initiated **Help → Check for updates** action may run a one-time check without changing the startup preference. Never fetch update metadata automatically unless the user has opted in.
 5. **Windows signing:** Use a **self-signed code-signing certificate** for the planned signing path, rather than assuming a publicly trusted certificate is available. Preview artifacts may remain unsigned until release. Stable-release candidates must disclose the certificate type and pass actual signature verification if signed. A self-signed certificate is not trusted by Windows on other machines by default and does not remove SmartScreen warnings; Microsoft documents self-signed certificates as appropriate for development/testing, not broad public distribution. Do not describe such a build as signed by a publicly trusted publisher or promise warning-free installation. See [Microsoft's SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation) and [code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options).
 6. **Accent palette:** Keep the existing teal-and-indigo direction. Refine contrast, state colors, and consistency without changing the core palette.
 
@@ -809,3 +811,15 @@ The [current-main Windows package workflow](https://github.com/ram1234598766-dot
 - [ ] Review the produced signed release manifest and `SHA256SUMS` for the exact binaries before promoting a stable release.
 
 **Important boundary:** main/preview artifacts remain unsigned by policy. The disposable-EXE smoke test proves the repository's configured PFX is usable and correctly pinned; it is not a signed product release. No stable version-tag release was published by this work.
+
+### Phase 7 follow-up — opt-in stable-release update checker — 19 October 2026
+
+The initial implementation is in branch `feat/opt-in-stable-release-checker` for CI validation.
+
+- Automatic update checks are disabled by default and remain off until the user checks **Settings → Updates → Automatically check for updates at startup**. An explicit **Help → Check for updates** action performs one request without turning on future startup checks.
+- The checker uses the fixed public GitHub `/releases/latest` endpoint; it sends no SQL, MySQL connection details, database credentials, result rows, device identifiers, or usage history. The installed version is used in the User-Agent, and GitHub receives normal request metadata such as the network IP address.
+- Network work runs in a QThread with a 4.5-second URL timeout and a 512 KiB response limit. Stable `X.Y.Z` tags only are compared; draft/prerelease responses, malformed responses, and release links outside the exact repository HTTPS release path are rejected.
+- The UI offers the official release page for manual review only; there is no auto-download, installer, or auto-update path. Result and cleanup callbacks are queued to the Qt UI thread.
+- Regression coverage includes version parsing, safe/unsafe links, update/up-to-date comparisons, missing release, malformed/oversized responses, network failure, and an explicit default-off UI check.
+
+CI outcomes and merge status will be recorded once the focused PR completes.

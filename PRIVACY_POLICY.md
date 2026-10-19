@@ -17,6 +17,8 @@ The clean-room MySQL Editor is a local Windows SQL client. This implementation i
 
 The app connects to the host and port chosen in its connection dialog. SQL and credentials are sent to that database connection, subject to the selected TLS policy. Automatic TLS does not verify server identity; strict mode enables certificate and hostname verification.
 
+Automatic update checks are **disabled by default**. Only after the user enables **Settings → Updates → Automatically check for updates at startup** does the app request public stable-release metadata from GitHub on startup. Separately, choosing **Help → Check for updates** performs a one-time check explicitly requested by the user without enabling automatic checks. The request includes the installed app version in its User-Agent and normal request metadata handled by GitHub (such as the network IP address). It does not include SQL, MySQL connection details, database credentials, result rows, device identifiers, or query history. The app does not download or install updates automatically.
+
 ## User controls
 
 Query history can be enabled or disabled from Settings. Disabling it clears history. Saved profiles and their stored passwords can be removed from the app and Windows Credential Manager. To remove local settings completely, close the app and delete its user-data directory. This does not delete MySQL data.
