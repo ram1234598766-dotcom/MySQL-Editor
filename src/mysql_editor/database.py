@@ -1282,12 +1282,14 @@ class DatabaseWorker(QThread):
                 tuple([new_value, *primary_key_values, expected_old]),
             )
             affected = int(cursor.rowcount or 0)
+            update_applied = affected > 0
             if affected > 1:
                 return {
                     "ok": False,
-                    "error": "MySQL matched more than one row for a primary-key edit. No further action was taken.",
+                    "error": "MySQL updated more than one row for a primary-key edit. Inspect the active transaction and use Rollback if those changes were not intended.",
+                    "update_applied": True,
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
                 }
-            update_applied = affected == 1
 
             cursor.execute(f"SELECT * FROM {qualified_table} WHERE {where_keys}", tuple(primary_key_values))
             current_row = cursor.fetchone()
@@ -1345,13 +1347,19 @@ class DatabaseWorker(QThread):
                 "message": "Cell value updated in the active MySQL session.",
             }
         except Exception as exc:
-            if is_connection_lost(exc):
+            connection_lost = is_connection_lost(exc)
+            if connection_lost:
                 self._close_connection()
+            try:
+                transaction_open = bool(getattr(connection, "in_transaction", False))
+            except Exception:
+                transaction_open = False
             return {
                 "ok": False,
                 "error": safe_db_error(exc),
                 "update_applied": update_applied,
-                "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                "transaction_open": transaction_open,
+                "connection_lost": connection_lost,
             }
         finally:
             if cursor is not None:
