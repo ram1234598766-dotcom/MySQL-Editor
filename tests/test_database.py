@@ -1228,7 +1228,6 @@ def test_schema_inspector_uses_show_create_view_for_views():
     )
 
 def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
-    import json
     import sqlite3
 
     worker = DatabaseWorker()
@@ -1675,7 +1674,7 @@ def test_single_cell_update_rejects_preview_from_prior_connection_session():
         item = worker._preview_table("analytics", "items")["results"][0]
         edit = item["table_edit"]
         stale_session = edit["session_token"]
-        worker._session_token = "different-active-session"
+        worker._session_token = f"{stale_session}-new-session"
 
         result = worker._update_table_cell({
             "result_id": item["result_id"],
