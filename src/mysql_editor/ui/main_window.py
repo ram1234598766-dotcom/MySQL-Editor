@@ -8,8 +8,8 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
+from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
@@ -44,6 +44,7 @@ from mysql_editor.ui.preferences import (
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
 from mysql_editor.ui.schema_inspector import SchemaObjectInspectorDialog
+from mysql_editor.update_checker import UpdateCheckResult, UpdateCheckThread, is_safe_release_url
 from mysql_editor.recent_files import (
     MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
 )
@@ -213,6 +214,10 @@ class MainWindow(QMainWindow):
         self._last_sql = ""
         self._last_saved_paths: dict[int, str] = {}
         self._settings = QSettings()
+        self._update_checks_enabled = normalize_boolean_preference(
+            self._settings.value("updates/automaticCheck", False), False
+        )
+        self._update_check_thread: UpdateCheckThread | None = None
         self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
         self._show_editor_line_numbers = normalize_boolean_preference(
             self._settings.value("ui/showLineNumbers", True), True
@@ -248,6 +253,7 @@ class MainWindow(QMainWindow):
         self.new_query_tab()
         self._update_connection_status()
         QTimer.singleShot(150, self.refresh_schema)
+        QTimer.singleShot(1400, self._maybe_check_for_updates_on_startup)
 
     def _set_icon(self):
         import sys
@@ -766,6 +772,17 @@ class MainWindow(QMainWindow):
             density_group.addAction(action)
             density_menu.addAction(action)
 
+        updates_menu = settings_menu.addMenu("Updates")
+        self.update_checks_action = QAction("Automatically check for updates at startup", self)
+        self.update_checks_action.setCheckable(True)
+        self.update_checks_action.setChecked(self._update_checks_enabled)
+        self.update_checks_action.setToolTip(
+            "When enabled, check the latest stable GitHub Release at startup. "
+            "Only public release metadata is requested; updates are never downloaded or installed automatically."
+        )
+        self.update_checks_action.toggled.connect(self._set_update_checks_enabled)
+        updates_menu.addAction(self.update_checks_action)
+
         history_menu = settings_menu.addMenu("Query History")
         history_action = QAction("Enable local query history", self)
         history_action.setCheckable(True)
@@ -775,6 +792,7 @@ class MainWindow(QMainWindow):
         self._action(history_menu, "Clear query history", "", self.clear_history)
         help_menu = self.menuBar().addMenu("&Help")
         self._action(help_menu, "Guided tour", "F1", self._show_product_tour)
+        self._action(help_menu, "Check for updates…", "", self.check_for_updates)
         self._action(help_menu, "SQL safety information", "", self.show_safety_info)
         self._action(help_menu, "About MySQL Editor", "", self.show_about)
 
@@ -813,6 +831,122 @@ class MainWindow(QMainWindow):
         action.triggered.connect(lambda _checked=False: callback())
         menu.addAction(action)
         return action
+
+    def _set_update_checks_enabled(self, enabled: bool) -> None:
+        """Persist the explicit opt-in controlling startup update requests."""
+        self._update_checks_enabled = bool(enabled)
+        self._settings.setValue("updates/automaticCheck", self._update_checks_enabled)
+        self._settings.sync()
+        if self._update_checks_enabled:
+            self.status.setText(
+                "Automatic update checks enabled for future startups. "
+                "Use Help → Check for updates to check now."
+            )
+        else:
+            self.status.setText("Update checks disabled. No update metadata will be requested on startup.")
+
+    def check_for_updates(self) -> None:
+        """Run an on-demand update check only after the user opted in."""
+        self._run_update_check(manual=True)
+
+    def _maybe_check_for_updates_on_startup(self) -> None:
+        if self._update_checks_enabled:
+            self._run_update_check(manual=False)
+
+    def _run_update_check(self, *, manual: bool) -> None:
+        if not self._update_checks_enabled:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "Update checks are disabled",
+                    "No network request was made. To enable this optional feature, open "
+                    "Settings → Updates and turn on “Automatically check for updates at startup”.",
+                )
+            return
+
+        current = self._update_check_thread
+        if current is not None and current.isRunning():
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "Update check in progress",
+                    "A GitHub Releases check is already running. Please wait for it to finish.",
+                )
+            return
+
+        thread = UpdateCheckThread(parent=self)
+        self._update_check_thread = thread
+        thread.result_ready.connect(
+            lambda result, started_manually=manual:
+            self._on_update_check_result(result, manual=started_manually)
+        )
+        thread.finished.connect(lambda completed_thread=thread: self._on_update_check_finished(completed_thread))
+        self.status.setText("Checking the latest stable GitHub Release…")
+        thread.start()
+
+    def _on_update_check_finished(self, thread: UpdateCheckThread) -> None:
+        if self._update_check_thread is thread:
+            self._update_check_thread = None
+        thread.deleteLater()
+
+    def _on_update_check_result(self, result: UpdateCheckResult, *, manual: bool) -> None:
+        if not manual and not self._update_checks_enabled:
+            return
+
+        if result.status == "update_available" and result.release_url:
+            self.status.setText(f"MySQL Editor {result.latest_version} is available.")
+            message = QMessageBox(self)
+            message.setIcon(QMessageBox.Icon.Information)
+            message.setWindowTitle("MySQL Editor update available")
+            message.setText(f"MySQL Editor {result.latest_version} is available.")
+            message.setInformativeText(
+                f"Installed version: {result.current_version}\n"
+                f"Latest stable release: {result.latest_version}\n\n"
+                "Open the official release page to review its notes and download manually. "
+                "MySQL Editor will not download or install the update for you."
+            )
+            open_button = message.addButton(
+                "Open release page", QMessageBox.ButtonRole.AcceptRole
+            )
+            message.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+            message.exec()
+            if (
+                message.clickedButton() is open_button
+                and is_safe_release_url(result.release_url)
+            ):
+                QDesktopServices.openUrl(QUrl(result.release_url))
+            return
+
+        if result.status == "up_to_date":
+            self.status.setText(
+                f"Update check complete · installed {result.current_version}, "
+                f"latest stable {result.latest_version}."
+            )
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "MySQL Editor is up to date",
+                    f"Installed version: {result.current_version}\n"
+                    f"Latest stable release: {result.latest_version}\n\n"
+                    "No newer stable release is available.",
+                )
+            return
+
+        if result.status == "no_release":
+            self.status.setText("No published stable GitHub Release is available yet.")
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "No stable release available",
+                    "No published stable GitHub Release is available yet. "
+                    "You can continue using this build.",
+                )
+            return
+
+        detail = result.detail or "The update check failed. Try again later."
+        self.status.setText("Update check failed. Use Help → Check for updates to retry.")
+        if manual:
+            QMessageBox.warning(self, "Update check failed", detail)
 
     def _restore_ui_preferences(self):
         geometry = self._settings.value("ui/windowGeometry")
@@ -3073,6 +3207,16 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 break
+        update_thread = self._update_check_thread
+        if update_thread is not None and update_thread.isRunning():
+            # The request has a short socket timeout. Do not destroy a QThread while
+            # it is running; if the timeout is unusually slow, let the user retry close.
+            if not update_thread.wait(6000):
+                self.status.setText(
+                    "The update check is still finishing. Wait a moment, then close again."
+                )
+                event.ignore()
+                return
         self._settings.setValue("ui/windowGeometry", self.saveGeometry())
         self._settings.setValue("ui/mainSplitterSizes", self.main_split.sizes())
         self._settings.setValue("ui/editorResultsSplitterSizes", self.editor_results_split.sizes())
