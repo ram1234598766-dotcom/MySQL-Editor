@@ -81,7 +81,7 @@ try {
         $publicCertificateBytes = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
         [System.IO.File]::WriteAllBytes($certificatePublicPath, $publicCertificateBytes)
         Write-Host "Adding only the public self-signed certificate to this runner's current-user Root store via certutil.exe."
-        & $certutil -user -f -addstore Root $certificatePublicPath
+        & $certutil -silent -user -f -addstore Root $certificatePublicPath
         if ($LASTEXITCODE -ne 0) {
             throw "certutil.exe failed to add the temporary public certificate to the current-user Root store (exit code $LASTEXITCODE)."
         }
@@ -158,7 +158,7 @@ try {
 } finally {
     if ($rootCertificateAdded) {
         Write-Host "Removing the temporary self-signed certificate from this runner's current-user Root store."
-        & $certutil -user -delstore Root $certificate.Thumbprint
+        & $certutil -silent -user -delstore Root $certificate.Thumbprint
         if ($LASTEXITCODE -ne 0) {
             throw "certutil.exe failed to remove the temporary public certificate from the current-user Root store (exit code $LASTEXITCODE)."
         }
