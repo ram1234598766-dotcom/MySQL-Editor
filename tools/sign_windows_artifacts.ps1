@@ -91,14 +91,27 @@ try {
 
     $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
     $kitsRoot = Join-Path $programFilesX86 "Windows Kits\10\bin"
-    $signToolCandidates = @(
-        Get-ChildItem -Path $kitsRoot -Filter signtool.exe -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' }
-    )
-    if ($signToolCandidates.Count -eq 0) {
-        throw "SignTool.exe was not found in the Windows SDK x64 tools directory."
+    Write-Host "Locating SignTool in installed Windows SDK version directories."
+    $signToolCandidates = @()
+    if (Test-Path -LiteralPath $kitsRoot -PathType Container) {
+        $sdkDirectories = Get-ChildItem -LiteralPath $kitsRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object -Property Name -Descending
+        foreach ($sdkDirectory in $sdkDirectories) {
+            $candidate = Join-Path $sdkDirectory.FullName "x64\signtool.exe"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $signToolCandidates += $candidate
+            }
+        }
+        $directCandidate = Join-Path $kitsRoot "x64\signtool.exe"
+        if ((Test-Path -LiteralPath $directCandidate -PathType Leaf) -and $signToolCandidates.Count -eq 0) {
+            $signToolCandidates += $directCandidate
+        }
     }
-    $signTool = $signToolCandidates[0].FullName
+    if ($signToolCandidates.Count -eq 0) {
+        throw "SignTool.exe was not found in the Windows SDK x64 tools directory under $kitsRoot."
+    }
+    $signTool = $signToolCandidates[0]
+    Write-Host "Using SignTool: $signTool"
 
     if ($SkipTimestamp) {
         Write-Host "Timestamping skipped for the temporary signing smoke test only; release signing must timestamp."
@@ -111,11 +124,13 @@ try {
             $signArgs += @("/tr", $env:WINDOWS_SIGNING_TIMESTAMP_URL, "/td", "SHA256")
         }
         $signArgs += @("/f", $certificatePath, "/p", $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD, $target)
+        Write-Host "Signing target: $target"
         & $signTool @signArgs
         if ($LASTEXITCODE -ne 0) {
             throw "SignTool failed to sign $target (exit code $LASTEXITCODE)."
         }
 
+        Write-Host "Verifying Authenticode signature: $target"
         & $signTool verify /pa /all /v $target
         if ($LASTEXITCODE -ne 0) {
             throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
