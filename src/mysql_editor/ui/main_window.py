@@ -1461,8 +1461,10 @@ class MainWindow(QMainWindow):
         )
 
     def _set_result_controls(self):
-        self.export_button.setEnabled(bool(self._current_result_id))
         item = self._result_item_by_id(self._current_result_id)
+        self.export_button.setEnabled(
+            bool(self._current_result_id) and not bool(item and item.get("export_unavailable"))
+        )
         rows = item.get("rows", []) if item else []
         try:
             total = max(len(rows), int(item.get("row_count", len(rows)) or 0)) if item else 0
@@ -2081,6 +2083,20 @@ class MainWindow(QMainWindow):
             self._mark_connection_lost(str(result.get("error", "") or ""))
         preview_rollback_rows = result.get("preview_rollback_rows") or []
         preview_restore_errors = result.get("preview_restore_errors") or []
+        preview_invalidated_result_ids = result.get("preview_invalidated_result_ids") or []
+        for invalidated_result_id in preview_invalidated_result_ids:
+            cached_preview = self._result_item_by_id(str(invalidated_result_id))
+            if cached_preview is None:
+                continue
+            cached_preview["export_unavailable"] = True
+            cached_preview["page_load_unavailable"] = True
+            edit_context = cached_preview.get("table_edit")
+            if isinstance(edit_context, dict):
+                edit_context["enabled"] = False
+                edit_context["reason"] = (
+                    "This preview may be stale after ROLLBACK TO SAVEPOINT; "
+                    "refresh the table before editing or exporting."
+                )
         if preview_rollback_rows:
             self._restore_table_preview_rows(
                 preview_rollback_rows,
@@ -2181,6 +2197,13 @@ class MainWindow(QMainWindow):
                 else:
                     reason = str(edit_context.get("reason") or "this preview is read-only.")
                     self.status.setText(f"Table preview loaded · {reason}")
+            if action == "query" and preview_invalidated_result_ids:
+                current_status = self.status.text().strip()
+                notice = (
+                    "ROLLBACK TO SAVEPOINT completed · cached table previews are invalidated. "
+                    "Re-preview affected tables before editing or exporting."
+                )
+                self.status.setText(f"{current_status} · {notice}" if current_status else notice)
             if action == "query":
                 self._flush_deferred_export_notifications()
             return
