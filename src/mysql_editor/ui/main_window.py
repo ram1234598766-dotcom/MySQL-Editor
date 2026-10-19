@@ -212,6 +212,9 @@ class MainWindow(QMainWindow):
         self._connection_available = True
         self._disconnect_pending = False
         self._jobs: dict[str, tuple[str, dict]] = {}
+        self._task_sequence_counter = 0
+        self._task_sequences: dict[str, int] = {}
+        self._latest_query_sequence = 0
         self._deferred_export_notifications: list[dict] = []
         self._schema_request_id: str | None = None
         self._schema_expansion_requests: dict[str, str] = {}
@@ -1151,6 +1154,11 @@ class MainWindow(QMainWindow):
             )
             return None
         job_id = uuid.uuid4().hex
+        self._task_sequence_counter += 1
+        task_sequence = self._task_sequence_counter
+        self._task_sequences[job_id] = task_sequence
+        if action == "query":
+            self._latest_query_sequence = task_sequence
         self._jobs[job_id] = (action, context or {})
         self.worker.submit(action, payload, job_id)
         if action == "query":
@@ -2073,6 +2081,10 @@ class MainWindow(QMainWindow):
         self._set_result_controls()
 
     def _on_worker_completed(self, job_id: str, action: str, result: dict):
+        # Retain the submission order after the worker finishes. Qt signals can be
+        # queued while a newer query is submitted; completion order alone must not
+        # let an older job reclaim the global status line.
+        task_sequence = self._task_sequences.pop(job_id, None)
         pending = self._jobs.pop(job_id, None)
         if pending is None:
             return
@@ -2537,7 +2549,12 @@ class MainWindow(QMainWindow):
                     "error": str(result.get("error") or "Export failed."),
                 })
                 return
-            self._show_export_notification(result)
+            query_submitted_after_export = (
+                task_sequence is not None and self._latest_query_sequence > task_sequence
+            )
+            self._show_export_notification(
+                result, update_status=not query_submitted_after_export
+            )
 
     def _handle_explain_plan_completed(self, result: dict, context: dict) -> None:
         """Show a structured JSON plan without loading optimizer data into the result grid."""
@@ -2687,6 +2704,15 @@ class MainWindow(QMainWindow):
         action, _context = pending
         if action not in {"query", "export_csv"}:
             return
+        if action == "export_csv":
+            task_sequence = self._task_sequences.get(job_id)
+            if (
+                task_sequence is not None
+                and self._latest_query_sequence > task_sequence
+            ):
+                # This export began before a later query. Its queued progress signals
+                # remain stale even after that query completes.
+                return
         self._on_activity(message)
 
     def _on_activity(self, message: str):
