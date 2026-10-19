@@ -91,7 +91,6 @@ class EditTableCellDialog(QDialog):
         self.cancel_button.setAccessibleName("Cancel cell edit")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        self.apply_button.clicked.connect(self.accept)
         layout.addWidget(buttons)
 
     def new_value(self) -> str | None:
