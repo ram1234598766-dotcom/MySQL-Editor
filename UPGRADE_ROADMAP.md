@@ -68,7 +68,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 - Automatic TLS negotiates encryption where supported but does not verify server identity; strict mode does.
 - The current dark styling is spread through UI code and should be consolidated into reusable design tokens before substantial visual changes.
 - Automated/offscreen tests cannot prove the visual result on every real display configuration.
-- The Windows executable remains unsigned unless a trusted Authenticode signing certificate is configured and the final signature is verified.
+- Preview Windows executables remain unsigned by policy. Stable version-tag builds require a configured code-signing PFX and successful final signature verification; the default self-signed mode does not make recipient PCs trust the publisher certificate.
 
 ---
 
