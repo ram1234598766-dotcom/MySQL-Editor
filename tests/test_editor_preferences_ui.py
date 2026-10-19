@@ -430,3 +430,57 @@ def test_update_checks_are_opt_in_and_disabled_state_never_starts_network_access
         repository.close()
         _APP.processEvents()
 
+def test_manual_update_check_is_explicit_opt_in_without_enabling_startup_checks(
+    tmp_path, monkeypatch,
+):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+
+    class SignalStub:
+        def connect(self, *_args, **_kwargs):
+            pass
+
+    class FakeUpdateThread:
+        def __init__(self, *_args, **_kwargs):
+            self.result_ready = SignalStub()
+            self.finished = SignalStub()
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr("mysql_editor.ui.main_window.UpdateCheckThread", FakeUpdateThread)
+    repository = LocalRepository(tmp_path / "updates-manual.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-manual-updates",
+        "name": "Development",
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+    }
+    config = {
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+        "default_schema": "app_db",
+        "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(worker, repository, object(), profile, config, {"database": "app_db"})
+    try:
+        assert not window.update_checks_action.isChecked()
+        assert settings.values.get("updates/automaticCheck", False) is False
+
+        window.check_for_updates()
+
+        assert isinstance(window._update_check_thread, FakeUpdateThread)
+        assert window._update_check_thread.started is True
+        assert settings.values.get("updates/automaticCheck", False) is False
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
