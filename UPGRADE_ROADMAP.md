@@ -367,7 +367,7 @@ Tasks:
 - Test credential save/read/delete errors and missing or invalid Windows Credential Manager backend behavior.
 - Exercise SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
 - Test result spool cleanup on normal shutdown and exceptional shutdown; keep fetched rows and CSV files treated as sensitive.
-- Implement an optional stable-release update check that is disabled by default, uses a bounded background HTTPS request, validates release versions and canonical project release URLs, has no automatic download/install path, and sends no database or usage data.
+- [x] Implemented the opt-in stable-release update checker in PR #61 and its non-blocking shutdown follow-up in PR #62. Startup checks remain disabled by default; one-time manual checks do not enable the startup preference.
 - Audit all user-visible database errors for useful context and secret redaction without exposing raw credentials.
 - Run \`pip-audit\`, review dependency licence inventory, keep a deliberate version support matrix and update dependencies in small, tested batches.
 - Avoid broad “upgrade everything to latest” changes without checking Python/Qt/connector/PyInstaller/Inno Setup compatibility.
@@ -378,7 +378,7 @@ Exit gate:
 - No known blocking regression remains in the release-candidate test suite.
 - Dependency audit result is reviewed; failures are resolved or explicitly documented before release.
 - Tests prove cleanup/recovery behaviour; visual finish does not substitute for reliability.
-- Update-check tests prove the default state makes no network request, non-stable/unsafe metadata is rejected, time/response size are bounded, and release URLs are restricted to this repository.
+- [x] Update-check tests prove automatic startup checks stay off by default, non-stable/unsafe metadata is rejected, time/response size are bounded, release URLs are restricted to this repository, manual checks work without opting into future startup checks, and close never blocks on the update thread.
 
 ### Phase 8 — Release candidate and real Windows QA
 
@@ -812,14 +812,18 @@ The [current-main Windows package workflow](https://github.com/ram1234598766-dot
 
 **Important boundary:** main/preview artifacts remain unsigned by policy. The disposable-EXE smoke test proves the repository's configured PFX is usable and correctly pinned; it is not a signed product release. No stable version-tag release was published by this work.
 
-### Phase 7 follow-up — opt-in stable-release update checker — 19 October 2026
+### Phase 7 follow-up — opt-in stable-release update checker and shutdown reliability — 19 October 2026
 
-The initial implementation is in branch `feat/opt-in-stable-release-checker` for CI validation.
+**Implementation status: merged.** Automatic stable-release checking is disabled by default, in line with the Phase 0 decision. A one-time Help → Check for updates action does not turn on future startup checks.
 
-- Automatic update checks are disabled by default and remain off until the user checks **Settings → Updates → Automatically check for updates at startup**. An explicit **Help → Check for updates** action performs one request without turning on future startup checks.
-- The checker uses the fixed public GitHub `/releases/latest` endpoint; it sends no SQL, MySQL connection details, database credentials, result rows, device identifiers, or usage history. The installed version is used in the User-Agent, and GitHub receives normal request metadata such as the network IP address.
-- Network work runs in a QThread with a 4.5-second URL timeout and a 512 KiB response limit. Stable `X.Y.Z` tags only are compared; draft/prerelease responses, malformed responses, and release links outside the exact repository HTTPS release path are rejected.
-- The UI offers the official release page for manual review only; there is no auto-download, installer, or auto-update path. Result and cleanup callbacks are queued to the Qt UI thread.
-- Regression coverage includes version parsing, safe/unsafe links, update/up-to-date comparisons, missing release, malformed/oversized responses, network failure, and an explicit default-off UI check.
+- [PR #61](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/61), merged as `c72d5cfb0ba376faf5cd665674ff579d5a3b3f28`, adds the bounded GitHub Releases check, strict stable-tag and URL validation, a background QThread, an explicit Settings toggle, manual-only release-page navigation, and privacy/test documentation.
+- [PR #62](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/62), merged as `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0`, removes the synchronous UI-thread wait during close. If an update check is active, the close event is deferred until the thread finishes; the main window does not block on the network timeout, and update dialogs are suppressed while closing.
+- Regression coverage includes stable-version parsing, safe and unsafe links, newer/equal/older version outcomes, missing stable release, malformed and oversized responses, network failures, default-off behavior, one-time manual checks, and non-blocking close behavior.
 
-CI outcomes and merge status will be recorded once the focused PR completes.
+The required workflows passed on both pull-request heads:
+- PR #61: [desktop CI #409](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39260531405), [dependency security #478](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39260531523), [Windows packages #290](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39260531432).
+- PR #62: [desktop CI #412](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39263894629), [dependency security #481](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39263894519), [Windows packages #293](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39263894491).
+
+The merge-commit desktop CI and dependency-security audit for PR #62 have also passed on `main`. The post-merge Windows package workflow [#294](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39264933203) is the final confirmation of the exact default-branch source and will be recorded when complete.
+
+**Behavior/security boundary:** the checker requests public GitHub release metadata only when automatic checking is enabled or a user explicitly requests a manual check. It sends no SQL, MySQL connection details, database credentials, query results, device identifier, or usage history. It never downloads or installs an update. Preview Windows artifacts remain unsigned by policy.
