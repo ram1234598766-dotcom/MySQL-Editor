@@ -29,15 +29,15 @@ The automated release gates passed on this exact `main` commit:
 
 The Windows workflow produced a `MySQLEditor-Windows` Actions artifact (about 220.7 MB; SHA-256 of the Actions artifact archive: `55b0cb75edb51538bf1b191562737ca174cfd2d68ea6818f6e789622375f1a4d`, artifact ID `12170265978`). Download it from the [Windows workflow run](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104411); the artifact expires on 17 January 2027. The separate `MySQLEditor-UI-Visual-QA` artifact contains simulated-scale captures and expires on 2 November 2026.
 
-**Signing status for this candidate: UNSIGNED.** The signing-configuration check succeeded, but no trusted certificate secrets were configured; both SignTool signing steps were skipped, and the release manifest explicitly reports the unsigned state. This run is not evidence that a publisher certificate or real signing path has been tested. Stable version tags now fail closed unless `WINDOWS_SIGNING_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` are configured and every published executable passes SignTool signature verification. See [`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md). A valid signature does not guarantee SmartScreen or antivirus will never warn.
+**Signing status for this candidate: UNSIGNED.** No signing secrets were configured for this candidate, the SignTool release steps were skipped, and the manifest explicitly reports the unsigned state. Stable version tags fail closed unless `WINDOWS_SIGNING_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` are configured and every published executable passes SignTool signature verification. The selected default is self-signed; the manifest must disclose that recipient PCs do not trust the certificate by default. See [`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md). A signature does not guarantee SmartScreen or antivirus will never warn.
 
 These results are hosted-CI evidence, not physical-PC acceptance. All hands-on Windows items below remain unchecked. Do not promote a stable release until both the manual acceptance record and the publisher-signing gate (if publisher trust is required) are complete.
 
 ## Publisher-trust gate — stable releases
 
-- [ ] Configure a legitimate trusted Authenticode certificate using the two repository Actions secrets documented in `WINDOWS_SIGNING.md`.
+- [ ] Configure a self-signed Code Signing PFX using the two repository Actions secrets documented in `WINDOWS_SIGNING.md` (or choose a trusted CA certificate by setting the repository variable `WINDOWS_SIGNING_CERTIFICATE_TYPE=trusted`). A self-signed certificate is not trusted by recipient PCs by default.
 - [ ] Build a version tag through the release workflow and confirm the application-folder executable, portable EXE, and installer each pass SignTool verification with a timestamp.
-- [ ] Inspect the resulting `RELEASE-MANIFEST.json` and confirm `signing.status` is `signed` and `authenticode_verified` is `true`; verify the downloaded files against `SHA256SUMS`.
+- [ ] Inspect `RELEASE-MANIFEST.json` and confirm `signing.status` is `signed`, `authenticode_verified` is `true`, `certificate_type` is `self-signed`, and `recipient_trust` is `not-trusted-by-default` for the selected mode; verify downloaded files against `SHA256SUMS`.
 
 Preview builds may remain unsigned, but their release notes and manifest must state that clearly. Never infer publisher identity from CI success or hashes alone.
 
