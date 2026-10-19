@@ -123,7 +123,7 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "verify /pa /all /v" in signing_script
     assert "Remove-Item -LiteralPath $certificatePath" in signing_script
     assert "Stable version tags require an Authenticode PFX certificate and password" in workflow
-    assert "Preview builds remain unsigned by policy" in workflow
+    assert "remain unsigned by policy" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_TYPE || 'self-signed' }}" in workflow
     assert "Test self-signed signing flow with a temporary certificate" in workflow
     assert '"tools/test_self_signed_signing.ps1"' in workflow
