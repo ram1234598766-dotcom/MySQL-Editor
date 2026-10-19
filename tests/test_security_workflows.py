@@ -126,6 +126,8 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "remain unsigned by policy" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_TYPE || 'self-signed' }}" in workflow
     assert "Test self-signed signing flow with a temporary certificate" in workflow
+    assert '"tools/create_signing_smoke_executable.ps1"' in workflow
+    assert "where.exe" not in workflow
     assert "Verify configured self-signed certificate without publishing a release" in workflow
     assert '"configured_certificate=$($hasCertificate.ToString().ToLowerInvariant())"' in workflow
     assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/phase-b/self-signed-windows-signing'" in workflow
@@ -134,6 +136,10 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert '"tools/test_self_signed_signing.ps1"' in workflow
     assert "Validate signing helper scripts parse" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE" in signing_script
+    smoke_builder = _read_workflow("tools/create_signing_smoke_executable.ps1")
+    assert 'Get-AuthenticodeSignature -FilePath $OutputPath' in smoke_builder
+    assert 'ne "NotSigned"' in smoke_builder
+    assert "where.exe" not in smoke_builder
     assert 'Get-AuthenticodeSignature -FilePath $target' in signing_script
     assert 'if ($signatureStatus -notin @("Valid", "NotTrusted"))' in signing_script
     assert 'signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint' in signing_script
