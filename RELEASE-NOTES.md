@@ -7,7 +7,7 @@ This is a clean-room Windows desktop SQL editor for MySQL. Release metadata iden
 
 ## Unreleased changes
 
-- Optional stable-release update checking is disabled by default. After the user opts in, the app can check public GitHub Release metadata at startup or through Help → Check for updates. Network work runs off the UI thread, release tags/URLs are validated, and the app opens the release page for manual review; it never downloads or installs updates automatically. The request does not send SQL or database credentials. See `PRIVACY_POLICY.md`.
+- Automatic stable-release update checks are disabled by default. Users can enable the Settings → Updates startup preference or trigger a one-time check via Help → Check for updates without changing that preference. Network work runs off the UI thread, release tags/URLs are validated, and the app opens the release page for manual review; it never downloads or installs updates automatically. The request does not send SQL or database credentials. See `PRIVACY_POLICY.md`.
 
 ## Downloadable Windows packages
 
