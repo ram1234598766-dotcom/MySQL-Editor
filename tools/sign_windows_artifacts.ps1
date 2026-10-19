@@ -33,6 +33,8 @@ if ($certificateType -notin @("self-signed", "trusted")) {
 
 $certificatePath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-{0}.pfx" -f [Guid]::NewGuid().ToString("N"))
 $certificate = $null
+$publicCertificate = $null
+$rootCertificateAdded = $false
 try {
     Write-Host "Decoding the supplied PFX payload."
     $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
@@ -71,7 +73,38 @@ try {
         if (-not [StringComparer]::Ordinal.Equals($certificate.Subject, $certificate.Issuer)) {
             throw "The certificate type is self-signed, but its subject and issuer do not match."
         }
-        Write-Host "Self-signed signatures will be checked for Authenticode integrity without adding the certificate to the runner trust store."
+        Write-Host "Preparing temporary runner-local trust so Windows can verify the self-signed Authenticode chain."
+        $publicCertificateBytes = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+        $publicCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($publicCertificateBytes)
+        $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        try {
+            Write-Host "Opening the current-user Root store through the .NET certificate-store API."
+            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $existingRootCertificates = $rootStore.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $certificate.Thumbprint,
+                $false
+            )
+            try {
+                if ($existingRootCertificates.Count -eq 0) {
+                    $rootStore.Add($publicCertificate)
+                    $rootCertificateAdded = $true
+                    Write-Host "Temporary public-certificate trust installed for this runner."
+                } else {
+                    Write-Host "The exact self-signed certificate is already present in the runner's current-user Root store."
+                }
+            } finally {
+                foreach ($existingCertificate in $existingRootCertificates) {
+                    $existingCertificate.Dispose()
+                }
+            }
+        } finally {
+            $rootStore.Close()
+            $rootStore.Dispose()
+        }
         Write-Host "Recipient PCs will not trust this self-signed certificate by default."
     }
 
@@ -117,18 +150,19 @@ try {
         }
 
         if ($certificateType -eq "self-signed") {
-            Write-Host "Verifying Authenticode signature integrity without asserting publisher trust: $target"
+            Write-Host "Verifying Authenticode signature with temporary runner-local trust: $target"
             $signature = Get-AuthenticodeSignature -FilePath $target
             $signatureStatus = $signature.Status.ToString()
-            if ($signatureStatus -notin @("Valid", "NotTrusted")) {
-                throw "Authenticode signature integrity check failed for $target (status: $signatureStatus)."
+            if ($signatureStatus -ne "Valid") {
+                throw "Authenticode signature verification failed for $target (status: $signatureStatus)."
             }
             if ($null -eq $signature.SignerCertificate -or
                 $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
                 throw "The Authenticode signature for $target does not match the configured self-signed certificate."
             }
-            if ($signatureStatus -eq "NotTrusted") {
-                Write-Host "Signature integrity verified; certificate chain is untrusted by design for this self-signed mode."
+            & $signTool verify /pa /all /v $target
+            if ($LASTEXITCODE -ne 0) {
+                throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
             }
         } else {
             Write-Host "Verifying Authenticode signature and certificate trust: $target"
@@ -140,6 +174,27 @@ try {
         Write-Host "Signed and verified: $(Split-Path $target -Leaf) (certificate type: $certificateType)"
     }
 } finally {
+    if ($rootCertificateAdded -and $publicCertificate) {
+        $cleanupStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        $cleanupStoreOpened = $false
+        try {
+            $cleanupStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $cleanupStoreOpened = $true
+            $cleanupStore.Remove($publicCertificate)
+            Write-Host "Removed the temporary self-signed certificate from this runner's Root store."
+        } finally {
+            if ($cleanupStoreOpened) {
+                $cleanupStore.Close()
+            }
+            $cleanupStore.Dispose()
+        }
+    }
+    if ($publicCertificate) {
+        $publicCertificate.Dispose()
+    }
     if ($certificate) {
         $certificate.Dispose()
     }
