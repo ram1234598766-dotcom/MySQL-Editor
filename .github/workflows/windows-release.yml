@@ -145,6 +145,7 @@ jobs:
 
           # Previews are intentionally unsigned even if release-signing secrets exist.
           $enabled = $signingRequired -and $hasCertificate -and $hasPassword
+          "configured_certificate=$($hasCertificate.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "certificate_type=$certificateType" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($enabled) {
@@ -203,7 +204,7 @@ jobs:
         run: |
           & "tools/test_self_signed_signing.ps1" -Target "dist/MySQLEditor/MySQLEditor.exe"
       - name: Verify configured self-signed certificate without publishing a release
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/phase-b/self-signed-windows-signing'
+        if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/phase-b/self-signed-windows-signing') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.signing-config.outputs.configured_certificate == 'true')
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
