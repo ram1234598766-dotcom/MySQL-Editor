@@ -114,6 +114,36 @@ jobs:
           python -m pip install -e ".[dev]" pyinstaller pip-licenses
       - name: Audit installed test and packaging environment
         run: python -m pip_audit
+      - name: Validate Windows signing configuration
+        id: signing-config
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          SIGNING_REF: ${{ github.ref }}
+          SIGNING_REF_NAME: ${{ github.ref_name }}
+        run: |
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)
+          if ($hasCertificate -xor $hasPassword) {
+            throw "Configure both WINDOWS_SIGNING_CERTIFICATE_BASE64 and WINDOWS_SIGNING_CERTIFICATE_PASSWORD secrets."
+          }
+
+          $isTag = $env:SIGNING_REF.StartsWith("refs/tags/")
+          $isPreviewTag = $env:SIGNING_REF_NAME -match '(?i)-(alpha|beta|rc|preview)([.-]|$)'
+          $signingRequired = $isTag -and -not $isPreviewTag
+          if ($signingRequired -and -not $hasCertificate) {
+            throw "Stable version tags require a trusted Authenticode certificate and password; refusing an unsigned stable release."
+          }
+
+          $enabled = $hasCertificate -and $hasPassword
+          "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($enabled) {
+            Write-Host "Windows signing is configured; release executables will be signed and verified."
+          } else {
+            Write-Host "No signing certificate configured; this preview/build remains explicitly unsigned."
+          }
       - name: Create transparent brand assets
         run: python tools/build_brand_assets.py
       - name: Validate application startup imports before packaging
@@ -147,6 +177,49 @@ jobs:
         run: choco install innosetup --yes --no-progress
       - name: Build setup installer
         run: iscc installer/MySQLEditor.iss
+      - name: Sign and verify Windows executables
+        if: steps.signing-config.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: http://timestamp.digicert.com
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "mysql-editor-signing.pfx"
+          try {
+            $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
+            [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+
+            $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+            $signToolCandidates = @(
+              Get-ChildItem -Path $kitsRoot -Filter signtool.exe -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' }
+            )
+            if ($signToolCandidates.Count -eq 0) {
+              throw "SignTool.exe was not found in the Windows SDK x64 tools directory."
+            }
+            $signTool = ($signToolCandidates | Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1).FullName
+
+            $targets = @(
+              (Resolve-Path "dist/MySQLEditor/MySQLEditor.exe").Path
+              (Resolve-Path "dist/MySQLEditor-Portable.exe").Path
+              (Resolve-Path "dist/installer/MySQLEditor-Setup.exe").Path
+            )
+            foreach ($target in $targets) {
+              & $signTool sign /fd SHA256 /tr $env:WINDOWS_SIGNING_TIMESTAMP_URL /td SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD $target
+              if ($LASTEXITCODE -ne 0) {
+                throw "SignTool failed to sign $target (exit code $LASTEXITCODE)."
+              }
+
+              & $signTool verify /pa /all /v $target
+              if ($LASTEXITCODE -ne 0) {
+                throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
+              }
+              Write-Host "Signed and verified: $(Split-Path $target -Leaf)"
+            }
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          }
       - name: Smoke test installer install and uninstall
         shell: pwsh
         run: |
@@ -208,7 +281,11 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive -Path "dist/MySQLEditor/*" -DestinationPath "dist/MySQLEditor-Folder.zip" -CompressionLevel Optimal
-          python tools/create_release_manifest.py --dist dist --commit $env:GITHUB_SHA
+          $manifestArgs = @("tools/create_release_manifest.py", "--dist", "dist", "--commit", $env:GITHUB_SHA)
+          if ("${{ steps.signing-config.outputs.enabled }}" -eq "true") {
+            $manifestArgs += @("--signing-status", "signed", "--authenticode-verified")
+          }
+          python @manifestArgs
       - name: Create SHA-256 checksums for release assets
         shell: pwsh
         run: |

@@ -101,6 +101,12 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "python -m pytest --ignore=tests/test_mysql_integration.py" in workflow
     assert "run: python -m pytest tests/test_mysql_integration.py -v" in workflow
     assert "needs: [release-tests, mysql-integration]" in workflow
-    assert "python tools/create_release_manifest.py --dist dist --commit $env:GITHUB_SHA" in workflow
+    assert '"tools/create_release_manifest.py", "--dist", "dist", "--commit", $env:GITHUB_SHA' in workflow
+    assert '"--signing-status", "signed", "--authenticode-verified"' in workflow
+    assert "Validate Windows signing configuration" in workflow
+    assert "if: github.event_name != 'pull_request'" in workflow
+    assert "Sign and verify Windows executables" in workflow
+    assert "Stable version tags require a trusted Authenticode certificate" in workflow
+    assert "http://timestamp.digicert.com" in workflow
     assert "dist/RELEASE-MANIFEST.json" in workflow
     assert "dist/MySQLEditor/MySQLEditor.exe" in workflow

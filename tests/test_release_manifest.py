@@ -65,6 +65,49 @@ def test_manifest_records_exact_commit_version_and_artifact_hashes(tmp_path: Pat
         assert record["sha256"] == hashlib.sha256(artifact_path.read_bytes()).hexdigest()
 
 
+def test_manifest_records_signed_status_only_after_verified_signature(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    manifest = build_release_manifest(
+        dist,
+        "e" * 40,
+        project_root=project_root,
+        signing_status="signed",
+        authenticode_verified=True,
+    )
+
+    assert manifest["signing"]["status"] == "signed"
+    assert manifest["signing"]["authenticode_verified"] is True
+    assert manifest["signing"]["timestamp_authority"] == "http://timestamp.digicert.com"
+    assert manifest["signing"]["verification_method"] == "SignTool /verify /pa /all /v"
+
+
+def test_manifest_rejects_signed_status_without_authenticode_verification(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="requires successful Authenticode verification"):
+        build_release_manifest(
+            dist,
+            "f" * 40,
+            project_root=project_root,
+            signing_status="signed",
+            authenticode_verified=False,
+        )
+
+
+def test_manifest_rejects_authenticode_claim_for_unsigned_assets(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="cannot claim Authenticode verification"):
+        build_release_manifest(
+            dist,
+            "0" * 40,
+            project_root=project_root,
+            signing_status="unsigned",
+            authenticode_verified=True,
+        )
+
+
 def test_manifest_rejects_a_missing_release_asset(tmp_path: Path):
     project_root, dist = _release_fixture(tmp_path)
     (dist / "installer" / "MySQLEditor-Setup.exe").unlink()

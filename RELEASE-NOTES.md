@@ -1,10 +1,9 @@
-# MySQL Editor — Windows Preview Release Notes
+# MySQL Editor — Windows Release Notes
 
-**Release channel:** Preview / pre-release  
 **Platform:** Windows 10/11 x64  
-**Signing status:** Unsigned — no trusted Authenticode publisher signature is included.
+**Signing status:** See `RELEASE-MANIFEST.json` for the exact artifacts. The manifest reports `signed` only after SignTool verification; otherwise it reports `unsigned`.
 
-This is a clean-room Windows desktop SQL editor for MySQL. It is a preview build, not a publisher-signed production release. The Windows build workflow validates expected output files, launches packaged executables, and exercises installation/uninstallation before publishing the preview assets.
+This is a clean-room Windows desktop SQL editor for MySQL. Release metadata identifies preview versus stable status. The Windows build workflow validates expected output files, launches packaged executables, and exercises installation/uninstallation before publishing assets.
 
 ## Downloadable Windows packages
 
@@ -23,7 +22,7 @@ The workflow writes `RELEASE-MANIFEST.json` from the final package files and the
 
 The Windows workflow also uploads the complete package folder and a simulated display-scale UI evidence artifact to GitHub Actions. These are useful for diagnostics; artifacts expire, while release assets remain available with the GitHub Release.
 
-## Highlights in this preview
+## Highlights
 
 ### SQL editor
 - Multiple SQL tabs, syntax highlighting, line numbers, current-line highlighting, bracket matching, formatting, SQL-file open/save, and configurable editor font/tab width.
