@@ -1,6 +1,9 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [string[]]$Targets
+    [string[]]$Targets,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipTimestamp
 )
 
 Set-StrictMode -Version Latest
@@ -12,19 +15,82 @@ if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)) {
 if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
     throw "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required."
 }
-if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_TIMESTAMP_URL)) {
-    throw "WINDOWS_SIGNING_TIMESTAMP_URL is required."
+if (-not $SkipTimestamp -and [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_TIMESTAMP_URL)) {
+    throw "WINDOWS_SIGNING_TIMESTAMP_URL is required for release signing."
 }
 if ($Targets.Count -eq 0) {
     throw "At least one executable target must be specified."
 }
 
+$certificateType = $env:WINDOWS_SIGNING_CERTIFICATE_TYPE
+if ([string]::IsNullOrWhiteSpace($certificateType)) {
+    $certificateType = "self-signed"
+}
+$certificateType = $certificateType.Trim().ToLowerInvariant()
+if ($certificateType -notin @("self-signed", "trusted")) {
+    throw "WINDOWS_SIGNING_CERTIFICATE_TYPE must be 'self-signed' or 'trusted'."
+}
+
 $certificatePath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-{0}.pfx" -f [Guid]::NewGuid().ToString("N"))
+$certificatePublicPath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-public-{0}.cer" -f [Guid]::NewGuid().ToString("N"))
+$rootThumbprint = $null
+$certificate = $null
 try {
     $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
     [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
 
-    $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+        $certificatePath,
+        $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD,
+        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+    )
+    if (-not $certificate.HasPrivateKey) {
+        throw "The supplied PFX does not contain a usable private key."
+    }
+    $nowUtc = [DateTime]::UtcNow
+    if ($nowUtc -lt $certificate.NotBefore.ToUniversalTime() -or $nowUtc -gt $certificate.NotAfter.ToUniversalTime()) {
+        throw "The code-signing certificate is not currently within its validity period."
+    }
+
+    $hasCodeSigningEku = $false
+    foreach ($extension in $certificate.Extensions) {
+        if ($extension -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]) {
+            foreach ($usage in $extension.EnhancedKeyUsages) {
+                if ($usage.Value -eq "1.3.6.1.5.5.7.3.3") {
+                    $hasCodeSigningEku = $true
+                }
+            }
+        }
+    }
+    if (-not $hasCodeSigningEku) {
+        throw "The supplied certificate does not declare the Code Signing EKU."
+    }
+
+    if ($certificateType -eq "self-signed") {
+        if (-not [StringComparer]::Ordinal.Equals($certificate.Subject, $certificate.Issuer)) {
+            throw "The certificate type is self-signed, but its subject and issuer do not match."
+        }
+
+        # SignTool policy verification requires a root of trust. Temporarily add this
+        # certificate only to the hosted runner's CurrentUser\Root store and remove it
+        # in finally. This does not make recipients trust the certificate.
+        $rootStorePath = "Cert:\CurrentUser\Root"
+        $existingRoot = Get-ChildItem -Path $rootStorePath |
+            Where-Object { $_.Thumbprint -eq $certificate.Thumbprint } |
+            Select-Object -First 1
+        if ($null -eq $existingRoot) {
+            [System.IO.File]::WriteAllBytes(
+                $certificatePublicPath,
+                $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+            )
+            Import-Certificate -FilePath $certificatePublicPath -CertStoreLocation $rootStorePath | Out-Null
+            $rootThumbprint = $certificate.Thumbprint
+        }
+        Write-Host "Self-signed certificate trust is temporary and local to this runner; recipient PCs will not trust it by default."
+    }
+
+    $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+    $kitsRoot = Join-Path $programFilesX86 "Windows Kits\10\bin"
     $signToolCandidates = @(
         Get-ChildItem -Path $kitsRoot -Filter signtool.exe -File -Recurse -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' }
@@ -34,9 +100,18 @@ try {
     }
     $signTool = $signToolCandidates[0].FullName
 
+    if ($SkipTimestamp) {
+        Write-Host "Timestamping skipped for the temporary signing smoke test only; release signing must timestamp."
+    }
+
     foreach ($relativeTarget in $Targets) {
         $target = (Resolve-Path -LiteralPath $relativeTarget).Path
-        & $signTool sign /fd SHA256 /tr $env:WINDOWS_SIGNING_TIMESTAMP_URL /td SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD $target
+        $signArgs = @("sign", "/fd", "SHA256")
+        if (-not $SkipTimestamp) {
+            $signArgs += @("/tr", $env:WINDOWS_SIGNING_TIMESTAMP_URL, "/td", "SHA256")
+        }
+        $signArgs += @("/f", $certificatePath, "/p", $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD, $target)
+        & $signTool @signArgs
         if ($LASTEXITCODE -ne 0) {
             throw "SignTool failed to sign $target (exit code $LASTEXITCODE)."
         }
@@ -45,8 +120,15 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
         }
-        Write-Host "Signed and verified: $(Split-Path $target -Leaf)"
+        Write-Host "Signed and verified: $(Split-Path $target -Leaf) (certificate type: $certificateType)"
     }
 } finally {
+    if ($rootThumbprint) {
+        Remove-Item -LiteralPath ("Cert:\CurrentUser\Root\{0}" -f $rootThumbprint) -Force -ErrorAction SilentlyContinue
+    }
+    if ($certificate) {
+        $certificate.Dispose()
+    }
     Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $certificatePublicPath -Force -ErrorAction SilentlyContinue
 }
