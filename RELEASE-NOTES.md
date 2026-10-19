@@ -1,81 +1,46 @@
-# MySQL Editor — Windows Release Notes
+# MySQL Editor — Windows Preview Release Notes
 
+**Application version:** 0.1.0  
+**Channel:** Preview — this is an unsigned preview build, not a stable release.  
 **Platform:** Windows 10/11 x64  
-**Signing status:** See `RELEASE-MANIFEST.json` for the exact artifacts. The manifest reports `signed` only after SignTool verification; otherwise it reports `unsigned`.
+**Source and verification:** See `RELEASE-MANIFEST.json` for the exact source commit, package hashes, build metadata, and signing state.
 
-This is a clean-room Windows desktop SQL editor for MySQL. Release metadata identifies preview versus stable status. The Windows build workflow validates expected output files, launches packaged executables, and exercises installation/uninstallation before publishing assets.
+## What's new in this preview
 
-## Unreleased changes
-
-- Automatic stable-release update checks are disabled by default. Users can enable the Settings → Updates startup preference or trigger a one-time check via Help → Check for updates without changing that preference. Network work runs off the UI thread, release tags/URLs are validated, and the app opens the release page for manual review; it never downloads or installs updates automatically. The request does not send SQL or database credentials. See `PRIVACY_POLICY.md`.
-- Schema Explorer supports guarded single-cell edits on verified transactional base-table previews. Only eligible non-primary-key cells can be updated; the worker checks the current session and locks/re-reads the row to refuse stale edits. Changes remain under manual Commit/Rollback control. Full rollback restores edited preview snapshots; `ROLLBACK TO SAVEPOINT` marks cached previews stale until refreshed.
+- **Visual JSON execution plans:** Explain SELECT uses `EXPLAIN FORMAT=JSON` and opens an expandable plan tree with a raw JSON tab and Copy JSON action. It does not execute the original SELECT. Row counts and optimizer costs are estimates.
+- **Guarded table-preview editing:** Schema Explorer supports single-cell updates only on verified transactional base-table previews and eligible non-primary-key columns. Changes remain subject to the existing manual Commit/Rollback workflow. Full rollback restores edited preview snapshots; rollback to a savepoint marks affected cached previews stale until refresh.
+- **Optional stable-release update checking:** Automatic startup checks are disabled by default. A one-time Help → Check for updates action does not enable future startup requests. The app validates release tags and canonical GitHub release URLs, does all network work off the UI thread, and never downloads or installs updates automatically.
+- **Accessibility contrast improvements:** The light theme's selected navigation and generic disabled-control text colors have regression checks. Generic disabled text now uses `#5D6B7B` on `#F2F5F9` (approximately 4.98:1 contrast); the selected-navigation color remains `#056C78` on `#D6E3F2` (approximately 4.71:1).
+- **SQL risk advisory hardening:** Executable SQL comments are inspected by the risk advisory so comments cannot trivially hide potentially destructive SQL from the user.
+- **Release engineering:** The Windows workflow builds the application-folder distribution, portable EXE, and installer; validates install/uninstall and packaged launch; generates SBOM, third-party license inventory, release manifest, and checksums.
 
 ## Downloadable Windows packages
 
-The release workflow attaches the following files when the package job succeeds:
+The GitHub Release for this preview contains the following artifacts when the Windows package workflow completes successfully:
 
-- **`MySQLEditor-Setup.exe`** — standard Windows installer, Start Menu/desktop shortcut and uninstaller.
+- **`MySQLEditor-Setup.exe`** — standard installer with Windows shortcuts and uninstaller.
 - **`MySQLEditor-Portable.exe`** — portable single-file executable.
-- **`MySQLEditor-Folder.zip`** — application-folder distribution for diagnostics or users who prefer the onedir package.
-- **`SHA256SUMS`** — SHA-256 hashes for the published packages and supporting release documents.
+- **`MySQLEditor-Folder.zip`** — application-folder distribution.
+- **`SHA256SUMS`** — SHA-256 hashes for the released packages and supporting documents.
 - **`RELEASE-MANIFEST.json`** — source commit, project version, Windows build metadata, signing disclosure, and each package's relative path, byte size, and SHA-256 hash.
 - **`sbom.cdx.json`** — CycloneDX dependency inventory.
 - **`THIRD_PARTY_LICENSES.md`** — third-party license inventory.
-- **`WINDOWS_SIGNING.md`** — current signing status and instructions.
+- **`WINDOWS_SIGNING.md`** — signing behavior and limitations.
 
-The workflow writes `RELEASE-MANIFEST.json` from the final package files and the exact `GITHUB_SHA`; its file hashes and byte sizes can be compared against downloaded artifacts. `SHA256SUMS` also hashes the manifest itself. The manifest is provenance evidence, not a publisher signature or a safety guarantee.
+The workflow builds the manifest from the final files and the exact `GITHUB_SHA`; `SHA256SUMS` includes a hash of the manifest itself. These files provide provenance and integrity checks, not a safety guarantee.
 
-The Windows workflow also uploads the complete package folder and a simulated display-scale UI evidence artifact to GitHub Actions. These are useful for diagnostics; artifacts expire, while release assets remain available with the GitHub Release.
+## Signing status and Windows warnings
 
-## Highlights
+**Preview binaries are intentionally unsigned.** The configured self-signed certificate was verified by signing a disposable executable on a trusted `main` run; it was not used to sign distributed preview artifacts. The stable-tag workflow is a separate path and fails closed unless signing configuration and artifact verification succeed.
 
-### SQL editor
-- Multiple SQL tabs, syntax highlighting, line numbers, current-line highlighting, bracket matching, formatting, SQL-file open/save, and configurable editor font/tab width.
-- Inline Find/Replace with match count, case-sensitive search, next/previous navigation, Replace, and Replace all.
-- Live line/column and selection-length status.
-- Keyboard-first completion for MySQL keywords/functions and schema-scoped table, view and column identifiers, including common qualified, alias and backtick-quoted contexts.
-- Completion is a bounded editing aid, not a full MySQL grammar or type-checking engine. It should not change SQL unless a completion item is accepted.
+Windows may show SmartScreen or unknown-publisher warnings for these unsigned preview files. Do not bypass a warning solely because a file is hosted on GitHub. A matching SHA-256 hash detects file mismatches but does not prove software safety. A future stable build signed with the selected self-signed certificate will still not establish publisher trust on recipient PCs by default.
 
-### Connections and schema navigation
-- Selecting a different database in Schema Explorer now switches the actual MySQL session on the database worker thread. The active badge, schema metadata, and saved profile default change only after MySQL confirms success; a failed switch keeps the prior context.
-- Direct local-to-server MySQL connections, saved profiles, duplicate/delete profile actions, and saved database passwords stored through Windows Credential Manager rather than plaintext application storage.
-- Explicit Automatic TLS, Verify server identity, and Disabled TLS policies; strict verification can use a supplied CA file.
-- Schema Explorer supports database/table/view navigation, refresh, safe identifier copying, limited table preview, and generating a SELECT in a new tab.
-- Right-click a table or view and choose **Inspect DDL and metadata** to open a read-only inspector for the MySQL-generated CREATE definition, columns, indexes, constraints, and available object properties. The inspector reports metadata-permission or unsupported-section warnings without changing the object or its data.
-- The active connection and schema context are visible in the workspace. Query execution is blocked when a query is already running or a disconnect is pending.
+## Validation and known limits
 
-### Results and query feedback
-- Multiple statement results, sortable preview grid, case-insensitive visible-row filter, row/column copy actions, and a cell-details view with **Copy full value**.
-- Large query results initially load up to 2,000 rows. The **Fetch +1,000** button adds up to 1,000 rows from the local result cache without rerunning or changing the SQL.
-- CSV export writes atomically, uses every fetched row in the spool rather than only loaded/filtered grid rows, and preserves server-fetch order after grid sorting or paging.
-- CSV uses an unquoted `\\N` token for SQL NULL; empty text stays an empty field. Backslash-leading text is escaped so it remains distinguishable from NULL.
-- Query lifecycle feedback distinguishes execution, fetching, cancellation requests, confirmed interruption, partial script failure, and export progress where the worker can report it.
-- Standalone MySQL client `DELIMITER` directives such as `//` and `$$` are handled as client commands, not sent to the server. Compound stored-program bodies stay intact across internal semicolons; malformed directives and routine bodies that would be split under the default delimiter fail closed before any part of the script is submitted.
+The current main commit passed desktop CI, dependency-security audit, and the complete Windows packaging workflow. Automated validation covers Python 3.12/3.13/3.14 tests, disposable MySQL 8.4 integration, Windows Qt startup/preferences and recovery smoke tests, application-folder and portable EXE builds, installer install/uninstall, packaged application launch, manifest/SBOM/checksum creation, and artifact upload.
 
-### Presentation, preferences and reliability
-- Shared semantic dark-theme styling, System/Light/Dark appearance selection, editor font and tab-width preferences, result-row sizing, and a persistent Reduce Motion option.
-- Contrast regression checks cover selected application states and SQL syntax colours; disabled primary actions use a contrast-tested disabled palette in both dark and light themes.
-- Accessibility names/descriptions cover the main SQL, results, schema/history/snippets, connection and unlock controls; keyboard traversal is regression-tested for the connection and unlock forms.
-- Theme-switch regression coverage verifies that query tabs, SQL buffer/cursor/selection, result filter/rows, connection context, and splitter state remain intact when changing appearance.
-- Windows-runner visual evidence includes dark and light themes at simulated 100%, 125%, 150%, and 200% display scales. Screenshots use synthetic data and explicitly show an offline preview; they are not physical-monitor certification.
-- Installer tests confirm the app executable and uninstaller are installed, the desktop shortcut is created, and uninstall removes the shortcut.
-- Packaging checks build and launch the onedir and portable EXE variants, build the installer, verify expected files, and generate SHA-256, SBOM, and third-party license records before publication.
+**Manual acceptance on a physical target Windows PC remains outstanding.** Runner screenshots use simulated display scaling and synthetic data. They cannot certify the actual display, screen-reader operation, Windows Credential Manager state, or the user's MySQL/TLS environment.
 
-## Important limitations and safety notes
+## Scope
 
-- **Unsigned binary:** Windows may show SmartScreen or unknown-publisher warnings. Do not bypass a warning solely because the file is hosted on GitHub. Review the repository and release, and compare a package's SHA-256 hash against `SHA256SUMS`. A matching hash detects file mismatches; it does not prove software safety.
-- **Manual Windows QA remains necessary:** automated/offscreen and runner-based tests cannot certify every display scale, hardware configuration, real Windows Credential Manager state, installer-upgrade path, or remote MySQL/TLS environment.
-- **Result paging:** only the initial 2,000 rows are loaded into the grid at query completion; use **Fetch +1,000** to retrieve further pages from the local result cache. CSV export remains complete even if additional pages were not loaded.
-- **Schema metadata permissions:** the object inspector depends on metadata MySQL exposes to the connected account. A CREATE definition or individual metadata section may be unavailable due to privileges or server version; the inspector reports the limitation and keeps other sections available where possible.
-- **MySQL server required:** MySQL Editor is a client and does not install or automatically start the database server.
-- **TLS:** Automatic TLS can encrypt traffic without verifying server identity. Prefer Verify server identity for remote or untrusted networks. Disabled TLS should only be used when its lack of transport encryption is understood and accepted.
-- **Cancellation:** stopping a query is best-effort and depends on server state, permissions and network conditions.
-- **Safety prompts and redaction:** mutation warnings and query-history redaction are heuristic aids, not security boundaries. Use least-privilege database accounts and avoid putting secrets in SQL text.
-- **Stored-program parsing scope:** statement splitting recognizes standalone `DELIMITER` changes and protects compound routine bodies, but is not a complete MySQL grammar or semantic validator. The MySQL server remains authoritative for SQL syntax, features, and permissions.
-- **Local unlock:** the master password unlocks this installation only. It is not an online account and does not synchronize to another device.
-- **Scope:** Android APK/AAB, cloud relay, cross-device synchronization, analytics, ads and telemetry are not included.
-
-## Verification record
-
-The Windows release workflow builds the onedir application, portable EXE, and installer from the exact release commit; checks their output paths and non-trivial size; launches the packaged EXEs; and runs silent install/uninstall smoke checks. The Phase 6 code commit `53218aed6b218925aec450bcb44796e462a9bcd6` passed [desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148985), the [dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148975), and the [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39050148964). The release-marker commit reruns package build and upload for the precise commit attached to the release. Review that final commit's Actions run before using the preview. Manual QA on a physical Windows machine remains **not verified by CI**.
-
+This is a Windows desktop MySQL client. Android APK/AAB, SSH tunneling, cloud relay, cross-device synchronization, analytics, ads, and telemetry are not part of this preview. The app does not install or start the MySQL server.
