@@ -198,9 +198,10 @@ jobs:
       - name: Build portable executable
         run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor-logo-transparent.png;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
       - name: Test self-signed signing flow with a temporary certificate
+        timeout-minutes: 3
         shell: pwsh
         run: |
-          & "tools/test_self_signed_signing.ps1" -Target "dist/MySQLEditor-Portable.exe"
+          & "tools/test_self_signed_signing.ps1" -Target "dist/MySQLEditor/MySQLEditor.exe"
       - name: Sign and verify application executables
         if: steps.signing-config.outputs.enabled == 'true'
         shell: pwsh
