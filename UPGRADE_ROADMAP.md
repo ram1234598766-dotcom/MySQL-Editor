@@ -372,7 +372,7 @@ Tasks:
 - Run \`pip-audit\`, review dependency licence inventory, keep a deliberate version support matrix and update dependencies in small, tested batches.
 - Avoid broad “upgrade everything to latest” changes without checking Python/Qt/connector/PyInstaller/Inno Setup compatibility.
 - Add time-bounded test scenarios for startup, typing latency, schema fetch, query display and export using representative data.
-- Review GitHub Actions permissions and third-party actions, and pin actions by immutable SHA when the release security policy is ready for that maintenance overhead.
+- [x] Reviewed GitHub Actions permissions and third-party actions on 19 October 2026. Every workflow action reference is pinned to an immutable commit SHA; desktop CI, dependency audit and build jobs use `contents: read`; only the guarded publish job requests `contents: write`. Dependabot checks both Python dependencies and GitHub Actions weekly.
 
 Exit gate:
 - No known blocking regression remains in the release-candidate test suite.
