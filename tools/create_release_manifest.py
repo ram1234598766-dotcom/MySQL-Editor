@@ -77,6 +77,7 @@ def build_release_manifest(
     project_root: str | Path | None = None,
     signing_status: str = "unsigned",
     authenticode_verified: bool = False,
+    signing_certificate_type: str | None = None,
 ) -> dict[str, Any]:
     """Validate required outputs and return JSON-compatible build provenance."""
     dist_path = Path(dist_dir)
@@ -90,6 +91,10 @@ def build_release_manifest(
         raise ValueError("A signed manifest requires successful Authenticode verification")
     if signing_status == "unsigned" and authenticode_verified:
         raise ValueError("An unsigned manifest cannot claim Authenticode verification")
+    if signing_status == "signed" and signing_certificate_type not in {"self-signed", "trusted"}:
+        raise ValueError("A signed manifest requires a signing certificate type ('self-signed' or 'trusted')")
+    if signing_status == "unsigned" and signing_certificate_type is not None:
+        raise ValueError("An unsigned manifest cannot claim a signing certificate type")
     if not dist_path.is_dir():
         raise ValueError(f"Distribution directory does not exist: {dist_path}")
 
@@ -123,6 +128,35 @@ def build_release_manifest(
     if not isinstance(sbom, dict) or sbom.get("bomFormat") != "CycloneDX":
         raise ValueError("SBOM is not identified as CycloneDX")
 
+    if signing_status == "unsigned":
+        signing_details = (
+            "No signing certificate was configured for this workflow run; these artifacts are unsigned."
+        )
+        verification_method = None
+        trust_scope = "none"
+        recipient_trust = "not-applicable"
+    elif signing_certificate_type == "self-signed":
+        signing_details = (
+            "The artifacts were Authenticode-signed, timestamped for release, and verified with SignTool. "
+            "For verification only, this workflow temporarily added the self-signed certificate to the "
+            "build runner's current-user root store and removed it afterward. Recipient PCs do not trust "
+            "this certificate by default; publisher and SmartScreen warnings may still appear."
+        )
+        verification_method = (
+            "SignTool /verify /pa /all /v after temporary build-runner trust of the self-signed certificate"
+        )
+        trust_scope = "build-runner-only"
+        recipient_trust = "not-trusted-by-default"
+    else:
+        signing_details = (
+            "The artifacts were Authenticode-signed, timestamped, and verified with SignTool against "
+            "the build runner's Windows certificate trust policy. Recipient behavior still depends on "
+            "their trust store and reputation checks; SmartScreen warnings are not ruled out."
+        )
+        verification_method = "SignTool /verify /pa /all /v"
+        trust_scope = "build-runner-windows-trust-policy"
+        recipient_trust = "depends-on-recipient-trust-store-and-reputation"
+
     return {
         "schema_version": 1,
         "product": {
@@ -141,19 +175,15 @@ def build_release_manifest(
         },
         "signing": {
             "status": signing_status,
+            "certificate_type": signing_certificate_type if signing_status == "signed" else None,
             "authenticode_verified": authenticode_verified,
+            "trust_scope": trust_scope,
+            "recipient_trust": recipient_trust,
             "timestamp_authority": (
                 "http://timestamp.digicert.com" if signing_status == "signed" else None
             ),
-            "verification_method": (
-                "SignTool /verify /pa /all /v" if signing_status == "signed" else None
-            ),
-            "details": (
-                "Distributed executables were Authenticode-signed, timestamped, and verified "
-                "with SignTool by the Windows release workflow."
-                if signing_status == "signed"
-                else "No signing certificate was configured for this workflow run; these artifacts are unsigned."
-            ),
+            "verification_method": verification_method,
+            "details": signing_details,
         },
         "artifacts": files,
     }
@@ -184,6 +214,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="assert that SignTool verification completed successfully for all published executables",
     )
+    parser.add_argument(
+        "--signing-certificate-type",
+        choices=("self-signed", "trusted"),
+        default=None,
+        help="certificate type used to sign and verify these executables",
+    )
     args = parser.parse_args(argv)
     if not args.commit:
         parser.error("--commit is required when GITHUB_SHA is not set")
@@ -195,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             project_root=args.project_root,
             signing_status=args.signing_status,
             authenticode_verified=args.authenticode_verified,
+            signing_certificate_type=args.signing_certificate_type,
         )
         destination = args.dist / "RELEASE-MANIFEST.json"
         temporary = destination.with_suffix(destination.suffix + ".tmp")
@@ -209,7 +246,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"Created {destination} for commit {manifest['source']['commit_sha']} "
-        f"({len(manifest['artifacts'])} validated artifacts; signing: {manifest['signing']['status']})."
+        f"({len(manifest['artifacts'])} validated artifacts; signing: "
+        f"{manifest['signing']['status']}/{manifest['signing']['certificate_type'] or 'none'})."
     )
     return 0
 
