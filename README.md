@@ -45,7 +45,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Execute the statement under the cursor, highlighted SQL, or the whole script.
 - Dedicated database worker thread keeps SQL execution and schema reads off the Qt UI event loop.
 - Configurable connection TLS policy and finite connection/read/write timeouts.
-- Explain SELECT runs an EXPLAIN version of the current SELECT statement.
+- **Explain SELECT** requests `EXPLAIN FORMAT=JSON` for the statement under the cursor and opens an expandable operation tree plus the original JSON. Optimizer costs/row counts are estimates; this does not execute the SELECT. If the server doesn't support JSON EXPLAIN or the request fails, the workspace reports the issue without running the original query.
 - Schema tree for databases, tables, and views; double-click a table for a limited preview.
 - Commit and Rollback controls, query history that is opt-in, and high-impact SQL confirmation prompts.
 
@@ -163,7 +163,7 @@ Completion covers common MySQL keywords/functions and suitable identifiers disco
 - **Run selection** executes the highlighted SQL.
 - **Run script** executes the full editor buffer in order.
 - **Format SQL** formats the selection when one exists, otherwise the whole buffer.
-- **Explain SELECT** executes EXPLAIN for the SELECT under the cursor.
+- **Explain SELECT** opens the visual JSON execution plan for the SELECT under the cursor. The app submits `EXPLAIN FORMAT=JSON`, displays a tree and raw JSON tab, and does not run the SELECT itself. Plan costs and row estimates are optimizer estimates, not actual runtime measurements.
 
 Before running a mutation, verify the active server and schema. High-impact statements may trigger a confirmation prompt. That prompt cannot guarantee that a query is safe: even a syntactically ordinary statement can lock a table, consume significant resources, expose sensitive data, or affect many rows.
 
@@ -354,6 +354,7 @@ A successful automated run is evidence only for the checks that actually ran. It
 | **src/mysql_editor/update_checker.py** | Optional stable GitHub Release metadata check with a bounded background request and strict release-link validation |
 | **src/mysql_editor/ui/tutorial.py** | Animated guided tour |
 | **src/mysql_editor/ui/unlock_dialog.py** | Local master-password unlock dialog |
+| **src/mysql_editor/ui/explain_plan.py** | Strict MySQL JSON plan extraction, expandable operation tree, estimate summary and copyable raw JSON |
 | **tests/** | Unit, integration, and startup/regression tests |
 | **tools/** | Brand-asset generator and Windows UI smoke tests |
 | **pyinstaller/** | PyInstaller application-folder specification |

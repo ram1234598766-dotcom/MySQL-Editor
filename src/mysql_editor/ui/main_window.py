@@ -44,6 +44,7 @@ from mysql_editor.ui.preferences import (
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
 from mysql_editor.ui.schema_inspector import SchemaObjectInspectorDialog
+from mysql_editor.ui.explain_plan import ExplainPlanDialog, ExplainPlanError, extract_explain_json
 from mysql_editor.update_checker import UpdateCheckResult, UpdateCheckThread, is_safe_release_url
 from mysql_editor.recent_files import (
     MAX_RECENT_SQL_FILES, normalize_recent_sql_paths, record_recent_sql_path,
@@ -1527,7 +1528,7 @@ class MainWindow(QMainWindow):
         self.status.setText("SQL not submitted · script parsing failed.")
         QMessageBox.warning(self, "SQL script parsing failed", str(error))
 
-    def _execute_sql(self, sql: str):
+    def _execute_sql(self, sql: str, additional_context: dict | None = None):
         if self._query_running:
             self._report_query_busy("submit")
             return
@@ -1587,9 +1588,14 @@ class MainWindow(QMainWindow):
         self.result_picker.blockSignals(False)
         self.result_model.update([], [])
         self._set_result_controls()
-        self._dispatch("query", {"sql": sql}, {
-            "sql": sql, "profile_name": self.profile.get("name", "Connection"),
-        })
+        query_context = {
+            "sql": sql,
+            "profile_name": self.profile.get("name", "Connection"),
+        }
+        query_context.update(additional_context or {})
+        # The history entry records the exact EXPLAIN request submitted to MySQL.
+        query_context["sql"] = sql
+        self._dispatch("query", {"sql": sql}, query_context)
         self._set_result_message(
             "SQL is queued for the database worker. The editor remains responsive."
         )
@@ -1610,7 +1616,10 @@ class MainWindow(QMainWindow):
         if not sql.lstrip().upper().startswith("SELECT"):
             QMessageBox.warning(self, "Explain SELECT", "EXPLAIN is offered for SELECT statements.")
             return
-        self._execute_sql("EXPLAIN " + sql)
+        self._execute_sql(
+            "EXPLAIN FORMAT=JSON " + sql,
+            additional_context={"explain_plan": True, "explained_sql": sql},
+        )
 
     def stop_query(self):
         if self._query_running and not self._cancellation_requested:
@@ -2034,6 +2043,18 @@ class MainWindow(QMainWindow):
             self._query_running = False
             self._cancellation_requested = False
             self._sync_connection_controls()
+        if action == "query" and context.get("explain_plan"):
+            self._handle_explain_plan_completed(result, context)
+            if context.get("sql"):
+                self.repository.add_history(
+                    context.get("profile_name", "Connection"),
+                    redact_sql_secrets(context["sql"]),
+                    int(result.get("duration_ms", 0) or 0),
+                    "success" if result.get("ok") else "error",
+                )
+                self.refresh_history()
+            self._flush_deferred_export_notifications()
+            return
         if action in {"query", "table_preview"}:
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
@@ -2316,6 +2337,55 @@ class MainWindow(QMainWindow):
                 })
                 return
             self._show_export_notification(result)
+
+    def _handle_explain_plan_completed(self, result: dict, context: dict) -> None:
+        """Show a structured JSON plan without loading optimizer data into the result grid."""
+        explained_sql = str(context.get("explained_sql") or "").strip()
+        if not result.get("ok"):
+            detail = redact_secrets(
+                str(result.get("error") or "MySQL could not produce a JSON execution plan.")
+            ).strip()
+            self.query_meta.setText("Execution plan unavailable")
+            self._set_result_message(
+                "The execution plan could not be produced. The original SELECT was not executed."
+                + (f"\n{detail}" if detail else "")
+            )
+            self.status.setText("Explain failed · SELECT was not executed.")
+            QMessageBox.warning(
+                self,
+                "Explain SELECT",
+                "MySQL could not produce an EXPLAIN FORMAT=JSON plan. The original SELECT was not "
+                "executed. Check server support and permissions.\n\n" + detail,
+            )
+            return
+
+        try:
+            plan = extract_explain_json(result)
+        except ExplainPlanError as exc:
+            detail = redact_secrets(str(exc)).strip()
+            self.query_meta.setText("Execution plan unavailable")
+            self._set_result_message(
+                "MySQL returned a response that could not be shown as a JSON plan."
+                + (f"\n{detail}" if detail else "")
+            )
+            self.status.setText("Explain failed · SELECT was not executed.")
+            QMessageBox.warning(
+                self,
+                "Explain SELECT",
+                "A JSON execution plan could not be read. The original SELECT was not executed."
+                + (f"\n\n{detail}" if detail else ""),
+            )
+            return
+
+        dialog = ExplainPlanDialog(plan, explained_sql, self)
+        dialog.exec()
+        self.query_meta.setText("JSON execution plan")
+        self._set_result_message(
+            "Visual execution plan loaded. This view shows optimizer estimates; it does not run the SELECT."
+        )
+        self.status.setText(
+            "Execution plan ready · the SELECT was not executed; row counts and costs are estimates."
+        )
 
     def _apply_query_outcome(self, outcome: str | None, result: dict):
         error = str(result.get("error") or "Query failed.")

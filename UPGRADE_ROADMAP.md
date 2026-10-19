@@ -327,6 +327,7 @@ Tasks:
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
 - Ensure result sorting does not reorder the underlying result spool or corrupt CSV order unexpectedly. Define whether export preserves server fetch order or current sorted-grid order and communicate that clearly.
 - Add export options deliberately (CSV first; JSON or XLSX only after dependency/licence/large-file/performance review).
+- [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
 - Continue atomic file replacement and temp-file cleanup. For long exports, show true progress or an honest indeterminate state and keep the window responsive.
 
 Exit gate:
@@ -334,6 +335,7 @@ Exit gate:
 - Large results do not cause UI freezes or unbounded memory use.
 - Failures preserve previously saved export files.
 - Row counts and completion states agree with the worker's result data.
+- [x] Explain-plan tests cover JSON row extraction, malformed/empty/error responses, nested plan rendering, raw JSON copy, asynchronous request dispatch, and graceful unsupported-server failures.
 
 ### Phase 6 — Professional polish, accessibility and preferences
 
