@@ -146,6 +146,16 @@ jobs:
           }
       - name: Create transparent brand assets
         run: python tools/build_brand_assets.py
+      - name: Validate optional signing helper syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "tools/sign_windows_artifacts.ps1"), [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parse errors were found in tools/sign_windows_artifacts.ps1."
+          }
       - name: Validate application startup imports before packaging
         shell: pwsh
         run: |
@@ -173,11 +183,7 @@ jobs:
         run: python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
       - name: Build portable executable
         run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor-logo-transparent.png;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
-      - name: Build setup installer
-        run: iscc installer/MySQLEditor.iss
-      - name: Sign and verify Windows executables
+      - name: Sign and verify application executables
         if: steps.signing-config.outputs.enabled == 'true'
         shell: pwsh
         env:
@@ -185,41 +191,25 @@ jobs:
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
           WINDOWS_SIGNING_TIMESTAMP_URL: http://timestamp.digicert.com
         run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "mysql-editor-signing.pfx"
-          try {
-            $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
-            [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
-
-            $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-            $signToolCandidates = @(
-              Get-ChildItem -Path $kitsRoot -Filter signtool.exe -File -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' }
-            )
-            if ($signToolCandidates.Count -eq 0) {
-              throw "SignTool.exe was not found in the Windows SDK x64 tools directory."
-            }
-            $signTool = ($signToolCandidates | Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1).FullName
-
-            $targets = @(
-              (Resolve-Path "dist/MySQLEditor/MySQLEditor.exe").Path
-              (Resolve-Path "dist/MySQLEditor-Portable.exe").Path
-              (Resolve-Path "dist/installer/MySQLEditor-Setup.exe").Path
-            )
-            foreach ($target in $targets) {
-              & $signTool sign /fd SHA256 /tr $env:WINDOWS_SIGNING_TIMESTAMP_URL /td SHA256 /f $certificatePath /p $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD $target
-              if ($LASTEXITCODE -ne 0) {
-                throw "SignTool failed to sign $target (exit code $LASTEXITCODE)."
-              }
-
-              & $signTool verify /pa /all /v $target
-              if ($LASTEXITCODE -ne 0) {
-                throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
-              }
-              Write-Host "Signed and verified: $(Split-Path $target -Leaf)"
-            }
-          } finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-          }
+          & "tools/sign_windows_artifacts.ps1" -Targets @(
+            "dist/MySQLEditor/MySQLEditor.exe",
+            "dist/MySQLEditor-Portable.exe"
+          )
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build setup installer
+        run: iscc installer/MySQLEditor.iss
+      - name: Sign and verify Windows installer
+        if: steps.signing-config.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: http://timestamp.digicert.com
+        run: |
+          & "tools/sign_windows_artifacts.ps1" -Targets @(
+            "dist/installer/MySQLEditor-Setup.exe"
+          )
       - name: Smoke test installer install and uninstall
         shell: pwsh
         run: |
