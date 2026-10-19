@@ -7,6 +7,7 @@ import tempfile
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
