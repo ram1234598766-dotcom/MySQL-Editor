@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
             self._settings.value("updates/automaticCheck", False), False
         )
         self._update_check_thread: UpdateCheckThread | None = None
+        self._update_check_manual = False
         self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
         self._show_editor_line_numbers = normalize_boolean_preference(
             self._settings.value("ui/showLineNumbers", True), True
@@ -876,20 +877,26 @@ class MainWindow(QMainWindow):
 
         thread = UpdateCheckThread(parent=self)
         self._update_check_thread = thread
+        self._update_check_manual = manual
         thread.result_ready.connect(
-            lambda result, started_manually=manual:
-            self._on_update_check_result(result, manual=started_manually)
+            self._on_update_check_result, Qt.ConnectionType.QueuedConnection
         )
-        thread.finished.connect(lambda completed_thread=thread: self._on_update_check_finished(completed_thread))
+        thread.finished.connect(
+            self._on_update_check_finished, Qt.ConnectionType.QueuedConnection
+        )
         self.status.setText("Checking the latest stable GitHub Release…")
         thread.start()
 
-    def _on_update_check_finished(self, thread: UpdateCheckThread) -> None:
-        if self._update_check_thread is thread:
+    def _on_update_check_finished(self) -> None:
+        """Release the completed background thread on the UI thread."""
+        thread = self._update_check_thread
+        if thread is not None and not thread.isRunning():
             self._update_check_thread = None
-        thread.deleteLater()
+            thread.deleteLater()
 
-    def _on_update_check_result(self, result: UpdateCheckResult, *, manual: bool) -> None:
+    def _on_update_check_result(self, result: UpdateCheckResult) -> None:
+        """Render update results on the UI thread only."""
+        manual = self._update_check_manual
         if not manual and not self._update_checks_enabled:
             return
 
