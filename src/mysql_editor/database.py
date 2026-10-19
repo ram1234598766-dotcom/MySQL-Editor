@@ -504,7 +504,13 @@ class DatabaseWorker(QThread):
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
         if action == "update_table_cell":
-            return self._update_table_cell(dict(payload))
+            result = self._update_table_cell(dict(payload))
+            result.setdefault(
+                "transaction_open",
+                bool(getattr(self._connection, "in_transaction", False))
+                if self._connection is not None else False,
+            )
+            return result
         if action == "inspect_schema_object":
             return self._inspect_schema_object(
                 str(payload.get("schema", "") or ""),
@@ -1173,7 +1179,7 @@ class DatabaseWorker(QThread):
         try:
             cursor = self._connection.cursor()
             cursor.execute(
-                "SELECT TABLE_TYPE FROM information_schema.TABLES "
+                "SELECT TABLE_TYPE, ENGINE FROM information_schema.TABLES "
                 "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
                 (schema, table),
             )
@@ -1183,6 +1189,21 @@ class DatabaseWorker(QThread):
                 return disabled
             if str(table_row[0] or "").casefold() != "base table":
                 disabled["reason"] = "Only base tables can be edited; views and other objects stay read-only."
+                return disabled
+            engine = str(table_row[1] or "").strip()
+            if not engine:
+                disabled["reason"] = "The table storage engine could not be verified; keep this preview read-only."
+                return disabled
+            cursor.execute(
+                "SELECT TRANSACTIONS FROM information_schema.ENGINES WHERE ENGINE = %s",
+                (engine,),
+            )
+            engine_row = cursor.fetchone()
+            if not engine_row or str(engine_row[0] or "").casefold() != "yes":
+                disabled["reason"] = (
+                    "Only tables using a transactional MySQL storage engine can be edited; "
+                    "this engine cannot guarantee Rollback."
+                )
                 return disabled
 
             cursor.execute(
@@ -1367,13 +1388,29 @@ class DatabaseWorker(QThread):
 
             cursor = connection.cursor()
             cursor.execute(
-                "SELECT TABLE_TYPE FROM information_schema.TABLES "
+                "SELECT TABLE_TYPE, ENGINE FROM information_schema.TABLES "
                 "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
                 (schema, table),
             )
             table_info = cursor.fetchone()
             if not table_info or str(table_info[0] or "").casefold() != "base table":
                 return {"ok": False, "error": "The target is no longer a base table; the cell was not updated."}
+            engine = str(table_info[1] or "").strip()
+            if not engine:
+                return {
+                    "ok": False,
+                    "error": "The table storage engine could not be verified; the cell was not updated.",
+                }
+            cursor.execute(
+                "SELECT TRANSACTIONS FROM information_schema.ENGINES WHERE ENGINE = %s",
+                (engine,),
+            )
+            engine_row = cursor.fetchone()
+            if not engine_row or str(engine_row[0] or "").casefold() != "yes":
+                return {
+                    "ok": False,
+                    "error": "This MySQL storage engine cannot guarantee Rollback; the cell was not updated.",
+                }
 
             cursor.execute(
                 "SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS "
@@ -1446,6 +1483,39 @@ class DatabaseWorker(QThread):
             where_keys = " AND ".join(
                 f"{safe_identifier(name)} = %s" for name in actual_primary_key
             )
+            # Lock and re-read the target row before changing it. This both prevents a
+            # concurrent writer from changing another column during a manual transaction
+            # and avoids accepting stale preview data as the rollback baseline.
+            cursor.execute(
+                f"SELECT * FROM {qualified_table} WHERE {where_keys} FOR UPDATE",
+                tuple(primary_key_values),
+            )
+            locked_row = cursor.fetchone()
+            if locked_row is None:
+                return {
+                    "ok": False,
+                    "error": "The row no longer exists. Refresh the table preview.",
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+            if len(locked_row) != len(cached_values):
+                return {
+                    "ok": False,
+                    "error": "The row shape changed since the preview. Refresh the table preview.",
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+            if not self._same_cell_value(locked_row[column_index], expected_old):
+                return {
+                    "ok": False,
+                    "error": "The cell changed on MySQL since this preview. Refresh and try again.",
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+            if [json_value(value) for value in locked_row] != cached_values:
+                return {
+                    "ok": False,
+                    "error": "Another column in this row changed on MySQL since the preview. Refresh before editing.",
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+
             cursor.execute(
                 f"UPDATE {qualified_table} SET {safe_column} = %s "
                 f"WHERE {where_keys} AND {safe_column} <=> %s",
