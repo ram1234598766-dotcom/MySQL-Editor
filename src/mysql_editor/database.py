@@ -354,7 +354,19 @@ class DatabaseWorker(QThread):
                     self._spool.rollback()
                 except Exception:
                     pass
-            return [], [
+            # The MySQL rollback has already happened. Keep enough information for the
+            # UI to restore its in-memory rows, but discard these snapshots so a later
+            # transaction can never reuse stale undo state.
+            restored = [
+                {
+                    "result_id": result_id,
+                    "row_index": row_index,
+                    "display_row": list(baseline),
+                }
+                for (result_id, row_index), baseline in self._table_preview_undo.items()
+            ]
+            self._table_preview_undo.clear()
+            return restored, [
                 "MySQL rolled back the transaction, but the local preview cache could not be restored: "
                 + safe_db_error(exc)
             ]
