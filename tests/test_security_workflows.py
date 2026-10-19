@@ -137,7 +137,7 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert 'signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint' in signing_script
     assert "Import-Certificate" not in signing_script
     assert "certutil.exe" not in signing_script
-    assert "temporary and local to this runner" in signing_script
+    assert "Recipient PCs will not trust this self-signed certificate by default." in signing_script
     assert "Remove-Item -LiteralPath $certificatePath" in signing_script
     assert "http://timestamp.digicert.com" in workflow
     assert "dist/RELEASE-MANIFEST.json" in workflow
