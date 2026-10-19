@@ -53,11 +53,14 @@ def test_manifest_records_exact_commit_version_and_artifact_hashes(tmp_path: Pat
 
     manifest = build_release_manifest(dist, commit, project_root=project_root)
 
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["product"] == {"name": "MySQL Editor", "version": "1.2.3"}
     assert manifest["source"]["commit_sha"] == "a" * 40
     assert manifest["signing"]["status"] == "unsigned"
+    assert manifest["signing"]["certificate_type"] is None
     assert manifest["signing"]["authenticode_verified"] is False
+    assert manifest["signing"]["trust_scope"] == "none"
+    assert manifest["signing"]["recipient_trust"] == "not-applicable"
     assert len(manifest["artifacts"]) == len(REQUIRED_ARTIFACTS)
     for record in manifest["artifacts"]:
         artifact_path = dist / record["path"]
@@ -74,12 +77,19 @@ def test_manifest_records_signed_status_only_after_verified_signature(tmp_path: 
         project_root=project_root,
         signing_status="signed",
         authenticode_verified=True,
+        signing_certificate_type="self-signed",
     )
 
     assert manifest["signing"]["status"] == "signed"
+    assert manifest["signing"]["certificate_type"] == "self-signed"
     assert manifest["signing"]["authenticode_verified"] is True
+    assert manifest["signing"]["trust_scope"] == "signature-integrity-only"
+    assert manifest["signing"]["recipient_trust"] == "not-trusted-by-default"
+    assert "Recipient PCs do not trust this certificate by default" in manifest["signing"]["details"]
     assert manifest["signing"]["timestamp_authority"] == "http://timestamp.digicert.com"
-    assert manifest["signing"]["verification_method"] == "SignTool /verify /pa /all /v"
+    assert manifest["signing"]["verification_method"].startswith("PowerShell Get-AuthenticodeSignature status/status message")
+    assert "without modifying the build runner's certificate stores" in manifest["signing"]["details"]
+    assert "explicitly identifies an untrusted root chain" in manifest["signing"]["details"]
 
 
 def test_manifest_rejects_signed_status_without_authenticode_verification(tmp_path: Path):
@@ -92,6 +102,7 @@ def test_manifest_rejects_signed_status_without_authenticode_verification(tmp_pa
             project_root=project_root,
             signing_status="signed",
             authenticode_verified=False,
+            signing_certificate_type="self-signed",
         )
 
 
@@ -137,3 +148,47 @@ def test_manifest_rejects_a_non_cyclonedx_sbom(tmp_path: Path):
 
     with pytest.raises(ValueError, match="not identified as CycloneDX"):
         build_release_manifest(dist, "d" * 40, project_root=project_root)
+
+def test_manifest_records_trusted_certificate_mode_without_promising_smart_screen_behavior(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    manifest = build_release_manifest(
+        dist,
+        "1" * 40,
+        project_root=project_root,
+        signing_status="signed",
+        authenticode_verified=True,
+        signing_certificate_type="trusted",
+    )
+
+    assert manifest["signing"]["certificate_type"] == "trusted"
+    assert manifest["signing"]["trust_scope"] == "build-runner-windows-trust-policy"
+    assert manifest["signing"]["recipient_trust"] == "depends-on-recipient-trust-store-and-reputation"
+    assert "SmartScreen warnings are not ruled out" in manifest["signing"]["details"]
+
+
+def test_manifest_rejects_signed_assets_without_certificate_type(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="requires a signing certificate type"):
+        build_release_manifest(
+            dist,
+            "2" * 40,
+            project_root=project_root,
+            signing_status="signed",
+            authenticode_verified=True,
+        )
+
+
+def test_manifest_rejects_certificate_type_for_unsigned_assets(tmp_path: Path):
+    project_root, dist = _release_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="cannot claim a signing certificate type"):
+        build_release_manifest(
+            dist,
+            "3" * 40,
+            project_root=project_root,
+            signing_status="unsigned",
+            authenticode_verified=False,
+            signing_certificate_type="self-signed",
+        )

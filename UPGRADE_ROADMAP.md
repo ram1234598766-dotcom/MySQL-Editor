@@ -68,7 +68,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 - Automatic TLS negotiates encryption where supported but does not verify server identity; strict mode does.
 - The current dark styling is spread through UI code and should be consolidated into reusable design tokens before substantial visual changes.
 - Automated/offscreen tests cannot prove the visual result on every real display configuration.
-- The Windows executable remains unsigned unless a trusted Authenticode signing certificate is configured and the final signature is verified.
+- Preview Windows executables remain unsigned by policy. Stable version-tag builds require a configured code-signing PFX and successful final signature verification; the default self-signed mode does not make recipient PCs trust the publisher certificate.
 
 ---
 
@@ -744,7 +744,7 @@ PR [#54](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/54) merged as
 - Build the app-folder and portable executables, then optionally sign and verify them with SHA-256 Authenticode plus an RFC 3161 timestamp before building the installer. Sign and verify the installer separately after Inno Setup compiles it.
 - Keep certificate secrets out of pull-request runs; evaluate signing configuration only on trusted pushes to `main`, version tags, or explicit workflow dispatches for those refs.
 - Fail on partial secret configuration, and block stable version-tag publication if a trusted certificate is not configured. Preview builds can remain unsigned, but their manifest must explicitly disclose that state.
-- Extend `tools/create_release_manifest.py` so it cannot claim `signed` unless the workflow passes the verified-signature arguments after all SignTool checks succeed. Add tests for unsigned/signed manifest states and workflow ordering.
+- Extend `tools/create_release_manifest.py` so it cannot claim `signed` unless the workflow passes the verified-signature arguments after successful mode-appropriate signature checks: Authenticode integrity and signer-thumbprint checks for self-signed mode, or SignTool policy verification for trusted mode. Add tests for unsigned/signed manifest states and workflow ordering.
 - Document the two Actions secrets and the limits of signing/SmartScreen claims in `WINDOWS_SIGNING.md`.
 
 Automated verification for the merged source commit:
@@ -775,8 +775,27 @@ The signing-configuration check ran successfully on this main build, but the sig
 
 ### Approval gate — do not bypass
 
-- [ ] User explicitly approves the Phase 0 baseline audit.
-- [ ] User explicitly approves the proposed PR sequence.
+- [x] User explicitly approves the Phase 0 baseline audit.
+- [x] User explicitly approves the proposed PR sequence.
 - [ ] Only after both approvals may Phase B / feature implementation begin.
 - [ ] Every implementation phase must use a focused branch/PR, regression tests, CI evidence, and honest Windows validation reporting.
 - [ ] No application code, feature behavior, or release-signing workflow is authorized by this decision record alone.
+
+## Phase B — self-signed Windows signing path
+
+**Status:** Implementation in progress on branch `phase-b/self-signed-windows-signing`. This is a focused release-engineering phase following the user's Phase 0 approval. Existing theme-token, motion, delimiter parsing, result paging, and other previously merged roadmap work must not be reimplemented merely to replay the older sequence.
+
+### Scope
+- Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
+- Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
+- Support the selected self-signed code-signing certificate without modifying the hosted runner's trust store; accept only the expected untrusted-root Authenticode status when the signer thumbprint matches, and disclose that recipient PCs do not trust the certificate by default.
+- Record the certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
+- Add a Windows end-to-end smoke test that generates a short-lived self-signed test certificate and signs a temporary copy of the built EXE. It must not mutate or publish that preview artifact.
+- Update the README, signing guide, and release-candidate checklist with the same signing and SmartScreen caveats.
+
+### Exit gate
+- Manifest tests reject a signed status without verified-signature evidence or a declared certificate type.
+- Workflow tests confirm previews remain unsigned, stable tags fail closed without secrets, and the signing helper is exercised in the Windows build.
+- The Windows workflow passes the complete test matrix, MySQL integration test, actual Windows signing smoke test, package/install/uninstall checks, and manifest/checksum validation.
+- The release manifest reports `certificate_type = "self-signed"` and `recipient_trust = "not-trusted-by-default"` when that mode signs a stable release.
+- No real stable release is published by this PR; a signed stable-tag run with the configured private PFX remains a separate release action.

@@ -1,39 +1,61 @@
 # Windows signing and release trust
 
-The Windows release workflow can sign the application executables and installer with a trusted Authenticode certificate. If signing secrets are absent, pull-request builds and preview builds remain explicitly unsigned. Stable version tags are blocked unless signing is configured and the final signatures pass SignTool verification.
+**Preview policy:** Pull-request builds, main-branch preview builds, and preview version tags stay **unsigned**, even if signing secrets are configured. Stable version tags require the signing secrets and successful signature verification before publication.
 
-A valid signature helps Windows identify the publisher and detect changes to signed files. It does **not** guarantee that SmartScreen, antivirus, or other reputation-based warnings will never appear.
+**Selected certificate policy:** The workflow defaults to a **self-signed code-signing certificate**. The signature can be checked, but Windows does not trust this certificate on recipient PCs by default. A self-signed signature does not establish a publicly trusted publisher identity and does not eliminate SmartScreen or unknown-publisher warnings. A trusted CA-issued certificate is also supported by setting the repository variable described below.
 
-## Configure GitHub Actions secrets
+## 1. Create a self-signed code-signing certificate
 
-Use a legitimate code-signing certificate from a reputable certificate authority. Do not present a self-signed certificate as trusted publisher verification.
-
-Add both repository Actions secrets:
-
-- `WINDOWS_SIGNING_CERTIFICATE_BASE64` — the PFX/P12 certificate file encoded as Base64.
-- `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` — the PFX/P12 password.
-
-For example, on a trusted local machine, encode the certificate file with PowerShell:
+Run PowerShell on a trusted Windows machine. Keep the resulting PFX and its password private; do not commit or upload them as ordinary repository files.
 
 ```powershell
-[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("publisher-codesigning.pfx"))
+$cert = New-SelfSignedCertificate `
+  -Type CodeSigningCert `
+  -Subject "CN=MySQL Editor Release Signing" `
+  -CertStoreLocation "Cert:\CurrentUser\My" `
+  -KeyAlgorithm RSA `
+  -KeyLength 3072 `
+  -HashAlgorithm SHA256 `
+  -KeyExportPolicy Exportable `
+  -NotAfter (Get-Date).AddYears(3)
+
+$pfxPassword = Read-Host "Choose a strong PFX password" -AsSecureString
+Export-PfxCertificate -Cert $cert -FilePath ".\mysql-editor-signing.pfx" -Password $pfxPassword
+
+[Convert]::ToBase64String([System.IO.File]::ReadAllBytes(".\mysql-editor-signing.pfx"))
 ```
 
-Copy the output directly into the secret value. Keep the PFX and its password out of source control, pull-request comments, chat messages, ordinary files, and workflow logs. Never commit the private certificate.
+Store the PFX securely and keep the same certificate for the signing identity where possible. Losing the PFX/private key prevents later signing with that certificate. The Base64 command prints the encoded PFX; it does not make the private key safe to share publicly.
 
-The workflow intentionally does not expose signing secrets to `pull_request` runs. On trusted pushes or manual runs, it signs when both secrets are present. Configure both or neither; partial configuration fails.
+## 2. Configure GitHub Actions
 
-## Signing and verification policy
+Add these repository Actions **secrets**:
 
-When signing is enabled, the Windows workflow:
+- `WINDOWS_SIGNING_CERTIFICATE_BASE64` — the complete Base64 output from the previous step.
+- `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` — the password chosen for the PFX.
 
-1. Writes the Base64-decoded PFX to the temporary hosted-runner directory.
-2. Signs `MySQLEditor.exe`, `MySQLEditor-Portable.exe`, and `MySQLEditor-Setup.exe` with SHA-256 Authenticode and an RFC 3161 timestamp from DigiCert.
-3. Verifies each signature with `SignTool verify /pa /all /v`. A signing or verification error fails the build.
-4. Creates the folder ZIP, release manifest, and SHA-256 checksums **after** signing, so the digests describe the exact signed binaries.
+The workflow defaults to self-signed mode. The optional repository **variable** `WINDOWS_SIGNING_CERTIFICATE_TYPE` accepts `self-signed` or `trusted`; leave it unset or set it to `self-signed` for the selected policy. Use `trusted` only when the supplied certificate is issued by a certificate authority and validates against Windows trust policy.
 
-The manifest records `signing.status = "signed"` and `authenticode_verified = true` only when the workflow reaches manifest generation after all three verifications pass. Otherwise, it records `unsigned` and does not claim verification.
+Configure both secrets or neither. Partial configuration fails. Signing secrets are not made available to pull-request workflows. The self-signed test step creates a short-lived test certificate and signs a **temporary, freshly compiled unsigned EXE**; it does not sign or mutate a distributed preview artifact. On a push to `main`, when the signing secrets are configured, the workflow also compiles an unsigned disposable Windows executable and signs/verifies it against the approved certificate fingerprint. That check does not publish a release and does not change the preview binaries; if the secrets are absent, the optional certificate smoke step is skipped while stable tags remain blocked.
 
-Stable version tags such as `v1.0.0` require both signing secrets; publication is blocked if the certificate is missing or the signature cannot be verified. Explicit preview tags (for example, `v1.0.0-preview.1`, `v1.0.0-beta.1`, `v1.0.0-rc.1`) and normal main-branch preview builds may remain unsigned when no certificate is configured. The GitHub Release must still be marked as a pre-release for preview tags.
+## 3. Stable-release signing and verification
 
-DigiCert's current SignTool instructions use `/tr http://timestamp.digicert.com /td SHA256 /fd SHA256`. Timestamping helps preserve signature validation after the signing certificate later expires; it does not certify that the application is safe.
+For a stable version tag (for example, `v1.0.0`), the Windows release workflow:
+
+1. Requires both signing secrets; it refuses to publish a stable version tag unsigned.
+2. Checks that the PFX contains a currently valid Code Signing certificate and private key.
+3. For a self-signed certificate, the helper does **not** modify the hosted runner's certificate stores. It checks `Get-AuthenticodeSignature` status and the signer thumbprint. It accepts `Valid`, or accepts `UnknownError`/`NotTrusted` only when Windows' status message explicitly reports an untrusted root chain—the expected trust limitation for a self-signed certificate. A hash mismatch, expired/revoked certificate, missing signer, or unrelated verification error fails. This checks signature integrity and signer identity without claiming that the publisher is trusted on recipient PCs.
+4. Signs the app-folder executable, portable EXE, and setup installer with SHA-256 Authenticode and an RFC 3161 timestamp from DigiCert.
+5. In self-signed mode, the helper requires a matching signer thumbprint and either a `Valid` signature status or the specifically identified untrusted-root-chain status; every other status fails. In `trusted` mode, it runs `SignTool verify /pa /all /v` so Windows policy and certificate trust are verified.
+6. Creates the folder ZIP, release manifest, and SHA-256 checksums after signing, so those hashes describe the final signed artifacts.
+
+The manifest records the signing status, certificate type, verification scope, and whether recipient trust is established by default. For the selected self-signed certificate, it reports `certificate_type = "self-signed"`, `trust_scope = "signature-integrity-only"`, and `recipient_trust = "not-trusted-by-default"`. Self-signed verification does not modify the runner's trust store; it checks Authenticode status/status message and signer thumbprint, accepting only the specific untrusted-root-chain result in lieu of a trusted-chain status. A trusted CA certificate uses Windows trust-policy verification instead; SmartScreen behavior still depends on reputation and client environment.
+
+Timestamping preserves the time at which the signature was applied after the signing certificate later expires, when the timestamp service and signature remain valid. It is not a safety certification.
+
+## 4. Limitations recipients should understand
+
+- A self-signed signature can detect post-signing changes and identify the certificate embedded in the signature, but **does not make that certificate trusted on other PCs**.
+- Recipients may see unknown-publisher, SmartScreen, or antivirus warnings. Do not promise warning-free installation.
+- Do not advise users to disable SmartScreen or certificate validation globally. If an organization intentionally distributes a self-signed certificate internally, its administrators must distribute and trust the certificate through their own managed policy.
+- SHA-256 checksums verify file equality against the published values. They do not prove that software is safe or establish publisher trust.
