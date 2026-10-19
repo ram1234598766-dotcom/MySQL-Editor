@@ -351,6 +351,7 @@ A successful automated run is evidence only for the checks that actually ran. It
 | **src/mysql_editor/ui/find_replace_bar.py** | Inline literal Find/Replace controls and match counting |
 | **src/mysql_editor/ui/connection_dialog.py** | Connection form, profile selection, test/connect actions, first-run lock setup |
 | **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, cursor status, result grid, schema/history/snippets, transaction controls and export |
+| **src/mysql_editor/update_checker.py** | Optional stable GitHub Release metadata check with a bounded background request and strict release-link validation |
 | **src/mysql_editor/ui/tutorial.py** | Animated guided tour |
 | **src/mysql_editor/ui/unlock_dialog.py** | Local master-password unlock dialog |
 | **tests/** | Unit, integration, and startup/regression tests |
