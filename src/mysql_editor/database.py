@@ -1016,8 +1016,9 @@ class DatabaseWorker(QThread):
             disabled["reason"] = "The MySQL connection is no longer available."
             return disabled
 
-        cursor = self._connection.cursor()
+        cursor = None
         try:
+            cursor = self._connection.cursor()
             cursor.execute(
                 "SELECT TABLE_TYPE FROM information_schema.TABLES "
                 "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
@@ -1121,7 +1122,11 @@ class DatabaseWorker(QThread):
             )
             return disabled
         finally:
-            cursor.close()
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _same_cell_value(left: Any, right: Any) -> bool:
