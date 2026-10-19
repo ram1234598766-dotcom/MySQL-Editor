@@ -198,3 +198,25 @@ def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes(
 
     assert _contrast_ratio("#A6B6CB", "#121A26") >= 4.5
     assert _contrast_ratio("#526174", "#F2F5F9") >= 4.5
+
+def test_light_theme_normal_hover_selected_disabled_error_and_warning_states_meet_contrast():
+    light = stylesheet_for_theme("light")
+
+    # Keep these checks tied to actual stylesheet rules so palette changes cannot
+    # quietly make a visible interaction state unreadable.
+    assert "QPushButton:hover { background: #E6EDF5;" in light
+    assert "QToolButton#navButton:checked { background: #D6E3F2; color: #075B66;" in light
+    assert "QPushButton:disabled { color: #5D6B7B; background: #F2F5F9;" in light
+    assert 'QLabel#connectionBadge[connectionState="lost"] { color: #B42335; background: #FCE7E9;' in light
+    assert "QLabel#statusWarning { color: #946200; }" in light
+    assert "selection-background-color: #184C82; selection-color: white;" in light
+
+    assert _contrast_ratio("#263548", "#F8FAFC") >= 4.5  # normal text
+    assert _contrast_ratio("#263548", "#E6EDF5") >= 4.5  # hovered normal button
+    assert _contrast_ratio("#075B66", "#D6E3F2") >= 4.5  # selected navigation
+    assert _contrast_ratio("#FFFFFF", "#184C82") >= 4.5  # selected result rows
+    assert _contrast_ratio("#5D6B7B", "#F2F5F9") >= 4.5  # disabled control text
+    assert _contrast_ratio("#B42335", "#FCE7E9") >= 4.5  # connection error badge
+    assert _contrast_ratio("#946200", "#F8FAFC") >= 4.5  # warning text
+    assert _contrast_ratio("#F8FAFC", "#056C78") >= 4.5  # primary button hover text
+
