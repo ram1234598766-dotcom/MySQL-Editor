@@ -762,11 +762,11 @@ The signing-configuration check ran successfully on this main build, but the sig
 ## Phase 0 — User decisions and implementation gate
 
 **Recorded:** 19 October 2026  
-**Status:** Product decisions recorded and approval gates satisfied. The user approved the baseline audit, PR sequence, and implementation. Phase B's self-signed Windows signing path is merged and the configured PFX has been verified on the trusted \`main\` workflow. Stable-tag release signing and physical-Windows acceptance remain separate gates.
+**Status:** Product decisions recorded and approval gates satisfied. The user approved the baseline audit, PR sequence, and implementation. Phase B's self-signed Windows signing path is merged and the configured PFX has been verified on the trusted `main` workflow. Stable-tag release signing and physical-Windows acceptance remain separate gates.
 
 ### Confirmed decisions
 
-1. **SQL parser:** Adopt SQLGlot, with a custom MySQL \`DELIMITER\` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
+1. **SQL parser:** Adopt SQLGlot, with a custom MySQL `DELIMITER` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
 2. **SSH tunneling:** Defer to a later phase. Do not include SSH tunneling in the initial Windows desktop scope.
 3. **Platform:** Windows 10 and Windows 11 only for this roadmap.
 4. **Update checker:** Optional and disabled by default. Do not initiate update checks unless the user explicitly enables the feature.
@@ -796,16 +796,16 @@ The signing-configuration check ran successfully on this main build, but the sig
 
 ### Verification and merge record
 
-- [PR #57](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/57) — implementation of the signing helper, fail-closed stable-tag path, and signature-integrity validation without trust-store writes; merged as \`f4f3fabc132aa30293559a0067f1f12290a2c2e3\`.
-- [PR #58](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/58) — diagnostics for mismatched configured and approved certificate thumbprints; merged as \`b9216a5c6a93479458c1136e1a0caf5269d0e225\`.
-- [PR #59](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/59) — pins the workflow to the public thumbprint of the existing configured certificate, updates the regression assertion, and documents the identity; merged as \`9f5ed33f946e08ffaf7cf3bf922422e4dd1641b6\`.
+- [PR #57](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/57) — implementation of the signing helper, fail-closed stable-tag path, and signature-integrity validation without trust-store writes; merged as `f4f3fabc132aa30293559a0067f1f12290a2c2e3`.
+- [PR #58](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/58) — diagnostics for mismatched configured and approved certificate thumbprints; merged as `b9216a5c6a93479458c1136e1a0caf5269d0e225`.
+- [PR #59](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/59) — pins the workflow to the public thumbprint of the existing configured certificate, updates the regression assertion, and documents the identity; merged as `9f5ed33f946e08ffaf7cf3bf922422e4dd1641b6`.
 
-The [current-main Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39253548129) completed **PASS**. The configured PFX loaded with its private key, the signer matched the pinned thumbprint, and the workflow successfully signed and checked a disposable executable. The same commit passed desktop CI and the dependency-security audit. The Windows build generated the application-folder EXE, portable EXE, and installer; passed install/uninstall and packaged-launch smoke tests; generated the SBOM, provenance manifest, and SHA-256 checksums; and uploaded the \`MySQLEditor-Windows\` CI artifact.
+The [current-main Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39253548129) completed **PASS**. The configured PFX loaded with its private key, the signer matched the pinned thumbprint, and the workflow successfully signed and checked a disposable executable. The same commit passed desktop CI and the dependency-security audit. The Windows build generated the application-folder EXE, portable EXE, and installer; passed install/uninstall and packaged-launch smoke tests; generated the SBOM, provenance manifest, and SHA-256 checksums; and uploaded the `MySQLEditor-Windows` CI artifact.
 
 ### Remaining release gates
 
 - [ ] Build a stable version tag and verify that the application-folder executable, portable EXE, and installer are each timestamp-signed, verified by the selected mode, and correctly represented in the release manifest.
-- [ ] Complete the manual Windows acceptance checks in \`RELEASE-CANDIDATE-CHECKLIST.md\`, including real display scaling, keyboard-only interaction, screen-reader behavior, the target machine's Credential Manager state, and the target MySQL/TLS environment.
-- [ ] Review the produced signed release manifest and \`SHA256SUMS\` for the exact binaries before promoting a stable release.
+- [ ] Complete the manual Windows acceptance checks in `RELEASE-CANDIDATE-CHECKLIST.md`, including real display scaling, keyboard-only interaction, screen-reader behavior, the target machine's Credential Manager state, and the target MySQL/TLS environment.
+- [ ] Review the produced signed release manifest and `SHA256SUMS` for the exact binaries before promoting a stable release.
 
 **Important boundary:** main/preview artifacts remain unsigned by policy. The disposable-EXE smoke test proves the repository's configured PFX is usable and correctly pinned; it is not a signed product release. No stable version-tag release was published by this work.
