@@ -22,7 +22,7 @@ def test_edit_dialog_keeps_sql_null_distinct_from_empty_text():
     )
     try:
         assert dialog.set_null_checkbox.isChecked()
-        assert dialog.value_editor.isDisabled()
+        assert not dialog.value_editor.isEnabled()
         assert dialog.new_value() is None
 
         dialog.set_null_checkbox.setChecked(False)
