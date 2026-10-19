@@ -137,15 +137,17 @@ def build_release_manifest(
         recipient_trust = "not-applicable"
     elif signing_certificate_type == "self-signed":
         signing_details = (
-            "The artifacts were Authenticode-signed, timestamped for release, and verified with SignTool. "
-            "For verification only, this workflow temporarily added the self-signed certificate to the "
-            "build runner's current-user root store and removed it afterward. Recipient PCs do not trust "
-            "this certificate by default; publisher and SmartScreen warnings may still appear."
+            "The artifacts were Authenticode-signed and timestamped for release. The helper checked the "
+            "Authenticode signature status and confirmed the signer thumbprint matches the configured "
+            "self-signed certificate; the build runner's trust store was not modified. This checks signature "
+            "integrity and signer identity, not public publisher trust. Recipient PCs do not trust this "
+            "certificate by default; publisher and SmartScreen warnings may still appear."
         )
         verification_method = (
-            "SignTool /verify /pa /all /v after temporary build-runner trust of the self-signed certificate"
+            "PowerShell Get-AuthenticodeSignature status plus matching signer-certificate thumbprint "
+            "(accepted statuses: Valid, NotTrusted)"
         )
-        trust_scope = "build-runner-only"
+        trust_scope = "signature-integrity-only"
         recipient_trust = "not-trusted-by-default"
     else:
         signing_details = (
