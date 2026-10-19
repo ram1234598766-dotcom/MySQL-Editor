@@ -1103,6 +1103,17 @@ class MainWindow(QMainWindow):
     def reset_editor_font(self):
         self._set_editor_font_size(10)
 
+    def _mysql_task_pending(self) -> bool:
+        """Return whether a connection-bound task is queued or being processed."""
+        connection_actions = {
+            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
+            "update_table_cell", "use_schema", "commit", "rollback", "disconnect",
+        }
+        return any(
+            action in connection_actions
+            for action, _context in self._jobs.values()
+        )
+
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
         database_actions = {
             "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
@@ -1131,8 +1142,10 @@ class MainWindow(QMainWindow):
         if action == "query" and self._query_running:
             self._report_query_busy("submit")
             return None
-        if action == "update_table_cell" and self._query_running:
-            self._report_query_busy("cell edit")
+        if action == "update_table_cell" and self._mysql_task_pending():
+            self.status.setText(
+                "Cell edit paused · another MySQL operation is still queued. Wait for it to finish and retry."
+            )
             return None
         job_id = uuid.uuid4().hex
         self._jobs[job_id] = (action, context or {})
@@ -2659,6 +2672,7 @@ class MainWindow(QMainWindow):
             and not self._disconnect_pending
             and not self._query_running
             and not self._cell_edit_pending
+            and not self._mysql_task_pending()
             and self._table_cell_edit_entry(clicked)
         ):
             edit_action = menu.addAction("Edit table preview cell…")
@@ -2728,7 +2742,12 @@ class MainWindow(QMainWindow):
 
     def _edit_table_preview_cell(self, index) -> None:
         """Request confirmation, then submit one optimistic, parameterized cell update."""
-        if self._query_running or self._cell_edit_pending or self._disconnect_pending:
+        if (
+            self._query_running
+            or self._cell_edit_pending
+            or self._disconnect_pending
+            or self._mysql_task_pending()
+        ):
             self.status.setText("Cell editing is paused while another MySQL operation is active.")
             return
         if not self._connection_available:
