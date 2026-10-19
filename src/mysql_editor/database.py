@@ -127,6 +127,8 @@ class DatabaseWorker(QThread):
         self._session_token = uuid.uuid4().hex
         # Snapshot each preview row once while an inline edit belongs to an open transaction.
         self._table_preview_undo: dict[tuple[str, int], list[Any]] = {}
+        # Rollback-to-savepoint can invalidate a cached preview without ending the transaction.
+        self._invalid_table_previews: set[str] = set()
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -374,6 +376,21 @@ class DatabaseWorker(QThread):
         self._table_preview_undo.clear()
         return restored, errors
 
+    def _invalidate_table_previews(self) -> list[str]:
+        """Mark cached Schema Explorer previews stale after partial transaction rollback."""
+        if self._spool is None:
+            result_ids = {result_id for result_id, _row_index in self._table_preview_undo}
+        else:
+            try:
+                rows = self._spool.execute(
+                    "SELECT result_id FROM result_meta WHERE statement LIKE 'Preview %'"
+                ).fetchall()
+                result_ids = {str(row[0]) for row in rows if row and row[0]}
+            except sqlite3.Error:
+                result_ids = {result_id for result_id, _row_index in self._table_preview_undo}
+        self._invalid_table_previews.update(result_ids)
+        return sorted(result_ids)
+
     def _close_connection(self) -> dict[str, Any]:
         # Closing a connection can implicitly roll back uncommitted cell edits. Keep
         # the local result cache and the visible table-preview snapshot consistent.
@@ -579,6 +596,14 @@ class DatabaseWorker(QThread):
                 "ok": False, "error": "A result identifier is required.",
                 "result_id": chosen_result_id, "offset": page_offset, "rows": [],
             }
+        if chosen_result_id in self._invalid_table_previews:
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before loading more rows.",
+                "result_id": chosen_result_id,
+                "offset": page_offset,
+                "rows": [],
+            }
         try:
             meta = self._spool.execute(
                 "SELECT row_count FROM result_meta WHERE result_id=?",
@@ -657,6 +682,7 @@ class DatabaseWorker(QThread):
         results: list[dict[str, Any]] = []
         preview_rollback_rows: list[dict[str, Any]] = []
         preview_restore_errors: list[str] = []
+        preview_invalidated_result_ids: list[str] = []
         preview_transaction_finalized = False
         started = time.perf_counter()
         with self._lock:
@@ -738,7 +764,17 @@ class DatabaseWorker(QThread):
                     transaction_open_after = bool(
                         getattr(self._connection, "in_transaction", False)
                     )
-                    if self._table_preview_undo and not transaction_open_after:
+                    if transaction_command == "ROLLBACK_TO":
+                        # A savepoint rollback can undo only some work while leaving the
+                        # transaction open. We do not have per-savepoint row snapshots, so
+                        # invalidate cached table previews instead of claiming their rows
+                        # still reflect MySQL. Keep transaction-start undo snapshots for a
+                        # possible later full ROLLBACK.
+                        preview_invalidated_result_ids.extend(
+                            result_id for result_id in self._invalidate_table_previews()
+                            if result_id not in preview_invalidated_result_ids
+                        )
+                    elif self._table_preview_undo and not transaction_open_after:
                         if transaction_command == "ROLLBACK":
                             restored, restore_errors = self._restore_table_preview_undo()
                             preview_rollback_rows.extend(restored)
@@ -784,6 +820,7 @@ class DatabaseWorker(QThread):
                         ),
                         "preview_rollback_rows": preview_rollback_rows,
                         "preview_restore_errors": preview_restore_errors,
+                        "preview_invalidated_result_ids": preview_invalidated_result_ids,
                         "preview_transaction_finalized": preview_transaction_finalized,
                     }
                 finally:
@@ -808,6 +845,7 @@ class DatabaseWorker(QThread):
             "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
             "preview_rollback_rows": preview_rollback_rows,
             "preview_restore_errors": preview_restore_errors,
+            "preview_invalidated_result_ids": preview_invalidated_result_ids,
             "preview_transaction_finalized": preview_transaction_finalized,
         }
 
@@ -1319,6 +1357,13 @@ class DatabaseWorker(QThread):
         """
         connection = self._connection
         result_id = str(payload.get("result_id", "") or "")
+        if result_id in self._invalid_table_previews:
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before editing.",
+                "transaction_open": bool(getattr(connection, "in_transaction", False))
+                if connection is not None else False,
+            }
         if connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         preview_session_token = str(payload.get("session_token", "") or "")
@@ -1622,6 +1667,11 @@ class DatabaseWorker(QThread):
 
 
     def _export_csv(self, result_id: str, path: str) -> dict[str, Any]:
+        if result_id in self._invalid_table_previews:
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before exporting.",
+            }
         if self._spool is None:
             return {"ok": False, "error": "The result cache is no longer available."}
         meta = self._spool.execute("SELECT headers FROM result_meta WHERE result_id=?",
