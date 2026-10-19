@@ -555,8 +555,14 @@ def test_close_defers_without_blocking_ui_until_update_thread_finishes(tmp_path,
         assert window._close_after_update_check is False
         assert window._close_after_update_check_approved is True
         assert window.isEnabled()
-        assert len(callbacks) == 1
-        assert callbacks[0][0] == 0
+        close_callbacks = [
+            callback
+            for delay, callback in callbacks
+            if delay == 0
+            and getattr(callback, "__self__", None) is window
+            and getattr(callback, "__name__", "") == "close"
+        ]
+        assert len(close_callbacks) == 1
     finally:
         window._close_after_update_check = False
         window._close_after_update_check_approved = False
