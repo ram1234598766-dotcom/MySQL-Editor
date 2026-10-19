@@ -98,6 +98,7 @@ def _table_preview_item(*, enabled=True):
             "enabled": enabled,
             "schema": "analytics",
             "table": "items",
+            "session_token": "test-preview-session",
             "primary_key_columns": ["id"],
             "primary_key_indices": [0],
             "row_keys": [[7], [8]],
@@ -182,6 +183,7 @@ def test_confirmed_cell_edit_dispatches_one_parameterized_update_without_commit(
         assert action == "update_table_cell"
         assert payload == {
             "result_id": "preview-items-1",
+            "session_token": "test-preview-session",
             "row_index": 0,
             "column_index": 1,
             "schema": "analytics",
