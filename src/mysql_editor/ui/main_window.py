@@ -855,14 +855,9 @@ class MainWindow(QMainWindow):
             self._run_update_check(manual=False)
 
     def _run_update_check(self, *, manual: bool) -> None:
-        if not self._update_checks_enabled:
-            if manual:
-                QMessageBox.information(
-                    self,
-                    "Update checks are disabled",
-                    "No network request was made. To enable this optional feature, open "
-                    "Settings → Updates and turn on “Automatically check for updates at startup”.",
-                )
+        # Startup checks are disabled by default. An explicit Help → Check for updates
+        # action is a one-time user request and does not change the startup preference.
+        if not manual and not self._update_checks_enabled:
             return
 
         current = self._update_check_thread
