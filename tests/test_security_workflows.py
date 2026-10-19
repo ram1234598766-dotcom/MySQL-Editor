@@ -119,13 +119,15 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     signing_script = _read_workflow("tools/sign_windows_artifacts.ps1")
     assert "WINDOWS_SIGNING_CERTIFICATE_BASE64" in signing_script
     assert "WINDOWS_SIGNING_CERTIFICATE_PASSWORD" in signing_script
-    assert "sign /fd SHA256" in signing_script
+    assert '"sign", "/fd", "SHA256"' in signing_script
     assert "verify /pa /all /v" in signing_script
     assert "Remove-Item -LiteralPath $certificatePath" in signing_script
     assert "Stable version tags require an Authenticode PFX certificate and password" in workflow
     assert "Preview builds remain unsigned by policy" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_TYPE || 'self-signed' }}" in workflow
     assert "Test self-signed signing flow with a temporary certificate" in workflow
+    assert '"tools/test_self_signed_signing.ps1"' in workflow
+    assert "Validate signing helper scripts parse" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE" in signing_script
     assert "Import-Certificate" in signing_script
     assert "temporary and local to this runner" in signing_script
