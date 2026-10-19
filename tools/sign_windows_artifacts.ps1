@@ -32,9 +32,13 @@ if ($certificateType -notin @("self-signed", "trusted")) {
 }
 
 $certificatePath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-{0}.pfx" -f [Guid]::NewGuid().ToString("N"))
+$certificatePublicPath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-public-{0}.cer" -f [Guid]::NewGuid().ToString("N"))
 $certificate = $null
-$publicCertificate = $null
 $rootCertificateAdded = $false
+$certutil = Join-Path $env:WINDIR "System32\certutil.exe"
+if (!(Test-Path -LiteralPath $certutil -PathType Leaf)) {
+    throw "certutil.exe was not found at the expected Windows system path: $certutil"
+}
 try {
     Write-Host "Decoding the supplied PFX payload."
     $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
@@ -75,36 +79,14 @@ try {
         }
         Write-Host "Preparing temporary runner-local trust so Windows can verify the self-signed Authenticode chain."
         $publicCertificateBytes = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-        $publicCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($publicCertificateBytes)
-        $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-        )
-        try {
-            Write-Host "Opening the current-user Root store through the .NET certificate-store API."
-            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $existingRootCertificates = $rootStore.Certificates.Find(
-                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $certificate.Thumbprint,
-                $false
-            )
-            try {
-                if ($existingRootCertificates.Count -eq 0) {
-                    $rootStore.Add($publicCertificate)
-                    $rootCertificateAdded = $true
-                    Write-Host "Temporary public-certificate trust installed for this runner."
-                } else {
-                    Write-Host "The exact self-signed certificate is already present in the runner's current-user Root store."
-                }
-            } finally {
-                foreach ($existingCertificate in $existingRootCertificates) {
-                    $existingCertificate.Dispose()
-                }
-            }
-        } finally {
-            $rootStore.Close()
-            $rootStore.Dispose()
+        [System.IO.File]::WriteAllBytes($certificatePublicPath, $publicCertificateBytes)
+        Write-Host "Adding only the public self-signed certificate to this runner's current-user Root store via certutil.exe."
+        & $certutil -user -f -addstore Root $certificatePublicPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "certutil.exe failed to add the temporary public certificate to the current-user Root store (exit code $LASTEXITCODE)."
         }
+        $rootCertificateAdded = $true
+        Write-Host "Temporary public-certificate trust installed for this runner."
         Write-Host "Recipient PCs will not trust this self-signed certificate by default."
     }
 
@@ -174,29 +156,17 @@ try {
         Write-Host "Signed and verified: $(Split-Path $target -Leaf) (certificate type: $certificateType)"
     }
 } finally {
-    if ($rootCertificateAdded -and $publicCertificate) {
-        $cleanupStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-        )
-        $cleanupStoreOpened = $false
-        try {
-            $cleanupStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $cleanupStoreOpened = $true
-            $cleanupStore.Remove($publicCertificate)
-            Write-Host "Removed the temporary self-signed certificate from this runner's Root store."
-        } finally {
-            if ($cleanupStoreOpened) {
-                $cleanupStore.Close()
-            }
-            $cleanupStore.Dispose()
+    if ($rootCertificateAdded) {
+        Write-Host "Removing the temporary self-signed certificate from this runner's current-user Root store."
+        & $certutil -user -delstore Root $certificate.Thumbprint
+        if ($LASTEXITCODE -ne 0) {
+            throw "certutil.exe failed to remove the temporary public certificate from the current-user Root store (exit code $LASTEXITCODE)."
         }
-    }
-    if ($publicCertificate) {
-        $publicCertificate.Dispose()
+        Write-Host "Removed the temporary self-signed certificate from this runner's Root store."
     }
     if ($certificate) {
         $certificate.Dispose()
     }
     Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $certificatePublicPath -Force -ErrorAction SilentlyContinue
 }
