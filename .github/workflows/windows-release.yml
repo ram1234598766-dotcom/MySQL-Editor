@@ -158,15 +158,17 @@ jobs:
           }
       - name: Create transparent brand assets
         run: python tools/build_brand_assets.py
-      - name: Validate optional signing helper syntax
+      - name: Validate signing helper scripts parse
         shell: pwsh
         run: |
-          $tokens = $null
-          $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "tools/sign_windows_artifacts.ps1"), [ref]$tokens, [ref]$parseErrors) | Out-Null
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_.Message }
-            throw "PowerShell parse errors were found in tools/sign_windows_artifacts.ps1."
+          foreach ($scriptPath in @("tools/sign_windows_artifacts.ps1", "tools/test_self_signed_signing.ps1")) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $scriptPath), [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell parse errors were found in $scriptPath."
+            }
           }
       - name: Validate application startup imports before packaging
         shell: pwsh
