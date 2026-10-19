@@ -198,3 +198,53 @@ def test_disabled_primary_button_uses_disabled_palette_in_dark_and_light_themes(
 
     assert _contrast_ratio("#A6B6CB", "#121A26") >= 4.5
     assert _contrast_ratio("#526174", "#F2F5F9") >= 4.5
+
+def test_hover_selected_disabled_error_warning_and_success_text_meet_wcag_aa():
+    """Exercise actual component text states instead of only checking palette tokens."""
+    state_pairs = {
+        "dark normal text": (TOKENS["text_primary"], TOKENS["window_bg"]),
+        "light normal text": ("#263548", "#F8FAFC"),
+        "dark navigation hover": ("#eef6ff", "#18273b"),
+        "light navigation hover": ("#243246", "#E6EDF5"),
+        "dark navigation selected": ("#62dff0", "#203650"),
+        "light navigation selected": ("#056C78", "#D6E3F2"),
+        "dark disabled button": ("#8293a9", "#121a26"),
+        "light disabled button": ("#526174", "#F2F5F9"),
+        "dark connection success": ("#3bd49b", "#142d2b"),
+        "light connection success": ("#126B50", "#DFF5ED"),
+        "dark connection lost": ("#F07886", "#3a1f26"),
+        "light connection lost": ("#B42335", "#FCE7E9"),
+        "dark warning text": (TOKENS["status_warning"], TOKENS["window_bg"]),
+        "light warning text": ("#946200", "#F8FAFC"),
+        "dark menu selection": ("#FFFFFF", "#2569cb"),
+        "light menu selection": ("#FFFFFF", "#225EA8"),
+        "dark result selection": ("#FFFFFF", "#1d4f88"),
+        "light result selection": ("#FFFFFF", "#184C82"),
+        "dark primary button hover": (TOKENS["window_bg"], "#55D5E2"),
+        "light primary button hover": ("#F8FAFC", "#056C78"),
+    }
+    for state, (foreground, background) in state_pairs.items():
+        ratio = _contrast_ratio(foreground, background)
+        assert ratio >= 4.5, f"{state} contrast is only {ratio:.2f}:1"
+
+    dark = stylesheet_for_theme("dark")
+    light = stylesheet_for_theme("light")
+    assert "QToolButton#navButton:checked" in dark
+    assert "color: #62dff0;" in dark
+    assert (
+        "QToolButton#navButton:checked { background: #D6E3F2; "
+        "color: #056C78; border: 1px solid #AFC5D6; }"
+    ) in light
+
+
+def test_focus_indicators_meet_non_text_contrast_in_both_themes():
+    focus_pairs = {
+        "dark primary focus boundary": ("#4a9bff", "#0B111B"),
+        "dark navigation focus boundary": ("#5bbdff", "#0d1522"),
+        "light primary focus boundary": ("#1F6FEB", "#FFFFFF"),
+        "light navigation focus boundary": ("#1F6FEB", "#F8FAFC"),
+    }
+    for state, (foreground, background) in focus_pairs.items():
+        ratio = _contrast_ratio(foreground, background)
+        assert ratio >= 3.0, f"{state} contrast is only {ratio:.2f}:1"
+
