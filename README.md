@@ -350,9 +350,10 @@ A successful automated run is evidence only for the checks that actually ran. It
 | **src/mysql_editor/ui/editor.py** | SQL editor, highlighting, line numbers, indentation, and completion |
 | **src/mysql_editor/ui/find_replace_bar.py** | Inline literal Find/Replace controls and match counting |
 | **src/mysql_editor/ui/connection_dialog.py** | Connection form, profile selection, test/connect actions, first-run lock setup |
-| **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, cursor status, result grid, schema/history/snippets, transaction controls and export |\n| **src/mysql_editor/ui/explain_plan.py** | Strict MySQL JSON plan extraction, expandable operation tree, estimate summary and copyable raw JSON |
+| **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, cursor status, result grid, schema/history/snippets, transaction controls and export |
 | **src/mysql_editor/ui/tutorial.py** | Animated guided tour |
 | **src/mysql_editor/ui/unlock_dialog.py** | Local master-password unlock dialog |
+| **src/mysql_editor/ui/explain_plan.py** | Strict MySQL JSON plan extraction, expandable operation tree, estimate summary and copyable raw JSON |
 | **tests/** | Unit, integration, and startup/regression tests |
 | **tools/** | Brand-asset generator and Windows UI smoke tests |
 | **pyinstaller/** | PyInstaller application-folder specification |
