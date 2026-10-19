@@ -2653,7 +2653,14 @@ class MainWindow(QMainWindow):
         details_action = menu.addAction("View cell details")
         details_action.setEnabled(clicked.isValid())
         edit_action = None
-        if clicked.isValid() and not self._query_running and self._table_cell_edit_entry(clicked):
+        if (
+            clicked.isValid()
+            and self._connection_available
+            and not self._disconnect_pending
+            and not self._query_running
+            and not self._cell_edit_pending
+            and self._table_cell_edit_entry(clicked)
+        ):
             edit_action = menu.addAction("Edit table preview cell…")
             edit_action.setToolTip(
                 "Edit a single non-primary-key cell in a Schema Explorer base-table preview. "
