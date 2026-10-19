@@ -92,6 +92,8 @@ class DatabaseWorker(QThread):
         self._connection = None
         self._connection_config: dict[str, Any] | None = None
         self._connection_id: int | None = None
+        # Prevent a stale preview from one connection being edited after a session switch.
+        self._session_token = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -286,6 +288,7 @@ class DatabaseWorker(QThread):
             self._connection = None
             self._connection_id = None
             self._connection_config = None
+            self._session_token = uuid.uuid4().hex
         if connection is not None:
             try:
                 connection.close()
@@ -323,6 +326,7 @@ class DatabaseWorker(QThread):
                 self._connection = candidate
                 self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
+                self._session_token = uuid.uuid4().hex
             if previous is not None and previous is not candidate:
                 try:
                     previous.close()
@@ -361,7 +365,7 @@ class DatabaseWorker(QThread):
             )
         if action in {
             "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
-            "use_schema", "commit", "rollback",
+            "update_table_cell", "use_schema", "commit", "rollback",
         } and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
@@ -391,6 +395,8 @@ class DatabaseWorker(QThread):
             return self._read_schema_objects(str(payload.get("schema", "")))
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
+        if action == "update_table_cell":
+            return self._update_table_cell(dict(payload))
         if action == "inspect_schema_object":
             return self._inspect_schema_object(
                 str(payload.get("schema", "") or ""),
@@ -974,19 +980,411 @@ class DatabaseWorker(QThread):
         }
 
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
+        if self._connection is None:
+            return {"ok": False, "error": "Not connected to a MySQL server."}
         cursor = self._connection.cursor()
         try:
             cursor.execute(f"SELECT * FROM {safe_identifier(schema)}.{safe_identifier(table)} LIMIT 1000")
             headers = [str(desc[0]) for desc in (cursor.description or [])]
-            rows = [[json_value(value) for value in row] for row in cursor.fetchall()]
+            raw_rows = [tuple(row) for row in cursor.fetchall()]
         finally:
             cursor.close()
+
+        rows = [[json_value(value) for value in row] for row in raw_rows]
         result_id = uuid.uuid4().hex
-        self._save_rows(result_id, headers, f"Preview {schema}.{table}", rows)
+        statement = f"Preview {schema}.{table}"
+        self._save_rows(result_id, headers, statement, rows)
+        table_edit = self._table_preview_edit_context(schema, table, headers, raw_rows)
         return {"ok": True, "results": [{
             "result_id": result_id, "headers": headers, "rows": rows, "row_count": len(rows),
             "preview_truncated": False, "kind": "rows", "duration_ms": 0,
+            "table_edit": table_edit,
         }]}
+
+    def _table_preview_edit_context(
+        self, schema: str, table: str, headers: list[str], raw_rows: list[tuple[Any, ...]]
+    ) -> dict[str, Any]:
+        """Describe only edits that can be safely targeted through a live primary key."""
+        disabled = {
+            "enabled": False,
+            "schema": schema,
+            "table": table,
+            "session_token": self._session_token,
+            "reason": "This preview is read-only because MySQL could not verify an eligible primary-key table.",
+        }
+        if self._connection is None:
+            disabled["reason"] = "The MySQL connection is no longer available."
+            return disabled
+
+        cursor = None
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(
+                "SELECT TABLE_TYPE FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                (schema, table),
+            )
+            table_row = cursor.fetchone()
+            if not table_row:
+                disabled["reason"] = "The table metadata is no longer available; refresh the schema."
+                return disabled
+            if str(table_row[0] or "").casefold() != "base table":
+                disabled["reason"] = "Only base tables can be edited; views and other objects stay read-only."
+                return disabled
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            column_rows = cursor.fetchall()
+            column_metadata = {
+                str(row[0]).casefold(): {
+                    "name": str(row[0]),
+                    "data_type": str(row[1] or "").casefold(),
+                    "extra": str(row[2] or "").casefold(),
+                }
+                for row in column_rows
+            }
+            current_columns = [str(row[0]) for row in column_rows]
+            if [column.casefold() for column in headers] != [
+                column.casefold() for column in current_columns
+            ]:
+                disabled["reason"] = "The table columns changed while the preview loaded; refresh before editing."
+                return disabled
+
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            primary_key_columns = [str(row[0]) for row in cursor.fetchall()]
+            if not primary_key_columns:
+                disabled["reason"] = "The table has no primary key, so rows cannot be targeted safely for editing."
+                return disabled
+
+            header_index = {
+                column.casefold(): index for index, column in enumerate(headers)
+            }
+            if any(column.casefold() not in header_index for column in primary_key_columns):
+                disabled["reason"] = "The primary key is not present in the table preview."
+                return disabled
+            primary_key_indices = [header_index[column.casefold()] for column in primary_key_columns]
+            key_names = {column.casefold() for column in primary_key_columns}
+            unsupported_types = {
+                "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob",
+                "bit", "geometry", "point", "linestring", "polygon", "multipoint",
+                "multilinestring", "multipolygon", "geometrycollection",
+            }
+            editable_column_indices = []
+            for index, column_name in enumerate(headers):
+                info = column_metadata.get(column_name.casefold())
+                if info is None or column_name.casefold() in key_names:
+                    continue
+                extra = info["extra"]
+                if "auto_increment" in extra or "generated" in extra:
+                    continue
+                if info["data_type"] in unsupported_types:
+                    continue
+                editable_column_indices.append(index)
+
+            if not editable_column_indices:
+                disabled["reason"] = (
+                    "The table has no safely editable non-primary-key columns in the current preview."
+                )
+                return disabled
+
+            row_keys = [
+                [row[index] for index in primary_key_indices]
+                for row in raw_rows
+            ]
+            original_values = {
+                str(index): [row[index] for row in raw_rows]
+                for index in editable_column_indices
+            }
+            return {
+                "enabled": True,
+                "schema": schema,
+                "table": table,
+                "session_token": self._session_token,
+                "primary_key_columns": primary_key_columns,
+                "primary_key_indices": primary_key_indices,
+                "row_keys": row_keys,
+                "original_values": original_values,
+                "editable_column_indices": editable_column_indices,
+                "reason": "",
+            }
+        except Exception as exc:
+            disabled["reason"] = (
+                "The preview remains read-only because MySQL metadata could not be verified: "
+                + safe_db_error(exc)
+            )
+            return disabled
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _same_cell_value(left: Any, right: Any) -> bool:
+        if left is None or right is None:
+            return left is None and right is None
+        if left == right:
+            return True
+        return str(left) == str(right)
+
+    def _update_table_cell(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update one non-key cell from a verified Schema Explorer preview.
+
+        The worker revalidates the table, columns, primary key and local result-spool
+        identity. Values are bound parameters; only server-confirmed identifiers are
+        quoted into SQL. The operation never commits or rolls back the user's session.
+        """
+        connection = self._connection
+        result_id = str(payload.get("result_id", "") or "")
+        if connection is None:
+            return {"ok": False, "error": "Not connected to a MySQL server."}
+        preview_session_token = str(payload.get("session_token", "") or "")
+        if not preview_session_token or preview_session_token != self._session_token:
+            return {
+                "ok": False,
+                "error": "The MySQL connection changed after this preview was loaded. Refresh the table before editing.",
+            }
+        if self._spool is None:
+            return {"ok": False, "error": "The local table-preview cache is no longer available."}
+
+        cursor = None
+        update_applied = False
+        try:
+            schema = str(payload.get("schema", "") or "")
+            table = str(payload.get("table", "") or "")
+            column_name = str(payload.get("column_name", "") or "")
+            try:
+                row_index = int(payload.get("row_index"))
+                column_index = int(payload.get("column_index"))
+            except (TypeError, ValueError, OverflowError):
+                return {"ok": False, "error": "The selected preview cell is invalid."}
+            if not schema or not table or not column_name or row_index < 0 or column_index < 0:
+                return {"ok": False, "error": "A schema, table, column and valid preview cell are required."}
+
+            meta = self._spool.execute(
+                "SELECT headers, statement FROM result_meta WHERE result_id = ?",
+                (result_id,),
+            ).fetchone()
+            if meta is None or str(meta[1]) != f"Preview {schema}.{table}":
+                return {
+                    "ok": False,
+                    "error": "Only cells from the current Schema Explorer table preview can be edited.",
+                }
+            headers = json.loads(meta[0])
+            cached_row = self._spool.execute(
+                "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = ?",
+                (result_id, row_index),
+            ).fetchone()
+            if cached_row is None:
+                return {"ok": False, "error": "The selected preview row is no longer available; refresh it."}
+            cached_values = json.loads(cached_row[0])
+            if (
+                column_index >= len(headers)
+                or column_index >= len(cached_values)
+                or str(headers[column_index]) != column_name
+            ):
+                return {"ok": False, "error": "The selected cell no longer matches the preview; refresh it."}
+
+            primary_key_columns = payload.get("primary_key_columns")
+            primary_key_values = payload.get("primary_key_values")
+            if (
+                not isinstance(primary_key_columns, list)
+                or not primary_key_columns
+                or not isinstance(primary_key_values, (list, tuple))
+                or len(primary_key_columns) != len(primary_key_values)
+                or any(value is None for value in primary_key_values)
+            ):
+                return {"ok": False, "error": "The primary-key row identity is incomplete."}
+            expected_old = payload.get("expected_old")
+            new_value = payload.get("new_value")
+            if json_value(expected_old) != cached_values[column_index]:
+                return {
+                    "ok": False,
+                    "error": "The preview cell changed locally. Refresh the table preview before editing.",
+                }
+
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT TABLE_TYPE FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                (schema, table),
+            )
+            table_info = cursor.fetchone()
+            if not table_info or str(table_info[0] or "").casefold() != "base table":
+                return {"ok": False, "error": "The target is no longer a base table; the cell was not updated."}
+
+            cursor.execute(
+                "SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            column_rows = cursor.fetchall()
+            current_columns = [str(row[0]) for row in column_rows]
+            if [name.casefold() for name in current_columns] != [
+                str(name).casefold() for name in headers
+            ]:
+                return {
+                    "ok": False,
+                    "error": "The table structure changed since the preview. Refresh before editing.",
+                }
+            column_lookup = {
+                str(row[0]).casefold(): {
+                    "name": str(row[0]),
+                    "data_type": str(row[1] or "").casefold(),
+                    "extra": str(row[2] or "").casefold(),
+                }
+                for row in column_rows
+            }
+            column_info = column_lookup.get(column_name.casefold())
+            if column_info is None:
+                return {"ok": False, "error": "The target column no longer exists."}
+
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            actual_primary_key = [str(row[0]) for row in cursor.fetchall()]
+            if [name.casefold() for name in actual_primary_key] != [
+                str(name).casefold() for name in primary_key_columns
+            ]:
+                return {
+                    "ok": False,
+                    "error": "The table primary key changed since the preview. Refresh before editing.",
+                }
+            if column_name.casefold() in {name.casefold() for name in actual_primary_key}:
+                return {"ok": False, "error": "Primary-key cells are read-only in this editor."}
+            extra = column_info["extra"]
+            if "auto_increment" in extra or "generated" in extra:
+                return {"ok": False, "error": "Generated columns are read-only in this editor."}
+            if column_info["data_type"] in {
+                "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob",
+                "bit", "geometry", "point", "linestring", "polygon", "multipoint",
+                "multilinestring", "multipolygon", "geometrycollection",
+            }:
+                return {"ok": False, "error": "Binary and spatial columns are read-only in this editor."}
+
+            header_index = {name.casefold(): index for index, name in enumerate(headers)}
+            try:
+                primary_key_indices = [header_index[name.casefold()] for name in actual_primary_key]
+            except KeyError:
+                return {"ok": False, "error": "The primary key is not present in the cached preview."}
+            if any(
+                json_value(primary_key_values[index]) != cached_values[primary_key_indices[index]]
+                for index in range(len(primary_key_values))
+            ):
+                return {
+                    "ok": False,
+                    "error": "The row identity no longer matches the cached preview. Refresh before editing.",
+                }
+
+            qualified_table = f"{safe_identifier(schema)}.{safe_identifier(table)}"
+            safe_column = safe_identifier(column_name)
+            where_keys = " AND ".join(
+                f"{safe_identifier(name)} = %s" for name in actual_primary_key
+            )
+            cursor.execute(
+                f"UPDATE {qualified_table} SET {safe_column} = %s "
+                f"WHERE {where_keys} AND {safe_column} <=> %s",
+                tuple([new_value, *primary_key_values, expected_old]),
+            )
+            affected = int(cursor.rowcount or 0)
+            update_applied = affected > 0
+            if affected > 1:
+                return {
+                    "ok": False,
+                    "error": "MySQL updated more than one row for a primary-key edit. Inspect the active transaction and use Rollback if those changes were not intended.",
+                    "update_applied": True,
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+
+            cursor.execute(f"SELECT * FROM {qualified_table} WHERE {where_keys}", tuple(primary_key_values))
+            current_row = cursor.fetchone()
+            if current_row is None:
+                return {
+                    "ok": False,
+                    "error": "The row no longer exists. Refresh the table preview.",
+                    "update_applied": update_applied,
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+            if affected == 0:
+                current_value = current_row[column_index]
+                if self._same_cell_value(current_value, new_value):
+                    no_change = True
+                elif not self._same_cell_value(current_value, expected_old):
+                    return {
+                        "ok": False,
+                        "error": "The cell changed on MySQL since this preview. Refresh and try again.",
+                        "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                    }
+                else:
+                    return {
+                        "ok": False,
+                        "error": "MySQL reported no changed row. Refresh the preview before retrying.",
+                        "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                    }
+            else:
+                no_change = False
+
+            display_row = [json_value(value) for value in current_row]
+            cursor.close()
+            cursor = None
+            cache_update = self._spool.execute(
+                "UPDATE result_rows SET values_json = ? WHERE result_id = ? AND row_idx = ?",
+                (json.dumps(display_row, ensure_ascii=False), result_id, row_index),
+            )
+            if cache_update.rowcount != 1:
+                return {
+                    "ok": False,
+                    "error": "MySQL accepted the update, but the local preview cache could not be refreshed. Re-preview the table.",
+                    "update_applied": update_applied,
+                    "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                }
+            self._spool.commit()
+            return {
+                "ok": True,
+                "result_id": result_id,
+                "row_index": row_index,
+                "column_index": column_index,
+                "column_name": column_name,
+                "display_row": display_row,
+                "raw_row": list(current_row),
+                "no_change": no_change,
+                "transaction_open": bool(getattr(connection, "in_transaction", False)),
+                "message": "Cell value updated in the active MySQL session.",
+            }
+        except Exception as exc:
+            connection_lost = is_connection_lost(exc)
+            if connection_lost:
+                self._close_connection()
+            try:
+                transaction_open = bool(getattr(connection, "in_transaction", False))
+            except Exception:
+                transaction_open = False
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "update_applied": update_applied,
+                "transaction_open": transaction_open,
+                "connection_lost": connection_lost,
+            }
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
 
     def _export_csv(self, result_id: str, path: str) -> dict[str, Any]:
         if self._spool is None:
