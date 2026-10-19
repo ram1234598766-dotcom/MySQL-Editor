@@ -111,7 +111,7 @@ def test_explain_dialog_shows_expandable_table_access_and_copyable_json():
         assert dialog.json_view.isReadOnly()
         assert json.loads(dialog.json_view.toPlainText()) == plan
         assert _tree_contains(dialog.plan_tree.topLevelItem(0), "Table: orders · access ALL")
-        assert _tree_contains(dialog.plan_tree.topLevelItem(0), "rows examined per scan: 250")
+        assert _tree_contains(dialog.plan_tree.topLevelItem(0), "Rows examined per scan: 250")
         labels = [label.text() for label in dialog.findChildren(QLabel)]
         assert any("Tables: orders (ALL)" in label for label in labels)
         assert any(sql in label for label in labels)
