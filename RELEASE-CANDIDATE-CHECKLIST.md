@@ -36,7 +36,7 @@ These results are hosted-CI evidence, not physical-PC acceptance. All hands-on W
 ## Signing gate — stable releases
 
 - [ ] Configure a self-signed Code Signing PFX using the two repository Actions secrets documented in `WINDOWS_SIGNING.md` (or choose a trusted CA certificate by setting the repository variable `WINDOWS_SIGNING_CERTIFICATE_TYPE=trusted`). A self-signed certificate is not trusted by recipient PCs by default.
-- [ ] Build a version tag through the release workflow and confirm the application-folder executable, portable EXE, and installer each pass SignTool verification with a timestamp.
+- [ ] Build a version tag through the release workflow and confirm the application-folder executable, portable EXE, and installer are timestamp-signed and pass the mode-appropriate signature checks; confirm the manifest states the self-signed recipient-trust limitation.
 - [ ] Inspect `RELEASE-MANIFEST.json` and confirm `signing.status` is `signed`, `authenticode_verified` is `true`, `certificate_type` is `self-signed`, and `recipient_trust` is `not-trusted-by-default` for the selected mode; verify downloaded files against `SHA256SUMS`.
 
 Preview builds may remain unsigned, but their release notes and manifest must state that clearly. Never infer publisher identity from CI success or hashes alone.
