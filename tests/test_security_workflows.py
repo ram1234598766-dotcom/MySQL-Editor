@@ -141,10 +141,15 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert 'ne "NotSigned"' in smoke_builder
     assert "where.exe" not in smoke_builder
     assert 'Get-AuthenticodeSignature -FilePath $target' in signing_script
-    assert 'if ($signatureStatus -notin @("Valid", "NotTrusted"))' in signing_script
+    assert 'if ($signatureStatus -ne "Valid")' in signing_script
     assert 'signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint' in signing_script
     assert "Import-Certificate" not in signing_script
     assert "certutil.exe" not in signing_script
+    assert "X509Store" in signing_script
+    assert "$rootStore.Add($publicCertificate)" in signing_script
+    assert "$cleanupStore.Remove($publicCertificate)" in signing_script
+    assert "Removed the temporary self-signed certificate" in signing_script
+    assert "& $signTool verify /pa /all /v $target" in signing_script
     assert "Recipient PCs will not trust this self-signed certificate by default." in signing_script
     assert "Remove-Item -LiteralPath $certificatePath" in signing_script
     assert "http://timestamp.digicert.com" in workflow
