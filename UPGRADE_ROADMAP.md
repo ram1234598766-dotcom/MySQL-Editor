@@ -348,7 +348,7 @@ Tasks:
 - Confirm keyboard traversal order and visible focus for all forms, navigation, tree controls, menus, result actions, popups, and dialogs.
 - Check keyboard-only use for connect/test, editor completion, query execution, stop/cancel, results switching, export, and close-with-unsaved-changes.
 - Check screen-reader accessible names for icon-only controls, busy state and error messages.
-- Validate text contrast in normal, hover, selected, disabled, error, warning and high-DPI states.
+- [x] Add automated WCAG AA contrast regression checks for normal, hover, selected, disabled, error, warning, success, menu/table selection, primary-button hover, and focus-boundary states in both dark/light palettes. Physical Windows high-DPI and display-scaling validation remains part of Phase 8 manual acceptance.
 - Use UI copy that is precise: distinguish “request sent” from “cancelled,” “saved locally” from “encrypted,” and “connected” from “connection settings saved.”
 - Review installer welcome, progress, finish, shortcut and uninstaller screens for branding consistency, legible copy and fast completion—without inserting fake progress or long animations.
 
@@ -358,6 +358,8 @@ Exit gate:
 - Essential operations are available without a mouse.
 - Reduce Motion disables optional motion without disabling feedback.
 
+
+**Contrast hardening follow-up — 19 October 2026:** The light-theme selected navigation text was measured at 3.69:1 against its selected background. It now uses the darker `#056C78` foreground, giving 4.71:1 against `#D6E3F2`. Regression tests exercise hover, selected, disabled, connection success/lost, warning, menu/result selections, primary-button hover, and focus boundaries. Hosted tests validate computed color pairs; high-DPI rendering still requires physical-Windows acceptance.
 ### Phase 7 — Reliability, security and performance hardening
 
 **Goal:** Catch failures before release rather than hide them behind a polished interface.
