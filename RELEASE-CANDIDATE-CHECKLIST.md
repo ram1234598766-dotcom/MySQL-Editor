@@ -31,9 +31,9 @@ The Windows workflow produced a `MySQLEditor-Windows` Actions artifact (about 22
 
 **Signing status for this candidate: UNSIGNED.** No signing secrets were configured for this candidate, the SignTool release steps were skipped, and the manifest explicitly reports the unsigned state. Stable version tags fail closed unless `WINDOWS_SIGNING_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` are configured and every published executable passes SignTool signature verification. The selected default is self-signed; the manifest must disclose that recipient PCs do not trust the certificate by default. See [`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md). A signature does not guarantee SmartScreen or antivirus will never warn.
 
-These results are hosted-CI evidence, not physical-PC acceptance. All hands-on Windows items below remain unchecked. Do not promote a stable release until both the manual acceptance record and the publisher-signing gate (if publisher trust is required) are complete.
+These results are hosted-CI evidence, not physical-PC acceptance. All hands-on Windows items below remain unchecked. Do not promote a stable release until both the manual acceptance record and the signing gate are complete. A self-signed certificate can be used for signature verification but does not establish publisher trust on recipient PCs.
 
-## Publisher-trust gate — stable releases
+## Signing gate — stable releases
 
 - [ ] Configure a self-signed Code Signing PFX using the two repository Actions secrets documented in `WINDOWS_SIGNING.md` (or choose a trusted CA certificate by setting the repository variable `WINDOWS_SIGNING_CERTIFICATE_TYPE=trusted`). A self-signed certificate is not trusted by recipient PCs by default.
 - [ ] Build a version tag through the release workflow and confirm the application-folder executable, portable EXE, and installer each pass SignTool verification with a timestamp.
