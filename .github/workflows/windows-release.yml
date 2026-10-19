@@ -215,7 +215,7 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
             throw "The repository signing secrets are unavailable; refusing to report configured-certificate validation."
           }
-          $source = Join-Path $env:WINDIR "System32\\where.exe"
+          $source = Join-Path $env:WINDIR "System32\where.exe"
           $target = Join-Path $env:RUNNER_TEMP "MySQLEditor-ConfiguredSigningSmoke.exe"
           Copy-Item -LiteralPath $source -Destination $target -Force
           try {
