@@ -129,9 +129,9 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert '"tools/test_self_signed_signing.ps1"' in workflow
     assert "Validate signing helper scripts parse" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE" in signing_script
-    assert "System.Security.Cryptography.X509Certificates.X509Store" in signing_script
-    assert "$rootStore.Add($rootPublicCertificate)" in signing_script
-    assert "$cleanupStore.Remove($temporaryRoot)" in signing_script
+    assert "certutil.exe" in signing_script
+    assert "-addstore Root $certificatePublicPath" in signing_script
+    assert "-delstore Root $rootThumbprint" in signing_script
     assert "Import-Certificate" not in signing_script
     assert "temporary and local to this runner" in signing_script
     assert "Remove-Item -LiteralPath $certificatePath" in signing_script
