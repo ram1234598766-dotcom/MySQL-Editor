@@ -7,6 +7,7 @@ import tempfile
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
@@ -44,6 +45,7 @@ from mysql_editor.ui.preferences import (
 from mysql_editor.ui.query_lifecycle import classify_query_outcome
 from mysql_editor.ui.schema_tools import qualified_identifier, schema_status_message, select_preview_sql
 from mysql_editor.ui.schema_inspector import SchemaObjectInspectorDialog
+from mysql_editor.ui.cell_editor import EditTableCellDialog
 from mysql_editor.ui.explain_plan import ExplainPlanDialog, ExplainPlanError, extract_explain_json
 from mysql_editor.update_checker import UpdateCheckResult, UpdateCheckThread, is_safe_release_url
 from mysql_editor.recent_files import (
@@ -86,6 +88,24 @@ class ResultsModel(QAbstractTableModel):
         self.headers = list(headers)
         self.rows = list(rows)
         self.endResetModel()
+
+    def update_cell_row(self, row_index: int, values) -> bool:
+        """Replace a single preview row after MySQL confirms a cell update."""
+        if not 0 <= row_index < len(self.rows) or len(values) != len(self.headers):
+            return False
+        self.rows[row_index] = list(values)
+        if self.columnCount():
+            self.dataChanged.emit(
+                self.index(row_index, 0),
+                self.index(row_index, self.columnCount() - 1),
+                [
+                    Qt.ItemDataRole.DisplayRole,
+                    Qt.ItemDataRole.UserRole,
+                    Qt.ItemDataRole.ForegroundRole,
+                    Qt.ItemDataRole.TextAlignmentRole,
+                ],
+            )
+        return True
 
     def append_rows(self, rows) -> None:
         """Append a result page without resetting existing rows or selection state."""
@@ -205,6 +225,9 @@ class MainWindow(QMainWindow):
         self._active_schema_name = str(config.get("default_schema", "") or connect_result.get("database", ""))
         self._result_completion_words: set[str] = set()
         self._query_running = False
+        self._cell_edit_pending = False
+        # Original preview rows stay available until the owning MySQL transaction ends.
+        self._pending_table_preview_undo: dict[tuple[str, int], dict[str, Any]] = {}
         self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
@@ -1083,10 +1106,21 @@ class MainWindow(QMainWindow):
     def reset_editor_font(self):
         self._set_editor_font_size(10)
 
+    def _mysql_task_pending(self) -> bool:
+        """Return whether a connection-bound task is queued or being processed."""
+        connection_actions = {
+            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
+            "update_table_cell", "use_schema", "commit", "rollback", "disconnect",
+        }
+        return any(
+            action in connection_actions
+            for action, _context in self._jobs.values()
+        )
+
     def _dispatch(self, action: str, payload: dict, context: dict | None = None):
         database_actions = {
             "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
-            "use_schema", "commit", "rollback",
+            "update_table_cell", "use_schema", "commit", "rollback",
         }
         if action in database_actions and (
             not self._connection_available or self._disconnect_pending
@@ -1103,8 +1137,18 @@ class MainWindow(QMainWindow):
             self._report_query_busy("connection")
             return None
         # Keep a single SQL task active even if another entry point bypasses editor buttons.
+        if self._cell_edit_pending and action in database_actions:
+            self.status.setText(
+                "MySQL action paused · wait for the single-cell update to finish."
+            )
+            return None
         if action == "query" and self._query_running:
             self._report_query_busy("submit")
+            return None
+        if action == "update_table_cell" and self._mysql_task_pending():
+            self.status.setText(
+                "Cell edit paused · another MySQL operation is still queued. Wait for it to finish and retry."
+            )
             return None
         job_id = uuid.uuid4().hex
         self._jobs[job_id] = (action, context or {})
@@ -1417,8 +1461,10 @@ class MainWindow(QMainWindow):
         )
 
     def _set_result_controls(self):
-        self.export_button.setEnabled(bool(self._current_result_id))
         item = self._result_item_by_id(self._current_result_id)
+        self.export_button.setEnabled(
+            bool(self._current_result_id) and not bool(item and item.get("export_unavailable"))
+        )
         rows = item.get("rows", []) if item else []
         try:
             total = max(len(rows), int(item.get("row_count", len(rows)) or 0)) if item else 0
@@ -2035,6 +2081,48 @@ class MainWindow(QMainWindow):
             return
         if result.get("connection_lost"):
             self._mark_connection_lost(str(result.get("error", "") or ""))
+        preview_rollback_rows = result.get("preview_rollback_rows") or []
+        preview_restore_errors = result.get("preview_restore_errors") or []
+        preview_invalidated_result_ids = result.get("preview_invalidated_result_ids") or []
+        for invalidated_result_id in preview_invalidated_result_ids:
+            cached_preview = self._result_item_by_id(str(invalidated_result_id))
+            if cached_preview is None:
+                continue
+            cached_preview["export_unavailable"] = True
+            cached_preview["page_load_unavailable"] = True
+            edit_context = cached_preview.get("table_edit")
+            if isinstance(edit_context, dict):
+                edit_context["enabled"] = False
+                edit_context["reason"] = (
+                    "This preview may be stale after ROLLBACK TO SAVEPOINT; "
+                    "refresh the table before editing or exporting."
+                )
+        if preview_rollback_rows:
+            self._restore_table_preview_rows(
+                preview_rollback_rows,
+                disable_editing=bool(preview_restore_errors),
+            )
+        if result.get("preview_transaction_finalized"):
+            # A successful COMMIT or equivalent implicit-commit statement makes the
+            # current preview values final. Rollback snapshots must not linger.
+            self._pending_table_preview_undo.clear()
+        if preview_restore_errors:
+            detail = "\n".join(
+                redact_secrets(str(error)).strip()
+                for error in preview_restore_errors
+                if str(error).strip()
+            )
+            if detail:
+                QTimer.singleShot(
+                    0,
+                    lambda message=detail: QMessageBox.warning(
+                        self,
+                        "Table preview needs refresh",
+                        "MySQL transaction handling completed, but some local table-preview "
+                        "snapshots could not be restored. Refresh affected previews before editing "
+                        "or exporting them.\n\n" + message,
+                    ),
+                )
         outcome = None
         if action == "query":
             if "transaction_open" in result:
@@ -2098,6 +2186,24 @@ class MainWindow(QMainWindow):
                     "success" if outcome == "complete" else "error" if outcome else ("success" if result.get("ok") else "error"),
                 )
                 self.refresh_history()
+            if action == "table_preview":
+                preview_item = self._result_item_by_id(self._current_result_id)
+                edit_context = preview_item.get("table_edit", {}) if preview_item else {}
+                if edit_context.get("enabled"):
+                    self.status.setText(
+                        "Table preview loaded · right-click a non-key cell to edit it. "
+                        "Any UPDATE remains under MySQL's Commit/Rollback transaction controls."
+                    )
+                else:
+                    reason = str(edit_context.get("reason") or "this preview is read-only.")
+                    self.status.setText(f"Table preview loaded · {reason}")
+            if action == "query" and preview_invalidated_result_ids:
+                current_status = self.status.text().strip()
+                notice = (
+                    "ROLLBACK TO SAVEPOINT completed · cached table previews are invalidated. "
+                    "Re-preview affected tables before editing or exporting."
+                )
+                self.status.setText(f"{current_status} · {notice}" if current_status else notice)
             if action == "query":
                 self._flush_deferred_export_notifications()
             return
@@ -2162,6 +2268,95 @@ class MainWindow(QMainWindow):
                     f"Loaded {len(page_rows):,} additional row(s) from the local result cache · "
                     f"{len(loaded_rows):,} of {total:,} shown. SQL was not rerun."
                 )
+            return
+        if action == "update_table_cell":
+            self._cell_edit_pending = False
+            self.result_grid.setEnabled(True)
+            if "transaction_open" in result:
+                self._transaction_open = bool(result.get("transaction_open"))
+            self._sync_connection_controls()
+            if not result.get("ok"):
+                detail = redact_secrets(str(result.get("error") or "The cell could not be updated.")).strip()
+                if result.get("update_applied"):
+                    self.status.setText(
+                        "MySQL applied the cell UPDATE, but the preview could not be refreshed. "
+                        "The operation was not committed automatically. Refresh the table preview and inspect the transaction."
+                    )
+                    detail = (
+                        "The UPDATE may be pending in the active MySQL transaction, but the local preview could not be refreshed. "
+                        "No automatic commit was issued.\n\n" + detail
+                    )
+                else:
+                    self.status.setText("Cell update failed · " + detail)
+                QMessageBox.warning(self, "Edit table cell", detail)
+                return
+
+            result_id = str(context.get("result_id") or result.get("result_id") or "")
+            item = self._result_item_by_id(result_id)
+            try:
+                row_index = int(context.get("row_index", result.get("row_index", -1)))
+                column_index = int(context.get("column_index", result.get("column_index", -1)))
+            except (TypeError, ValueError, OverflowError):
+                row_index = column_index = -1
+            display_row = result.get("display_row")
+            raw_row = result.get("raw_row")
+            if (
+                item is None
+                or not isinstance(display_row, list)
+                or not isinstance(raw_row, list)
+                or not 0 <= row_index < len(item.get("rows", []))
+                or len(display_row) != len(item.get("headers", []))
+                or len(raw_row) != len(display_row)
+                or not 0 <= column_index < len(display_row)
+            ):
+                self.status.setText(
+                    "Cell updated in MySQL, but the preview is no longer available to refresh. "
+                    "Reload the table preview to inspect current values."
+                )
+                return
+
+            edit_context = item.get("table_edit") or {}
+            original_values = edit_context.get("original_values") or {}
+            undo_key = (result_id, row_index)
+            if self._transaction_open and not result.get("no_change"):
+                if undo_key not in self._pending_table_preview_undo:
+                    self._pending_table_preview_undo[undo_key] = {
+                        "display_row": list(item["rows"][row_index]),
+                        "original_values": {
+                            str(index): values[row_index]
+                            for index, values in original_values.items()
+                            if isinstance(values, list) and row_index < len(values)
+                        },
+                    }
+            item["rows"][row_index] = list(display_row)
+            for index, raw_value in enumerate(raw_row):
+                values_for_column = original_values.get(str(index))
+                if isinstance(values_for_column, list) and row_index < len(values_for_column):
+                    values_for_column[row_index] = raw_value
+
+            if self._current_result_id == result_id:
+                self.result_model.update_cell_row(row_index, display_row)
+                filter_text = self.result_filter.text().strip()
+                if filter_text:
+                    self._filter_results(filter_text)
+                else:
+                    self._set_result_message(
+                        result_summary_message(item, len(item.get("rows", [])), item.get("row_count", 0))
+                    )
+            if result.get("no_change"):
+                self.status.setText(
+                    f"{context.get('column_name', 'Cell')} already had the requested value. No data changed."
+                )
+            elif self._transaction_open:
+                self.status.setText(
+                    f"Updated {context.get('table', 'table')}.{context.get('column_name', 'column')} in the active MySQL transaction. "
+                    "Use Commit to persist it or Rollback to undo it."
+                )
+            else:
+                self.status.setText(
+                    f"Updated {context.get('table', 'table')}.{context.get('column_name', 'column')} according to the MySQL session's transaction policy."
+                )
+            self._set_result_controls()
             return
         if action == "inspect_schema_object":
             schema = str(context.get("schema") or result.get("schema") or "")
@@ -2322,6 +2517,12 @@ class MainWindow(QMainWindow):
         if action in {"commit", "rollback"}:
             if result.get("ok"):
                 self._transaction_open = bool(result.get("transaction_open", False))
+                if action == "commit":
+                    self._pending_table_preview_undo.clear()
+                else:
+                    # Returned rows have already been restored above. Any remaining
+                    # entries can no longer be rolled back in this transaction.
+                    self._pending_table_preview_undo.clear()
             self.status.setText(result.get("message", result.get("error", action.title())))
             if not result.get("ok"):
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
@@ -2511,6 +2712,13 @@ class MainWindow(QMainWindow):
     def export_results(self):
         if not self._current_result_id:
             return
+        item = self._result_item_by_id(self._current_result_id)
+        if item is not None and item.get("export_unavailable"):
+            self.status.setText(
+                "CSV export is disabled because the preview cache could not be restored after rollback. "
+                "Reload the table preview before exporting."
+            )
+            return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export result grid", "mysql-query-results.csv", "CSV files (*.csv)"
         )
@@ -2525,6 +2733,8 @@ class MainWindow(QMainWindow):
             self._dispatch("export_csv", {"result_id": self._current_result_id, "path": path})
 
     def _show_result_context(self, point):
+        if self._cell_edit_pending:
+            return
         clicked = self.result_grid.indexAt(point)
         selection = self.result_grid.selectionModel()
         if clicked.isValid() and clicked not in self.result_grid.selectedIndexes():
@@ -2533,6 +2743,21 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         details_action = menu.addAction("View cell details")
         details_action.setEnabled(clicked.isValid())
+        edit_action = None
+        if (
+            clicked.isValid()
+            and self._connection_available
+            and not self._disconnect_pending
+            and not self._query_running
+            and not self._cell_edit_pending
+            and not self._mysql_task_pending()
+            and self._table_cell_edit_entry(clicked)
+        ):
+            edit_action = menu.addAction("Edit table preview cell…")
+            edit_action.setToolTip(
+                "Edit a single non-primary-key cell in a Schema Explorer base-table preview. "
+                "Ordinary SQL query results remain read-only."
+            )
         menu.addSeparator()
         copy_cells_action = menu.addAction("Copy selected cells")
         copy_rows_action = menu.addAction("Copy selected rows")
@@ -2542,6 +2767,8 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
         if chosen == details_action:
             self.show_cell_details(clicked)
+        elif edit_action is not None and chosen == edit_action:
+            self._edit_table_preview_cell(clicked)
         elif chosen == copy_cells_action:
             self.copy_selected_cells()
         elif chosen == copy_rows_action:
@@ -2550,6 +2777,190 @@ class MainWindow(QMainWindow):
             self.copy_column_headers()
         elif chosen == export_action:
             self.export_results()
+
+    def _restore_table_preview_rows(
+        self, rows: list[dict[str, Any]], *, disable_editing: bool = False
+    ) -> None:
+        """Restore visible rows and raw cell metadata after MySQL rolls back edits."""
+        current_result_changed = False
+        for entry in rows:
+            if not isinstance(entry, dict):
+                continue
+            result_id = str(entry.get("result_id") or "")
+            try:
+                row_index = int(entry.get("row_index", -1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not result_id or row_index < 0:
+                continue
+            item = self._result_item_by_id(result_id)
+            undo = self._pending_table_preview_undo.pop((result_id, row_index), None)
+            baseline = undo.get("display_row") if isinstance(undo, dict) else entry.get("display_row")
+            if item is None or not isinstance(baseline, list):
+                continue
+            if row_index >= len(item.get("rows", [])) or len(baseline) != len(item.get("headers", [])):
+                continue
+
+            restored_row = list(baseline)
+            item["rows"][row_index] = restored_row
+            edit_context = item.get("table_edit")
+            if disable_editing:
+                item["export_unavailable"] = True
+            if isinstance(edit_context, dict):
+                if disable_editing:
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "The preview cache could not be restored reliably; refresh before editing."
+                    )
+                elif isinstance(undo, dict):
+                    raw_baselines = undo.get("original_values") or {}
+                    current_originals = edit_context.get("original_values") or {}
+                    for column_key, raw_value in raw_baselines.items():
+                        per_column = current_originals.get(str(column_key))
+                        if isinstance(per_column, list) and row_index < len(per_column):
+                            per_column[row_index] = raw_value
+                else:
+                    # A worker-reported rollback without a matching live UI snapshot
+                    # cannot safely restore raw Python values such as datetimes.
+                    # Show the confirmed display row but require a fresh preview to edit.
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "This preview was restored after rollback; refresh it before editing again."
+                    )
+
+            if self._current_result_id == result_id:
+                self.result_model.update_cell_row(row_index, restored_row)
+                current_result_changed = True
+
+        if current_result_changed:
+            filter_text = self.result_filter.text().strip()
+            if filter_text:
+                self._filter_results(filter_text)
+            else:
+                item = self._result_item_by_id(self._current_result_id)
+                if item is not None:
+                    self._set_result_message(
+                        result_summary_message(
+                            item, len(item.get("rows", [])), item.get("row_count", 0)
+                        )
+                    )
+        self._set_result_controls()
+
+    def _table_cell_edit_entry(self, index):
+        """Return a verified local preview target for a single-cell edit action."""
+        if not index.isValid() or not self._current_result_id or self._cell_edit_pending:
+            return None
+        source_index = self.result_proxy.mapToSource(index)
+        item = self._result_item_by_id(self._current_result_id)
+        if item is None or str(item.get("kind", "")).casefold() != "rows":
+            return None
+        table_edit = item.get("table_edit")
+        if not isinstance(table_edit, dict) or not table_edit.get("enabled"):
+            return None
+        row_index, column_index = source_index.row(), source_index.column()
+        editable_columns = table_edit.get("editable_column_indices") or []
+        if column_index not in editable_columns:
+            return None
+        row_keys = table_edit.get("row_keys") or []
+        original_values = table_edit.get("original_values") or {}
+        old_values = original_values.get(str(column_index))
+        primary_key_columns = table_edit.get("primary_key_columns") or []
+        if (
+            not 0 <= row_index < len(row_keys)
+            or not isinstance(old_values, list)
+            or not 0 <= row_index < len(old_values)
+            or len(row_keys[row_index]) != len(primary_key_columns)
+        ):
+            return None
+        headers = item.get("headers") or []
+        if not 0 <= column_index < len(headers):
+            return None
+        return {
+            "item": item,
+            "table_edit": table_edit,
+            "row_index": row_index,
+            "column_index": column_index,
+            "column_name": str(headers[column_index]),
+            "old_value": old_values[row_index],
+            "primary_key_values": list(row_keys[row_index]),
+            "primary_key_columns": list(primary_key_columns),
+        }
+
+    def _edit_table_preview_cell(self, index) -> None:
+        """Request confirmation, then submit one optimistic, parameterized cell update."""
+        if (
+            self._query_running
+            or self._cell_edit_pending
+            or self._disconnect_pending
+            or self._mysql_task_pending()
+        ):
+            self.status.setText("Cell editing is paused while another MySQL operation is active.")
+            return
+        if not self._connection_available:
+            self.status.setText("Cell editing requires an active MySQL connection.")
+            return
+        entry = self._table_cell_edit_entry(index)
+        if entry is None:
+            self.status.setText(
+                "This cell is read-only. Only non-primary-key cells from a verified base-table preview can be edited."
+            )
+            return
+
+        table_edit = entry["table_edit"]
+        key_summary = ", ".join(
+            f"{name}={'(NULL)' if value is None else str(value)}"
+            for name, value in zip(entry["primary_key_columns"], entry["primary_key_values"], strict=False)
+        )
+        dialog = EditTableCellDialog(
+            schema=str(table_edit.get("schema") or ""),
+            table=str(table_edit.get("table") or ""),
+            column=entry["column_name"],
+            current_value=entry["old_value"],
+            primary_key_summary=key_summary,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_value = dialog.new_value()
+        old_value = entry["old_value"]
+        if (
+            new_value is None and old_value is None
+            or new_value is not None and old_value is not None and str(new_value) == str(old_value)
+        ):
+            self.status.setText("Cell edit cancelled · the requested value is unchanged.")
+            return
+
+        result_id = str(entry["item"].get("result_id") or "")
+        context = {
+            "result_id": result_id,
+            "row_index": entry["row_index"],
+            "column_index": entry["column_index"],
+            "schema": str(table_edit.get("schema") or ""),
+            "table": str(table_edit.get("table") or ""),
+            "column_name": entry["column_name"],
+        }
+        payload = {
+            "result_id": result_id,
+            "session_token": str(table_edit.get("session_token") or ""),
+            "row_index": entry["row_index"],
+            "column_index": entry["column_index"],
+            "schema": context["schema"],
+            "table": context["table"],
+            "column_name": entry["column_name"],
+            "primary_key_columns": entry["primary_key_columns"],
+            "primary_key_values": entry["primary_key_values"],
+            "expected_old": old_value,
+            "new_value": new_value,
+        }
+        job_id = self._dispatch("update_table_cell", payload, context)
+        if job_id:
+            self._cell_edit_pending = True
+            self._sync_connection_controls()
+            self.result_grid.setEnabled(False)
+            self.status.setText(
+                f"Updating {context['schema']}.{context['table']}.{context['column_name']}… "
+                "The current MySQL transaction remains under your control."
+            )
 
     def _selected_view_rows(self) -> list[int]:
         return sorted({index.row() for index in self.result_grid.selectedIndexes()})
@@ -3096,6 +3507,9 @@ class MainWindow(QMainWindow):
         return True
 
     def open_connection_dialog(self):
+        if self._cell_edit_pending:
+            self.status.setText("Connection change paused · wait for the cell update to finish.")
+            return
         if self._query_running:
             self._report_query_busy("connection")
             return
@@ -3110,6 +3524,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _switch_connection(self, profile: dict, config: dict, connect_result: dict):
+        if self._cell_edit_pending:
+            self.status.setText("Connection change blocked · the cell update is still finishing.")
+            return
+        preview_rollback_rows = connect_result.get("preview_rollback_rows") or []
+        if preview_rollback_rows:
+            self._restore_table_preview_rows(preview_rollback_rows)
+        if connect_result.get("preview_transaction_finalized"):
+            self._pending_table_preview_undo.clear()
         if self._query_running:
             self._report_query_busy("connection")
             return
@@ -3159,8 +3581,8 @@ class MainWindow(QMainWindow):
     def _sync_connection_controls(self) -> None:
         """Keep database-only controls consistent with connection, query and refresh state."""
         available = self._connection_available and not self._disconnect_pending
-        idle = available and not self._query_running
-        self.connect_button.setEnabled(not self._disconnect_pending)
+        idle = available and not self._query_running and not self._cell_edit_pending
+        self.connect_button.setEnabled(not self._disconnect_pending and not self._cell_edit_pending)
         self.disconnect_button.setEnabled(idle)
         self.run_button.setEnabled(idle)
         self.run_selection_button.setEnabled(idle)
@@ -3168,10 +3590,15 @@ class MainWindow(QMainWindow):
         self.commit_button.setEnabled(idle)
         self.rollback_button.setEnabled(idle)
         self.stop_button.setEnabled(self._query_running)
-        self.schema_refresh_button.setEnabled(available and self._schema_request_id is None)
+        self.schema_refresh_button.setEnabled(
+            available and self._schema_request_id is None and not self._cell_edit_pending
+        )
 
     def disconnect_from_mysql(self) -> None:
         """Queue a session close without blocking the UI or discarding local query work."""
+        if self._cell_edit_pending:
+            self.status.setText("Disconnect paused · wait for the cell update to finish.")
+            return
         if self._query_running:
             self._report_query_busy("connection")
             return
