@@ -1,3 +1,4 @@
+import json
 from mysql_editor.database import (
     DatabaseWorker, RESULT_PAGE_ROWS, is_connection_lost, is_query_interrupted, safe_db_error,
 )
