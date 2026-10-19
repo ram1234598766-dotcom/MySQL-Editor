@@ -345,11 +345,66 @@ def _has_top_level_keyword(masked_sql: str, keyword: str, start: int) -> bool:
     return False
 
 
-def classify_statement(sql: str) -> tuple[str, str]:
-    """Conservative SQL advisory, excluding strings/comments and understanding CTE DML.
+def _executable_sql_comment_bodies(source: str) -> list[str]:
+    """Extract MySQL/MariaDB executable-comment bodies without scanning string literals.
 
-    This is guidance, not authorization; MySQL privileges remain the enforcement boundary.
+    MySQL /*! ... */ comments and MariaDB /*M! ... */ comments can contain SQL that the
+    server executes. Treat them separately for the risk advisory instead of masking them
+    like ordinary comments. The server remains authoritative on version-specific behavior.
     """
+    bodies: list[str] = []
+    length = len(source)
+    i = 0
+
+    while i < length:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < length else ""
+
+        if ch in {"'", '"', chr(96)}:
+            quote = ch
+            i += 1
+            while i < length:
+                current = source[i]
+                following = source[i + 1] if i + 1 < length else ""
+                if quote != chr(96) and current == "\\" and i + 1 < length:
+                    i += 2
+                    continue
+                if current == quote:
+                    if following == quote:
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        if ch == "#" or (
+            ch == "-" and nxt == "-"
+            and (i + 2 >= length or source[i + 2].isspace())
+        ):
+            newline = source.find("\n", i + (1 if ch == "#" else 2))
+            i = length if newline < 0 else newline + 1
+            continue
+
+        if ch == "/" and nxt == "*":
+            mysql_comment = source.startswith("/*!", i)
+            mariadb_comment = source[i:i + 4].upper() == "/*M!"
+            body_start = i + (3 if mysql_comment else 4 if mariadb_comment else 2)
+            end = source.find("*/", body_start)
+            if end < 0:
+                break
+            if mysql_comment or mariadb_comment:
+                bodies.append(source[body_start:end])
+            i = end + 2
+            continue
+
+        i += 1
+
+    return bodies
+
+
+def _classify_statement_core(sql: str) -> tuple[str, str]:
+    """Classify the visible outer statement without recursively inspecting comments."""
     masked = _mask_sql_literals_and_comments(sql)
     command, command_start = _main_statement_command(masked)
     body = masked[command_start:].lstrip().upper()
@@ -370,6 +425,26 @@ def classify_statement(sql: str) -> tuple[str, str]:
     }:
         return "medium", f"{command} may change data or database objects."
     return "low", "No high-impact pattern was detected by the local advisory check."
+
+
+def classify_statement(sql: str) -> tuple[str, str]:
+    """Conservative SQL advisory, including executable comments and CTE-wrapped DML.
+
+    Ordinary strings/comments are excluded. MySQL/MariaDB executable comments are inspected
+    independently because the server may execute SQL embedded inside them. This is guidance,
+    not authorization; MySQL privileges remain the enforcement boundary.
+    """
+    base_risk, base_message = _classify_statement_core(sql)
+    risk_rank = {"low": 0, "medium": 1, "high": 2}
+    highest_risk, highest_message = base_risk, base_message
+
+    for body in _executable_sql_comment_bodies(sql):
+        comment_risk, comment_message = _classify_statement_core(body)
+        if risk_rank[comment_risk] > risk_rank[highest_risk]:
+            highest_risk = comment_risk
+            highest_message = f"Executable MySQL/MariaDB comment: {comment_message}"
+
+    return highest_risk, highest_message
 
 def format_sql(sql: str) -> str:
     """Format SQL without executing it."""
