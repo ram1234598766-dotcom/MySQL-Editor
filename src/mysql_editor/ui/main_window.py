@@ -2769,6 +2769,7 @@ class MainWindow(QMainWindow):
         }
         payload = {
             "result_id": result_id,
+            "session_token": str(table_edit.get("session_token") or ""),
             "row_index": entry["row_index"],
             "column_index": entry["column_index"],
             "schema": context["schema"],
