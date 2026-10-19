@@ -788,7 +788,7 @@ The signing-configuration check ran successfully on this main build, but the sig
 ### Scope
 - Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
 - Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
-- Support the selected self-signed code-signing certificate by temporarily trusting only its public certificate in the isolated hosted runner's current-user Root store for signature verification, then removing that entry during cleanup; recipient PCs must remain disclosed as not trusting the certificate by default.
+- Support the selected self-signed code-signing certificate without modifying the hosted runner's trust store; accept only the expected untrusted-root Authenticode status when the signer thumbprint matches, and disclose that recipient PCs do not trust the certificate by default.
 - Record the certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
 - Add a Windows end-to-end smoke test that generates a short-lived self-signed test certificate and signs a temporary copy of the built EXE. It must not mutate or publish that preview artifact.
 - Update the README, signing guide, and release-candidate checklist with the same signing and SmartScreen caveats.
