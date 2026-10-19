@@ -1477,6 +1477,7 @@ def test_single_cell_update_rejects_primary_key_columns_and_non_preview_results(
         edit = item["table_edit"]
         primary_key_result = worker._update_table_cell({
             "result_id": item["result_id"],
+            "session_token": edit["session_token"],
             "row_index": 0,
             "column_index": 0,
             "schema": "analytics",
@@ -1489,6 +1490,7 @@ def test_single_cell_update_rejects_primary_key_columns_and_non_preview_results(
         })
         query_result = worker._update_table_cell({
             "result_id": "result-from-arbitrary-query",
+            "session_token": edit["session_token"],
             "row_index": 0,
             "column_index": 1,
             "schema": "analytics",
@@ -1506,6 +1508,37 @@ def test_single_cell_update_rejects_primary_key_columns_and_non_preview_results(
         assert "Schema Explorer table preview" in query_result["error"]
         assert state["rows"][0]["id"] == 1
         assert state["rows"][0]["label"] == "old"
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+def test_single_cell_update_rejects_preview_from_prior_connection_session():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        stale_session = edit["session_token"]
+        worker._session_token = "different-active-session"
+
+        result = worker._update_table_cell({
+            "result_id": item["result_id"],
+            "session_token": stale_session,
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "must not cross connections",
+        })
+
+        assert result["ok"] is False
+        assert "connection changed" in result["error"]
+        assert state["rows"][0]["label"] == "old"
+        assert not any(query.startswith("UPDATE ") for query, _params in state["queries"])
     finally:
         worker._spool.close()
         worker._spool = None
