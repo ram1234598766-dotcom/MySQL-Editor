@@ -218,6 +218,8 @@ class MainWindow(QMainWindow):
             self._settings.value("updates/automaticCheck", False), False
         )
         self._update_check_thread: UpdateCheckThread | None = None
+        self._close_after_update_check = False
+        self._close_after_update_check_approved = False
         self._update_check_manual = False
         self._editor_tab_width = normalize_tab_width(self._settings.value("ui/tabWidth", 4))
         self._show_editor_line_numbers = normalize_boolean_preference(
@@ -883,14 +885,22 @@ class MainWindow(QMainWindow):
         thread.start()
 
     def _on_update_check_finished(self) -> None:
-        """Release the completed background thread on the UI thread."""
+        """Release the completed background thread and resume a requested close."""
         thread = self._update_check_thread
         if thread is not None and not thread.isRunning():
             self._update_check_thread = None
             thread.deleteLater()
 
+        if self._close_after_update_check:
+            self._close_after_update_check = False
+            self._close_after_update_check_approved = True
+            self.setEnabled(True)
+            QTimer.singleShot(0, self.close)
+
     def _on_update_check_result(self, result: UpdateCheckResult) -> None:
         """Render update results on the UI thread only."""
+        if self._close_after_update_check or self._close_after_update_check_approved:
+            return
         manual = self._update_check_manual
         if not manual and not self._update_checks_enabled:
             return
@@ -3185,38 +3195,44 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
-        if self._query_running:
-            answer = QMessageBox.question(
-                self, "Query running",
-                "A query is still running. Ask MySQL to cancel it and close?",
-                QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                event.ignore()
-                return
-            self.worker.cancel_current_query()
-        for index in range(self.editors.count()):
-            editor = self.editors.widget(index)
-            if editor and editor.document().isModified():
+        # A deferred close repeats no confirmation: the user has already approved
+        # closing, and the window was disabled while the bounded update request exited.
+        close_already_approved = self._close_after_update_check_approved
+        if close_already_approved:
+            self._close_after_update_check_approved = False
+        else:
+            if self._query_running:
                 answer = QMessageBox.question(
-                    self, "Unsaved query",
-                    "One or more query tabs have unsaved edits. Close MySQL Editor anyway?",
-                    QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                    self, "Query running",
+                    "A query is still running. Ask MySQL to cancel it and close?",
+                    QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
                     QMessageBox.StandardButton.Cancel,
                 )
-                if answer != QMessageBox.StandardButton.Discard:
+                if answer != QMessageBox.StandardButton.Yes:
                     event.ignore()
                     return
-                break
-        update_thread = self._update_check_thread
-        if update_thread is not None and update_thread.isRunning():
-            # The request has a short socket timeout. Do not destroy a QThread while
-            # it is running; if the timeout is unusually slow, let the user retry close.
-            if not update_thread.wait(6000):
-                self.status.setText(
-                    "The update check is still finishing. Wait a moment, then close again."
-                )
+                self.worker.cancel_current_query()
+            for index in range(self.editors.count()):
+                editor = self.editors.widget(index)
+                if editor and editor.document().isModified():
+                    answer = QMessageBox.question(
+                        self, "Unsaved query",
+                        "One or more query tabs have unsaved edits. Close MySQL Editor anyway?",
+                        QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Cancel,
+                    )
+                    if answer != QMessageBox.StandardButton.Discard:
+                        event.ignore()
+                        return
+                    break
+
+            update_thread = self._update_check_thread
+            if update_thread is not None and update_thread.isRunning():
+                # Keep the event loop responsive while the bounded network request
+                # finishes. Never wait synchronously for a QThread in a UI callback.
+                self._close_after_update_check = True
+                self.setEnabled(False)
+                self.status.setText("Finishing the update check before closing…")
                 event.ignore()
                 return
         self._settings.setValue("ui/windowGeometry", self.saveGeometry())
