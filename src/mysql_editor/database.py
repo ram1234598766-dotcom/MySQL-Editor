@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import queue
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -69,6 +70,36 @@ def is_connection_lost(error: BaseException) -> bool:
         "connection is not available",
         "connection not available",
     ))
+
+
+def _leading_transaction_command(sql: str) -> str:
+    """Return COMMIT, ROLLBACK, ROLLBACK_TO or empty after leading SQL comments."""
+    source = str(sql or "")
+    while True:
+        source = source.lstrip()
+        if source.startswith("/*"):
+            end = source.find("*/", 2)
+            if end < 0:
+                return ""
+            source = source[end + 2:]
+            continue
+        if source.startswith("#") or (
+            source.startswith("--")
+            and (len(source) == 2 or source[2].isspace())
+        ):
+            newline = source.find("\n")
+            if newline < 0:
+                return ""
+            source = source[newline + 1:]
+            continue
+        break
+    match = re.match(r"(?i)^(COMMIT|ROLLBACK)\b", source)
+    if match is None:
+        return ""
+    command = match.group(1).upper()
+    if command == "ROLLBACK" and re.match(r"(?i)^ROLLBACK\s+(?:WORK\s+)?TO\b", source):
+        return "ROLLBACK_TO"
+    return command
 
 
 def is_query_interrupted(error: BaseException) -> bool:
@@ -178,11 +209,16 @@ class DatabaseWorker(QThread):
                             result = self._dispatch(task["action"], task["payload"])
                         except Exception as exc:
                             connection_lost = is_connection_lost(exc)
+                            preview_restore = {
+                                "preview_rollback_rows": [],
+                                "preview_restore_errors": [],
+                            }
                             if connection_lost:
-                                self._close_connection()
+                                preview_restore = self._close_connection()
                             result = {
                                 "ok": False, "error": safe_db_error(exc),
                                 "connection_lost": connection_lost,
+                                **preview_restore,
                             }
                     self.completed.emit(task["id"], task["action"], result)
                 finally:
@@ -469,6 +505,7 @@ class DatabaseWorker(QThread):
             return {
                 "ok": True, "message": "Transaction committed.",
                 "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+                "preview_transaction_finalized": True,
             }
         if action == "rollback":
             self._connection.rollback()
@@ -483,6 +520,7 @@ class DatabaseWorker(QThread):
                 "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
                 "preview_rollback_rows": preview_rows,
                 "preview_restore_errors": preview_errors,
+                "preview_transaction_finalized": True,
             }
         if action == "export_csv":
             return self._export_csv(str(payload["result_id"]), str(payload["path"]))
@@ -599,6 +637,9 @@ class DatabaseWorker(QThread):
                 "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
             }
         results: list[dict[str, Any]] = []
+        preview_rollback_rows: list[dict[str, Any]] = []
+        preview_restore_errors: list[str] = []
+        preview_transaction_finalized = False
         started = time.perf_counter()
         with self._lock:
             self._active_query = True
@@ -610,6 +651,10 @@ class DatabaseWorker(QThread):
                 statement_start = time.perf_counter()
                 connection_lost = False
                 result_id: str | None = None
+                transaction_open_before = bool(
+                    getattr(self._connection, "in_transaction", False)
+                )
+                transaction_command = _leading_transaction_command(sql)
                 # Each statement gets its own cancellation generation. The cancel
                 # thread holds _lock while sending KILL QUERY; acquiring it here prevents
                 # that delayed request from striking the next statement in a script.
@@ -671,6 +716,21 @@ class DatabaseWorker(QThread):
                             "statement_count": len(statements), "warning_count": warning_count,
                             "duration_ms": int((time.perf_counter() - statement_start) * 1000),
                         })
+
+                    transaction_open_after = bool(
+                        getattr(self._connection, "in_transaction", False)
+                    )
+                    if self._table_preview_undo and not transaction_open_after:
+                        if transaction_command == "ROLLBACK":
+                            restored, restore_errors = self._restore_table_preview_undo()
+                            preview_rollback_rows.extend(restored)
+                            preview_restore_errors.extend(restore_errors)
+                        elif transaction_open_before:
+                            # COMMIT or a MySQL statement with implicit-commit
+                            # semantics ended the transaction. The visible/cache values
+                            # are now final and must not later be "rolled back" locally.
+                            self._table_preview_undo.clear()
+                            preview_transaction_finalized = True
                 except Exception as exc:
                     interrupted = is_query_interrupted(exc)
                     connection_lost = is_connection_lost(exc)
@@ -704,13 +764,22 @@ class DatabaseWorker(QThread):
                         "transaction_open": False if connection_lost else bool(
                             getattr(self._connection, "in_transaction", False)
                         ),
+                        "preview_rollback_rows": preview_rollback_rows,
+                        "preview_restore_errors": preview_restore_errors,
+                        "preview_transaction_finalized": preview_transaction_finalized,
                     }
                 finally:
                     try:
                         cursor.close()
                     finally:
                         if connection_lost:
-                            self._close_connection()
+                            preview_restore = self._close_connection()
+                            preview_rollback_rows.extend(
+                                preview_restore.get("preview_rollback_rows", [])
+                            )
+                            preview_restore_errors.extend(
+                                preview_restore.get("preview_restore_errors", [])
+                            )
         finally:
             with self._lock:
                 self._active_query = False
@@ -719,6 +788,9 @@ class DatabaseWorker(QThread):
             "ok": True, "results": results,
             "duration_ms": int((time.perf_counter() - started) * 1000),
             "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+            "preview_rollback_rows": preview_rollback_rows,
+            "preview_restore_errors": preview_restore_errors,
+            "preview_transaction_finalized": preview_transaction_finalized,
         }
 
     def _read_schema(self, schema: str) -> dict[str, Any]:
@@ -1369,6 +1441,13 @@ class DatabaseWorker(QThread):
             )
             affected = int(cursor.rowcount or 0)
             update_applied = affected > 0
+            transaction_open = bool(getattr(connection, "in_transaction", False))
+            if update_applied and transaction_open:
+                # Keep the first value seen in this transaction: multiple inline
+                # edits to the same cell must all roll back to the original preview.
+                self._table_preview_undo.setdefault(
+                    (result_id, row_index), list(cached_values)
+                )
             if affected > 1:
                 return {
                     "ok": False,
@@ -1434,8 +1513,12 @@ class DatabaseWorker(QThread):
             }
         except Exception as exc:
             connection_lost = is_connection_lost(exc)
+            preview_restore = {
+                "preview_rollback_rows": [],
+                "preview_restore_errors": [],
+            }
             if connection_lost:
-                self._close_connection()
+                preview_restore = self._close_connection()
             try:
                 transaction_open = bool(getattr(connection, "in_transaction", False))
             except Exception:
@@ -1446,6 +1529,7 @@ class DatabaseWorker(QThread):
                 "update_applied": update_applied,
                 "transaction_open": transaction_open,
                 "connection_lost": connection_lost,
+                **preview_restore,
             }
         finally:
             if cursor is not None:
