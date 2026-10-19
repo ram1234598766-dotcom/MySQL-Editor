@@ -757,3 +757,26 @@ The signing-configuration check ran successfully on this main build, but the sig
 
 **Phase 8 is not fully closed.** Physical Windows display-scale validation, end-to-end keyboard-only use, Narrator/screen-reader review, real Windows Credential Manager behavior, external MySQL/TLS checks, and the final manual test record are still pending in `RELEASE-CANDIDATE-CHECKLIST.md`. CI screenshots use simulated scaling and synthetic data and are not a substitute for testing on the target PC.
 
+---
+
+## Phase 0 — User decisions and implementation gate
+
+**Recorded:** 19 October 2026  
+**Status:** Product decisions recorded. **Phase B remains blocked** until the user explicitly approves both the Phase 0 audit and the proposed PR sequence. This section records decisions only; it does not authorize feature implementation.
+
+### Confirmed decisions
+
+1. **SQL parser:** Adopt SQLGlot, with a custom MySQL `DELIMITER` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
+2. **SSH tunneling:** Defer to a later phase. Do not include SSH tunneling in the initial Windows desktop scope.
+3. **Platform:** Windows 10 and Windows 11 only for this roadmap.
+4. **Update checker:** Optional and disabled by default. Do not initiate update checks unless the user explicitly enables the feature.
+5. **Windows signing:** Use a **self-signed code-signing certificate** for the planned signing path, rather than assuming a publicly trusted certificate is available. Preview artifacts may remain unsigned until the signing workflow is implemented and verified. Stable-release candidates must disclose the certificate type and pass actual signature verification if signed. A self-signed certificate is not trusted by Windows on other machines by default and does not remove SmartScreen warnings; Microsoft documents self-signed certificates as appropriate for development/testing, not broad public distribution. Do not describe such a build as signed by a publicly trusted publisher or promise warning-free installation. See [Microsoft's SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation) and [code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options).
+6. **Accent palette:** Keep the existing teal-and-indigo direction. Refine contrast, state colors, and consistency without changing the core palette.
+
+### Approval gate — do not bypass
+
+- [ ] User explicitly approves the Phase 0 baseline audit.
+- [ ] User explicitly approves the proposed PR sequence.
+- [ ] Only after both approvals may Phase B / feature implementation begin.
+- [ ] Every implementation phase must use a focused branch/PR, regression tests, CI evidence, and honest Windows validation reporting.
+- [ ] No application code, feature behavior, or release-signing workflow is authorized by this decision record alone.
