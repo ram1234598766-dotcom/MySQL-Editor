@@ -158,7 +158,7 @@ def build_release_manifest(
         recipient_trust = "depends-on-recipient-trust-store-and-reputation"
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "product": {
             "name": "MySQL Editor",
             "version": _project_version(project_path),
