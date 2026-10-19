@@ -83,12 +83,12 @@ def test_manifest_records_signed_status_only_after_verified_signature(tmp_path: 
     assert manifest["signing"]["status"] == "signed"
     assert manifest["signing"]["certificate_type"] == "self-signed"
     assert manifest["signing"]["authenticode_verified"] is True
-    assert manifest["signing"]["trust_scope"] == "signature-integrity-only"
+    assert manifest["signing"]["trust_scope"] == "build-runner-only"
     assert manifest["signing"]["recipient_trust"] == "not-trusted-by-default"
     assert "Recipient PCs do not trust this certificate by default" in manifest["signing"]["details"]
     assert manifest["signing"]["timestamp_authority"] == "http://timestamp.digicert.com"
-    assert manifest["signing"]["verification_method"].startswith("PowerShell Get-AuthenticodeSignature")
-    assert "trust store was not modified" in manifest["signing"]["details"]
+    assert manifest["signing"]["verification_method"].startswith("Get-AuthenticodeSignature plus SignTool /verify /pa /all /v")
+    assert "added to the build runner's current-user Root store and removed afterward" in manifest["signing"]["details"]
 
 
 def test_manifest_rejects_signed_status_without_authenticode_verification(tmp_path: Path):
