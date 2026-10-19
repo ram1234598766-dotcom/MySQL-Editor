@@ -148,7 +148,7 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "Import-Certificate" not in signing_script
     assert "certutil.exe" not in signing_script
     assert "X509Store" not in signing_script
-    assert "certificate stores." in signing_script
+    assert "without modifying any certificate store" in signing_script
     assert "A certificate chain processed, but" in signing_script
     assert "& $signTool verify /pa /all /v $target" in signing_script
     assert "Recipient PCs will not trust this self-signed certificate by default." in signing_script
