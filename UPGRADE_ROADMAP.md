@@ -325,6 +325,8 @@ Tasks:
 - Add clear “no rows”, “no result set”, “filter has no matches”, “query failed”, and “connection lost” states.
 - Add column-width behavior that balances readable values and speed; do not auto-size thousands of cells on every load.
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
+- [x] Add guarded single-cell editing for verified Schema Explorer base-table previews: exclude primary keys/generated and unsupported types; require a transactional engine; parameterize writes; re-read and lock the row to reject stale changes; do not auto-commit; restore edited rows in the local cache after full rollback.
+- [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and CSV export of invalidated previews until re-preview.
 - Ensure result sorting does not reorder the underlying result spool or corrupt CSV order unexpectedly. Define whether export preserves server fetch order or current sorted-grid order and communicate that clearly.
 - Add export options deliberately (CSV first; JSON or XLSX only after dependency/licence/large-file/performance review).
 - [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
@@ -335,6 +337,7 @@ Exit gate:
 - Large results do not cause UI freezes or unbounded memory use.
 - Failures preserve previously saved export files.
 - Row counts and completion states agree with the worker's result data.
+- [x] Table-edit tests cover eligibility, non-transactional engine rejection, parameterized update and no implicit commit, stale same-cell and other-column conflict detection, session invalidation, full rollback restoration, savepoint rollback invalidation, and UI consistency.
 - [x] Explain-plan tests cover JSON row extraction, malformed/empty/error responses, nested plan rendering, raw JSON copy, asynchronous request dispatch, and graceful unsupported-server failures.
 
 ### Phase 6 — Professional polish, accessibility and preferences
