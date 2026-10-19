@@ -2079,13 +2079,16 @@ class MainWindow(QMainWindow):
         if result.get("connection_lost"):
             self._mark_connection_lost(str(result.get("error", "") or ""))
         preview_rollback_rows = result.get("preview_rollback_rows") or []
+        preview_restore_errors = result.get("preview_restore_errors") or []
         if preview_rollback_rows:
-            self._restore_table_preview_rows(preview_rollback_rows)
+            self._restore_table_preview_rows(
+                preview_rollback_rows,
+                disable_editing=bool(preview_restore_errors),
+            )
         if result.get("preview_transaction_finalized"):
             # A successful COMMIT or equivalent implicit-commit statement makes the
             # current preview values final. Rollback snapshots must not linger.
             self._pending_table_preview_undo.clear()
-        preview_restore_errors = result.get("preview_restore_errors") or []
         if preview_restore_errors:
             detail = "\n".join(
                 redact_secrets(str(error)).strip()
@@ -2685,6 +2688,13 @@ class MainWindow(QMainWindow):
     def export_results(self):
         if not self._current_result_id:
             return
+        item = self._result_item_by_id(self._current_result_id)
+        if item is not None and item.get("export_unavailable"):
+            self.status.setText(
+                "CSV export is disabled because the preview cache could not be restored after rollback. "
+                "Reload the table preview before exporting."
+            )
+            return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export result grid", "mysql-query-results.csv", "CSV files (*.csv)"
         )
@@ -2744,7 +2754,9 @@ class MainWindow(QMainWindow):
         elif chosen == export_action:
             self.export_results()
 
-    def _restore_table_preview_rows(self, rows: list[dict[str, Any]]) -> None:
+    def _restore_table_preview_rows(
+        self, rows: list[dict[str, Any]], *, disable_editing: bool = False
+    ) -> None:
         """Restore visible rows and raw cell metadata after MySQL rolls back edits."""
         current_result_changed = False
         for entry in rows:
@@ -2768,8 +2780,15 @@ class MainWindow(QMainWindow):
             restored_row = list(baseline)
             item["rows"][row_index] = restored_row
             edit_context = item.get("table_edit")
+            if disable_editing:
+                item["export_unavailable"] = True
             if isinstance(edit_context, dict):
-                if isinstance(undo, dict):
+                if disable_editing:
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "The preview cache could not be restored reliably; refresh before editing."
+                    )
+                elif isinstance(undo, dict):
                     raw_baselines = undo.get("original_values") or {}
                     current_originals = edit_context.get("original_values") or {}
                     for column_key, raw_value in raw_baselines.items():
