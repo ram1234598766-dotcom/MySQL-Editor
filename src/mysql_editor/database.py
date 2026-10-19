@@ -92,6 +92,8 @@ class DatabaseWorker(QThread):
         self._connection = None
         self._connection_config: dict[str, Any] | None = None
         self._connection_id: int | None = None
+        # Prevent a stale preview from one connection being edited after a session switch.
+        self._session_token = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -286,6 +288,7 @@ class DatabaseWorker(QThread):
             self._connection = None
             self._connection_id = None
             self._connection_config = None
+            self._session_token = uuid.uuid4().hex
         if connection is not None:
             try:
                 connection.close()
@@ -323,6 +326,7 @@ class DatabaseWorker(QThread):
                 self._connection = candidate
                 self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
+                self._session_token = uuid.uuid4().hex
             if previous is not None and previous is not candidate:
                 try:
                     previous.close()
@@ -1005,6 +1009,7 @@ class DatabaseWorker(QThread):
             "enabled": False,
             "schema": schema,
             "table": table,
+            "session_token": self._session_token,
             "reason": "This preview is read-only because MySQL could not verify an eligible primary-key table.",
         }
         if self._connection is None:
@@ -1101,6 +1106,7 @@ class DatabaseWorker(QThread):
                 "enabled": True,
                 "schema": schema,
                 "table": table,
+                "session_token": self._session_token,
                 "primary_key_columns": primary_key_columns,
                 "primary_key_indices": primary_key_indices,
                 "row_keys": row_keys,
@@ -1136,6 +1142,12 @@ class DatabaseWorker(QThread):
         result_id = str(payload.get("result_id", "") or "")
         if connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
+        preview_session_token = str(payload.get("session_token", "") or "")
+        if not preview_session_token or preview_session_token != self._session_token:
+            return {
+                "ok": False,
+                "error": "The MySQL connection changed after this preview was loaded. Refresh the table before editing.",
+            }
         if self._spool is None:
             return {"ok": False, "error": "The local table-preview cache is no longer available."}
 
