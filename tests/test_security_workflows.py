@@ -132,7 +132,7 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert '"configured_certificate=$($hasCertificate.ToString().ToLowerInvariant())"' in workflow
     assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/phase-b/self-signed-windows-signing'" in workflow
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.signing-config.outputs.configured_certificate == 'true'" in workflow
-    assert "WINDOWS_SIGNING_EXPECTED_THUMBPRINT: A716417B2EEF09FBD91C6E7E044C569438762D91C45C2AAF8F3A7AD2B317E3A8" in workflow
+    assert "WINDOWS_SIGNING_EXPECTED_THUMBPRINT: 88FA4DE793F0883E7B8DA30EE6C3E76D555CB5F4" in workflow
     assert '"tools/test_self_signed_signing.ps1"' in workflow
     assert "Validate signing helper scripts parse" in workflow
     assert "WINDOWS_SIGNING_CERTIFICATE_TYPE" in signing_script

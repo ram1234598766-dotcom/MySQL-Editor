@@ -38,6 +38,8 @@ The workflow defaults to self-signed mode. The optional repository **variable** 
 
 Configure both secrets or neither. Partial configuration fails. Signing secrets are not made available to pull-request workflows. The self-signed test step creates a short-lived test certificate and signs a **temporary, freshly compiled unsigned EXE**; it does not sign or mutate a distributed preview artifact. On a push to `main`, when the signing secrets are configured, the workflow also compiles an unsigned disposable Windows executable and signs/verifies it against the approved certificate fingerprint. That check does not publish a release and does not change the preview binaries; if the secrets are absent, the optional certificate smoke step is skipped while stable tags remain blocked.
 
+The PFX currently configured in the repository has signer SHA-256 thumbprint `88FA4DE793F0883E7B8DA30EE6C3E76D555CB5F4`. The workflow pins this public certificate identity and checks it against the signer on a disposable executable. The PFX and its password are not changed by this code; update the fingerprint only when deliberately changing the configured certificate.
+
 ## 3. Stable-release signing and verification
 
 For a stable version tag (for example, `v1.0.0`), the Windows release workflow:
