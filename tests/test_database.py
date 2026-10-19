@@ -1262,6 +1262,7 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
         "commits": 0,
         "rollbacks": 0,
         "transaction_baseline": None,
+        "savepoints": {},
     }
     headers = ["id", "label", "quantity"]
     column_rows = [
@@ -1285,10 +1286,25 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
             self.rows = []
             self.rowcount = -1
             self.with_rows = False
-            if query.strip().upper().startswith("ROLLBACK"):
+            normalized_query = query.strip()
+            upper_query = normalized_query.upper()
+            if upper_query.startswith("ROLLBACK TO "):
+                savepoint_name = normalized_query.split()[-1].strip("`")
+                snapshot = state["savepoints"].get(savepoint_name)
+                if snapshot is None:
+                    raise AssertionError(f"Unknown test savepoint: {savepoint_name}")
+                state["rows"] = [dict(row) for row in snapshot]
+                connection.in_transaction = True
+            elif upper_query.startswith("ROLLBACK"):
                 connection.rollback()
-            elif query.strip().upper().startswith("COMMIT"):
+            elif upper_query.startswith("COMMIT"):
                 connection.commit()
+            elif upper_query.startswith("SAVEPOINT "):
+                savepoint_name = normalized_query.split()[-1].strip("`")
+                state["savepoints"][savepoint_name] = [
+                    dict(row) for row in state["rows"]
+                ]
+                connection.in_transaction = True
             elif query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
                 self.description = [(name,) for name in headers]
                 self.with_rows = True
@@ -1790,6 +1806,81 @@ def test_single_cell_update_rejects_changes_to_other_columns_before_writing():
             (item["result_id"],),
         ).fetchone()
         assert json.loads(cached[0]) == [1, "old", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+def test_rollback_to_savepoint_invalidates_preview_until_refreshed(tmp_path):
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        result_id = item["result_id"]
+        edit = item["table_edit"]
+
+        savepoint = worker._execute_script("SAVEPOINT before_cell_edit;")
+        assert savepoint["ok"] is True
+        assert savepoint["transaction_open"] is True
+
+        updated = worker._update_table_cell({
+            "result_id": result_id,
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "edited",
+        })
+        assert updated["ok"] is True
+        assert state["rows"][0]["label"] == "edited"
+        assert worker._table_preview_undo[(result_id, 0)] == [1, "old", 3]
+
+        rolled_to_savepoint = worker._execute_script("ROLLBACK TO SAVEPOINT before_cell_edit;")
+
+        assert rolled_to_savepoint["ok"] is True
+        assert rolled_to_savepoint["transaction_open"] is True
+        assert rolled_to_savepoint["preview_invalidated_result_ids"] == [result_id]
+        assert result_id in worker._invalid_table_previews
+        assert state["rows"][0]["label"] == "old"
+        assert worker._table_preview_undo[(result_id, 0)] == [1, "old", 3]
+
+        rejected_edit = worker._update_table_cell({
+            "result_id": result_id,
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": "edited",
+            "new_value": "must not be accepted",
+        })
+        assert rejected_edit["ok"] is False
+        assert "stale after ROLLBACK TO SAVEPOINT" in rejected_edit["error"]
+
+        export_path = tmp_path / "stale-preview.csv"
+        rejected_export = worker._export_csv(result_id, str(export_path))
+        assert rejected_export["ok"] is False
+        assert "stale after ROLLBACK TO SAVEPOINT" in rejected_export["error"]
+        assert not export_path.exists()
+
+        # A later full rollback still restores the transaction-start snapshot, but the
+        # result remains invalid until a fresh table preview is requested.
+        rolled_back = worker._dispatch("rollback", {})
+        assert rolled_back["ok"] is True
+        assert worker._table_preview_undo == {}
+        assert result_id in worker._invalid_table_previews
+
+        refreshed = worker._preview_table("analytics", "items")["results"][0]
+        assert refreshed["table_edit"]["enabled"] is True
+        assert refreshed["rows"][0] == [1, "old", 3]
+        assert refreshed["result_id"] not in worker._invalid_table_previews
     finally:
         worker._spool.close()
         worker._spool = None
