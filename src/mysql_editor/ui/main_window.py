@@ -225,6 +225,8 @@ class MainWindow(QMainWindow):
         self._result_completion_words: set[str] = set()
         self._query_running = False
         self._cell_edit_pending = False
+        # Original preview rows stay available until the owning MySQL transaction ends.
+        self._pending_table_preview_undo: dict[tuple[str, int], dict[str, Any]] = {}
         self._cancellation_requested = False
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
@@ -2076,6 +2078,31 @@ class MainWindow(QMainWindow):
             return
         if result.get("connection_lost"):
             self._mark_connection_lost(str(result.get("error", "") or ""))
+        preview_rollback_rows = result.get("preview_rollback_rows") or []
+        if preview_rollback_rows:
+            self._restore_table_preview_rows(preview_rollback_rows)
+        if result.get("preview_transaction_finalized"):
+            # A successful COMMIT or equivalent implicit-commit statement makes the
+            # current preview values final. Rollback snapshots must not linger.
+            self._pending_table_preview_undo.clear()
+        preview_restore_errors = result.get("preview_restore_errors") or []
+        if preview_restore_errors:
+            detail = "\n".join(
+                redact_secrets(str(error)).strip()
+                for error in preview_restore_errors
+                if str(error).strip()
+            )
+            if detail:
+                QTimer.singleShot(
+                    0,
+                    lambda message=detail: QMessageBox.warning(
+                        self,
+                        "Table preview needs refresh",
+                        "MySQL transaction handling completed, but some local table-preview "
+                        "snapshots could not be restored. Refresh affected previews before editing "
+                        "or exporting them.\n\n" + message,
+                    ),
+                )
         outcome = None
         if action == "query":
             if "transaction_open" in result:
@@ -2261,9 +2288,20 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            item["rows"][row_index] = list(display_row)
             edit_context = item.get("table_edit") or {}
             original_values = edit_context.get("original_values") or {}
+            undo_key = (result_id, row_index)
+            if self._transaction_open and not result.get("no_change"):
+                if undo_key not in self._pending_table_preview_undo:
+                    self._pending_table_preview_undo[undo_key] = {
+                        "display_row": list(item["rows"][row_index]),
+                        "original_values": {
+                            str(index): values[row_index]
+                            for index, values in original_values.items()
+                            if isinstance(values, list) and row_index < len(values)
+                        },
+                    }
+            item["rows"][row_index] = list(display_row)
             for index, raw_value in enumerate(raw_row):
                 values_for_column = original_values.get(str(index))
                 if isinstance(values_for_column, list) and row_index < len(values_for_column):
@@ -2452,6 +2490,12 @@ class MainWindow(QMainWindow):
         if action in {"commit", "rollback"}:
             if result.get("ok"):
                 self._transaction_open = bool(result.get("transaction_open", False))
+                if action == "commit":
+                    self._pending_table_preview_undo.clear()
+                else:
+                    # Returned rows have already been restored above. Any remaining
+                    # entries can no longer be rolled back in this transaction.
+                    self._pending_table_preview_undo.clear()
             self.status.setText(result.get("message", result.get("error", action.title())))
             if not result.get("ok"):
                 QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
@@ -2699,6 +2743,65 @@ class MainWindow(QMainWindow):
             self.copy_column_headers()
         elif chosen == export_action:
             self.export_results()
+
+    def _restore_table_preview_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Restore visible rows and raw cell metadata after MySQL rolls back edits."""
+        current_result_changed = False
+        for entry in rows:
+            if not isinstance(entry, dict):
+                continue
+            result_id = str(entry.get("result_id") or "")
+            try:
+                row_index = int(entry.get("row_index", -1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not result_id or row_index < 0:
+                continue
+            item = self._result_item_by_id(result_id)
+            undo = self._pending_table_preview_undo.pop((result_id, row_index), None)
+            baseline = undo.get("display_row") if isinstance(undo, dict) else entry.get("display_row")
+            if item is None or not isinstance(baseline, list):
+                continue
+            if row_index >= len(item.get("rows", [])) or len(baseline) != len(item.get("headers", [])):
+                continue
+
+            restored_row = list(baseline)
+            item["rows"][row_index] = restored_row
+            edit_context = item.get("table_edit")
+            if isinstance(edit_context, dict):
+                if isinstance(undo, dict):
+                    raw_baselines = undo.get("original_values") or {}
+                    current_originals = edit_context.get("original_values") or {}
+                    for column_key, raw_value in raw_baselines.items():
+                        per_column = current_originals.get(str(column_key))
+                        if isinstance(per_column, list) and row_index < len(per_column):
+                            per_column[row_index] = raw_value
+                else:
+                    # A worker-reported rollback without a matching live UI snapshot
+                    # cannot safely restore raw Python values such as datetimes.
+                    # Show the confirmed display row but require a fresh preview to edit.
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "This preview was restored after rollback; refresh it before editing again."
+                    )
+
+            if self._current_result_id == result_id:
+                self.result_model.update_cell_row(row_index, restored_row)
+                current_result_changed = True
+
+        if current_result_changed:
+            filter_text = self.result_filter.text().strip()
+            if filter_text:
+                self._filter_results(filter_text)
+            else:
+                item = self._result_item_by_id(self._current_result_id)
+                if item is not None:
+                    self._set_result_message(
+                        result_summary_message(
+                            item, len(item.get("rows", [])), item.get("row_count", 0)
+                        )
+                    )
+        self._set_result_controls()
 
     def _table_cell_edit_entry(self, index):
         """Return a verified local preview target for a single-cell edit action."""
@@ -3381,6 +3484,11 @@ class MainWindow(QMainWindow):
         if self._cell_edit_pending:
             self.status.setText("Connection change blocked · the cell update is still finishing.")
             return
+        preview_rollback_rows = connect_result.get("preview_rollback_rows") or []
+        if preview_rollback_rows:
+            self._restore_table_preview_rows(preview_rollback_rows)
+        if connect_result.get("preview_transaction_finalized"):
+            self._pending_table_preview_undo.clear()
         if self._query_running:
             self._report_query_busy("connection")
             return
