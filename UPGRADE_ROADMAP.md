@@ -744,7 +744,7 @@ PR [#54](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/54) merged as
 - Build the app-folder and portable executables, then optionally sign and verify them with SHA-256 Authenticode plus an RFC 3161 timestamp before building the installer. Sign and verify the installer separately after Inno Setup compiles it.
 - Keep certificate secrets out of pull-request runs; evaluate signing configuration only on trusted pushes to `main`, version tags, or explicit workflow dispatches for those refs.
 - Fail on partial secret configuration, and block stable version-tag publication if a trusted certificate is not configured. Preview builds can remain unsigned, but their manifest must explicitly disclose that state.
-- Extend `tools/create_release_manifest.py` so it cannot claim `signed` unless the workflow passes the verified-signature arguments after all SignTool checks succeed. Add tests for unsigned/signed manifest states and workflow ordering.
+- Extend `tools/create_release_manifest.py` so it cannot claim `signed` unless the workflow passes the verified-signature arguments after successful mode-appropriate signature checks: Authenticode integrity and signer-thumbprint checks for self-signed mode, or SignTool policy verification for trusted mode. Add tests for unsigned/signed manifest states and workflow ordering.
 - Document the two Actions secrets and the limits of signing/SmartScreen claims in `WINDOWS_SIGNING.md`.
 
 Automated verification for the merged source commit:
@@ -788,7 +788,7 @@ The signing-configuration check ran successfully on this main build, but the sig
 ### Scope
 - Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
 - Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
-- Support the selected self-signed code-signing certificate by temporarily trusting it only on the hosted build runner for SignTool verification, then removing that trust entry.
+- Support the selected self-signed code-signing certificate without modifying the hosted runner's trust store; verify Authenticode signature integrity and signer thumbprints while disclosing that recipient PCs do not trust the certificate by default.
 - Record the certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
 - Add a Windows end-to-end smoke test that generates a short-lived self-signed test certificate and signs a temporary copy of the built EXE. It must not mutate or publish that preview artifact.
 - Update the README, signing guide, and release-candidate checklist with the same signing and SmartScreen caveats.
