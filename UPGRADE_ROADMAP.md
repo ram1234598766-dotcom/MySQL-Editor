@@ -762,40 +762,50 @@ The signing-configuration check ran successfully on this main build, but the sig
 ## Phase 0 — User decisions and implementation gate
 
 **Recorded:** 19 October 2026  
-**Status:** Product decisions recorded. **Phase B remains blocked** until the user explicitly approves both the Phase 0 audit and the proposed PR sequence. This section records decisions only; it does not authorize feature implementation.
+**Status:** Product decisions recorded and approval gates satisfied. The user approved the baseline audit, PR sequence, and implementation. Phase B's self-signed Windows signing path is merged and the configured PFX has been verified on the trusted \`main\` workflow. Stable-tag release signing and physical-Windows acceptance remain separate gates.
 
 ### Confirmed decisions
 
-1. **SQL parser:** Adopt SQLGlot, with a custom MySQL `DELIMITER` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
+1. **SQL parser:** Adopt SQLGlot, with a custom MySQL \`DELIMITER\` preprocessing/layer. Keep delimiter handling and compound stored-program boundary behavior explicitly tested; do not claim SQLGlot alone provides complete MySQL server-side semantic validation.
 2. **SSH tunneling:** Defer to a later phase. Do not include SSH tunneling in the initial Windows desktop scope.
 3. **Platform:** Windows 10 and Windows 11 only for this roadmap.
 4. **Update checker:** Optional and disabled by default. Do not initiate update checks unless the user explicitly enables the feature.
-5. **Windows signing:** Use a **self-signed code-signing certificate** for the planned signing path, rather than assuming a publicly trusted certificate is available. Preview artifacts may remain unsigned until the signing workflow is implemented and verified. Stable-release candidates must disclose the certificate type and pass actual signature verification if signed. A self-signed certificate is not trusted by Windows on other machines by default and does not remove SmartScreen warnings; Microsoft documents self-signed certificates as appropriate for development/testing, not broad public distribution. Do not describe such a build as signed by a publicly trusted publisher or promise warning-free installation. See [Microsoft's SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation) and [code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options).
+5. **Windows signing:** Use a **self-signed code-signing certificate** for the planned signing path, rather than assuming a publicly trusted certificate is available. Preview artifacts may remain unsigned until release. Stable-release candidates must disclose the certificate type and pass actual signature verification if signed. A self-signed certificate is not trusted by Windows on other machines by default and does not remove SmartScreen warnings; Microsoft documents self-signed certificates as appropriate for development/testing, not broad public distribution. Do not describe such a build as signed by a publicly trusted publisher or promise warning-free installation. See [Microsoft's SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation) and [code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options).
 6. **Accent palette:** Keep the existing teal-and-indigo direction. Refine contrast, state colors, and consistency without changing the core palette.
 
 ### Approval gate — do not bypass
 
 - [x] User explicitly approves the Phase 0 baseline audit.
 - [x] User explicitly approves the proposed PR sequence.
-- [ ] Only after both approvals may Phase B / feature implementation begin.
-- [ ] Every implementation phase must use a focused branch/PR, regression tests, CI evidence, and honest Windows validation reporting.
-- [ ] No application code, feature behavior, or release-signing workflow is authorized by this decision record alone.
+- [x] Phase B implementation proceeded after both approvals.
+- [x] Implementation used focused branches/PRs, regression tests, CI evidence, and honest validation reporting.
+- [x] This decision record is no longer an approval blocker for the self-signed signing-path implementation.
 
 ## Phase B — self-signed Windows signing path
 
-**Status:** Implementation in progress on branch `phase-b/self-signed-windows-signing`. This is a focused release-engineering phase following the user's Phase 0 approval. Existing theme-token, motion, delimiter parsing, result paging, and other previously merged roadmap work must not be reimplemented merely to replay the older sequence.
+**Status: IMPLEMENTATION COMPLETE; CONFIGURED PFX VERIFIED ON MAIN.** PR #57 adds the signing path, PR #58 improves certificate-mismatch diagnostics, and PR #59 pins the workflow to the certificate already configured in Actions. All three are merged. The latest main Windows package workflow passed. Existing theme-token, motion, delimiter parsing, result paging, and other previously merged roadmap work must not be reimplemented merely to replay the older sequence.
 
-### Scope
-- Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
-- Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
-- Support the selected self-signed code-signing certificate without modifying the hosted runner's trust store; accept only the expected untrusted-root Authenticode status when the signer thumbprint matches, and disclose that recipient PCs do not trust the certificate by default.
-- Record the certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
-- Add a Windows end-to-end smoke test that generates a short-lived self-signed test certificate and signs a temporary copy of the built EXE. It must not mutate or publish that preview artifact.
-- Update the README, signing guide, and release-candidate checklist with the same signing and SmartScreen caveats.
+### Scope completed
 
-### Exit gate
-- Manifest tests reject a signed status without verified-signature evidence or a declared certificate type.
-- Workflow tests confirm previews remain unsigned, stable tags fail closed without secrets, and the signing helper is exercised in the Windows build.
-- The Windows workflow passes the complete test matrix, MySQL integration test, actual Windows signing smoke test, package/install/uninstall checks, and manifest/checksum validation.
-- The release manifest reports `certificate_type = "self-signed"` and `recipient_trust = "not-trusted-by-default"` when that mode signs a stable release.
-- No real stable release is published by this PR; a signed stable-tag run with the configured private PFX remains a separate release action.
+- [x] Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
+- [x] Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
+- [x] Support self-signed code-signing without modifying the hosted runner's trust store; accept only the expected untrusted-root Authenticode status when the signer thumbprint matches, and disclose that recipient PCs do not trust the certificate by default.
+- [x] Record certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
+- [x] Add a Windows smoke test that generates a short-lived self-signed test certificate and signs a disposable copy of a compiled EXE. It does not mutate or publish that preview artifact.
+- [x] Update the signing guide, README signing disclosure, workflow assertions, and release checklist.
+
+### Verification and merge record
+
+- [PR #57](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/57) — implementation of the signing helper, fail-closed stable-tag path, and signature-integrity validation without trust-store writes; merged as \`f4f3fabc132aa30293559a0067f1f12290a2c2e3\`.
+- [PR #58](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/58) — diagnostics for mismatched configured and approved certificate thumbprints; merged as \`b9216a5c6a93479458c1136e1a0caf5269d0e225\`.
+- [PR #59](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/59) — pins the workflow to the public thumbprint of the existing configured certificate, updates the regression assertion, and documents the identity; merged as \`9f5ed33f946e08ffaf7cf3bf922422e4dd1641b6\`.
+
+The [current-main Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39253548129) completed **PASS**. The configured PFX loaded with its private key, the signer matched the pinned thumbprint, and the workflow successfully signed and checked a disposable executable. The same commit passed desktop CI and the dependency-security audit. The Windows build generated the application-folder EXE, portable EXE, and installer; passed install/uninstall and packaged-launch smoke tests; generated the SBOM, provenance manifest, and SHA-256 checksums; and uploaded the \`MySQLEditor-Windows\` CI artifact.
+
+### Remaining release gates
+
+- [ ] Build a stable version tag and verify that the application-folder executable, portable EXE, and installer are each timestamp-signed, verified by the selected mode, and correctly represented in the release manifest.
+- [ ] Complete the manual Windows acceptance checks in \`RELEASE-CANDIDATE-CHECKLIST.md\`, including real display scaling, keyboard-only interaction, screen-reader behavior, the target machine's Credential Manager state, and the target MySQL/TLS environment.
+- [ ] Review the produced signed release manifest and \`SHA256SUMS\` for the exact binaries before promoting a stable release.
+
+**Important boundary:** main/preview artifacts remain unsigned by policy. The disposable-EXE smoke test proves the repository's configured PFX is usable and correctly pinned; it is not a signed product release. No stable version-tag release was published by this work.
