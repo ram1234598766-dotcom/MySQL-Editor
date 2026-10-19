@@ -1254,6 +1254,7 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
         "queries": [],
         "commits": 0,
         "rollbacks": 0,
+        "transaction_baseline": None,
     }
     headers = ["id", "label", "quantity"]
     column_rows = [
@@ -1268,6 +1269,7 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
             self.rows = []
             self.rowcount = -1
             self.closed = False
+            self.with_rows = False
 
         def execute(self, query, params=None):
             params = tuple(params or ())
@@ -1275,8 +1277,14 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
             self.description = []
             self.rows = []
             self.rowcount = -1
-            if query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
+            self.with_rows = False
+            if query.strip().upper().startswith("ROLLBACK"):
+                connection.rollback()
+            elif query.strip().upper().startswith("COMMIT"):
+                connection.commit()
+            elif query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
                 self.description = [(name,) for name in headers]
+                self.with_rows = True
                 self.rows = [
                     (row["id"], row["label"], row["quantity"])
                     for row in state["rows"]
@@ -1298,6 +1306,10 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
                 )
                 if matched is not None and matched["label"] == expected_old:
                     if matched["label"] != new_value:
+                        if state["transaction_baseline"] is None:
+                            state["transaction_baseline"] = [
+                                dict(row) for row in state["rows"]
+                            ]
                         matched["label"] = new_value
                         self.rowcount = 1
                         connection.in_transaction = True
@@ -1335,10 +1347,15 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
 
         def commit(self):
             state["commits"] += 1
+            state["transaction_baseline"] = None
             self.in_transaction = False
 
         def rollback(self):
             state["rollbacks"] += 1
+            baseline = state.get("transaction_baseline")
+            if baseline is not None:
+                state["rows"] = [dict(row) for row in baseline]
+            state["transaction_baseline"] = None
             self.in_transaction = False
 
     connection = Connection()
