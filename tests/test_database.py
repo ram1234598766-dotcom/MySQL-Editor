@@ -1451,6 +1451,145 @@ def test_single_cell_update_is_parameterized_optimistic_and_leaves_transaction_o
         worker._spool_dir.rmdir()
 
 
+def test_single_cell_update_rollback_restores_worker_spool_snapshot():
+    worker, state, connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        result_id = item["result_id"]
+        edit = item["table_edit"]
+        worker._spool.commit()
+
+        updated = worker._update_table_cell({
+            "result_id": result_id,
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "updated",
+        })
+        assert updated["ok"] is True
+        assert worker._table_preview_undo[(result_id, 0)] == [1, "old", 3]
+        cached = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (result_id,),
+        ).fetchone()
+        assert json.loads(cached[0]) == [1, "updated", 3]
+
+        rolled_back = worker._dispatch("rollback", {})
+
+        assert rolled_back["ok"] is True
+        assert rolled_back["transaction_open"] is False
+        assert rolled_back["preview_transaction_finalized"] is True
+        assert rolled_back["preview_rollback_rows"] == [{
+            "result_id": result_id,
+            "row_index": 0,
+            "display_row": [1, "old", 3],
+        }]
+        assert state["rows"][0]["label"] == "old"
+        assert state["rollbacks"] == 1
+        assert state["commits"] == 0
+        assert worker._table_preview_undo == {}
+        cached = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (result_id,),
+        ).fetchone()
+        assert json.loads(cached[0]) == [1, "old", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_sql_rollback_restores_preview_cache_after_inline_edit():
+    worker, state, connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        result_id = item["result_id"]
+        edit = item["table_edit"]
+        worker._spool.commit()
+
+        updated = worker._update_table_cell({
+            "result_id": result_id,
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "updated",
+        })
+        assert updated["ok"] is True
+
+        result = worker._execute_script("ROLLBACK;")
+
+        assert result["ok"] is True
+        assert result["transaction_open"] is False
+        assert result["preview_rollback_rows"] == [{
+            "result_id": result_id,
+            "row_index": 0,
+            "display_row": [1, "old", 3],
+        }]
+        assert state["rows"][0]["label"] == "old"
+        assert worker._table_preview_undo == {}
+        cached = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (result_id,),
+        ).fetchone()
+        assert json.loads(cached[0]) == [1, "old", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_commit_finalizes_cell_edit_and_keeps_updated_preview_snapshot():
+    worker, state, connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        result_id = item["result_id"]
+        edit = item["table_edit"]
+        worker._spool.commit()
+
+        result = worker._update_table_cell({
+            "result_id": result_id,
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "updated",
+        })
+        assert result["ok"] is True
+
+        committed = worker._dispatch("commit", {})
+
+        assert committed["ok"] is True
+        assert committed["preview_transaction_finalized"] is True
+        assert worker._table_preview_undo == {}
+        assert state["rows"][0]["label"] == "updated"
+        cached = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (result_id,),
+        ).fetchone()
+        assert json.loads(cached[0]) == [1, "updated", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
 def test_single_cell_update_rejects_stale_values_without_overwriting_server_changes():
     worker, state, _connection = _editable_preview_worker()
     try:
