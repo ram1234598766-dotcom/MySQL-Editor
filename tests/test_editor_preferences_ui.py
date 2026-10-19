@@ -376,3 +376,57 @@ def test_workspace_navigation_and_sql_actions_support_keyboard_focus(
         worker.shutdown()
         repository.close()
         _APP.processEvents()
+
+def test_update_checks_are_opt_in_and_disabled_state_never_starts_network_access(
+    tmp_path, monkeypatch,
+):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+
+    class ForbiddenUpdateThread:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("update-check thread must not start unless explicitly enabled")
+
+    monkeypatch.setattr("mysql_editor.ui.main_window.UpdateCheckThread", ForbiddenUpdateThread)
+    repository = LocalRepository(tmp_path / "updates-opt-in.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-updates",
+        "name": "Development",
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+    }
+    config = {
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+        "default_schema": "app_db",
+        "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(worker, repository, object(), profile, config, {"database": "app_db"})
+    try:
+        assert window.update_checks_action.isCheckable()
+        assert not window.update_checks_action.isChecked()
+        assert settings.values.get("updates/automaticCheck", False) is False
+
+        window._maybe_check_for_updates_on_startup()
+        window._run_update_check(manual=False)
+        assert window._update_check_thread is None
+
+        window.update_checks_action.setChecked(True)
+        assert settings.values["updates/automaticCheck"] is True
+        # Enabling only opts in for future startup checks; it does not fire an
+        # immediate request without an explicit Help > Check for updates action.
+        assert window._update_check_thread is None
+
+        window.update_checks_action.setChecked(False)
+        assert settings.values["updates/automaticCheck"] is False
+        assert "Update checks disabled" in window.status.text()
+        window._maybe_check_for_updates_on_startup()
+        assert window._update_check_thread is None
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
