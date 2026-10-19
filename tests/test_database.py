@@ -556,6 +556,8 @@ def test_new_connection_replaces_old_only_after_successful_handshake(monkeypatch
         "database": "analytics",
         "current_user": "tester@localhost",
         "transaction_open": False,
+        "preview_rollback_rows": [],
+        "preview_restore_errors": [],
     }
     assert candidate.rollback_calls == 1
     assert not candidate.in_transaction
@@ -633,6 +635,7 @@ def test_commit_and_rollback_return_updated_transaction_state():
         "ok": True,
         "message": "Transaction committed.",
         "transaction_open": False,
+        "preview_transaction_finalized": True,
     }
     assert connection.commit_calls == 1
     assert not connection.in_transaction
@@ -643,6 +646,9 @@ def test_commit_and_rollback_return_updated_transaction_state():
         "ok": True,
         "message": "Transaction rolled back.",
         "transaction_open": False,
+        "preview_rollback_rows": [],
+        "preview_restore_errors": [],
+        "preview_transaction_finalized": True,
     }
     assert connection.rollback_calls == 1
     assert not connection.in_transaction
