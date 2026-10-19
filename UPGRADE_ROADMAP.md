@@ -736,3 +736,24 @@ Regression coverage rejects unresolved style tokens and raw hex literals inside 
 This completes the automated stylesheet-token regression gate. It does **not** substitute for human visual review on real Windows displays: physical DPI/high-DPI rendering, contrast and clipping checks remain under Phase 8. CI artifacts are not a stable GitHub Release.
 
 **Workstream numbering note:** `PHASE0_BASELINE_AUDIT.md` uses an earlier “Phase 1” label for MySQL-client script-parser work. That is a separate parser workstream, not the canonical UX roadmap's Phase 1 (shared theme tokens and component styling).
+
+### Phase 8 follow-up — Authenticode release path and current-main verification — 19 October 2026
+
+PR [#54](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/54) merged as `73e8c2687635a85d0151cbd040d1f65749479332` and adds an optional, fail-closed Windows Authenticode path:
+
+- Build the app-folder and portable executables, then optionally sign and verify them with SHA-256 Authenticode plus an RFC 3161 timestamp before building the installer. Sign and verify the installer separately after Inno Setup compiles it.
+- Keep certificate secrets out of pull-request runs; evaluate signing configuration only on trusted pushes to `main`, version tags, or explicit workflow dispatches for those refs.
+- Fail on partial secret configuration, and block stable version-tag publication if a trusted certificate is not configured. Preview builds can remain unsigned, but their manifest must explicitly disclose that state.
+- Extend `tools/create_release_manifest.py` so it cannot claim `signed` unless the workflow passes the verified-signature arguments after all SignTool checks succeed. Add tests for unsigned/signed manifest states and workflow ordering.
+- Document the two Actions secrets and the limits of signing/SmartScreen claims in `WINDOWS_SIGNING.md`.
+
+Automated verification for the merged source commit:
+
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104552) — **PASS**.
+- [Dependency-security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104455) — **PASS**.
+- [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104411) — **PASS**, including executable/installer builds, silent install/uninstall and shortcut cleanup, package-launch smoke tests, SBOM, provenance, checksums, and artifact upload.
+
+The signing-configuration check ran successfully on this main build, but the signing steps were skipped because no certificate secrets were configured; the artifact is unsigned. The signing helper's syntax, manifest guardrails, and the unsigned PR build were tested. Actual signing with a trusted certificate remains unverified until the repository secrets are configured and a tagged workflow confirms successful SignTool verification.
+
+**Phase 8 is not fully closed.** Physical Windows display-scale validation, end-to-end keyboard-only use, Narrator/screen-reader review, real Windows Credential Manager behavior, external MySQL/TLS checks, and the final manual test record are still pending in `RELEASE-CANDIDATE-CHECKLIST.md`. CI screenshots use simulated scaling and synthetic data and are not a substitute for testing on the target PC.
+

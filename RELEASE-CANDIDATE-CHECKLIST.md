@@ -14,16 +14,32 @@ The Windows packaging workflow must pass all of the following for the candidate 
 - [x] Inno Setup installer build, silent installation, desktop shortcut check, silent uninstall, and shortcut cleanup.
 - [x] Launch smoke test for both packaged executables.
 - [x] Release manifest, CycloneDX SBOM, third-party license inventory, and SHA-256 checksums.
+- [x] Candidate manifest accurately discloses the unsigned preview state; stable tags fail closed without verified Authenticode signing.
 
-### Verified automated gate record — 18 October 2026
+### Verified automated gate record — 19 October 2026
 
-The automated items above passed on the exact product source commit `b37e1e146d3526b298b31fe3c13205ae4323dbdc`. The later documentation-only merge `6bba4814e9138670ed9df3813df45f9dda16aed8` did not change application code. Re-run the automated gates for any future code-changing candidate.
+**Verified source commit:** `73e8c2687635a85d0151cbd040d1f65749479332`  
+**PR:** [#54 — optional verified Windows Authenticode signing](https://github.com/ram1234598766-dotcom/MySQL-Editor/pull/54), merged to `main`.
 
-- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39118312368) — **PASS**: lint, compilation, Python 3.12/3.13/3.14 tests, Windows Qt UI smoke, and MySQL 8.4 integration.
-- [Dependency security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39118312479) — **PASS**.
-- [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39118312396) — **PASS**: onedir application, portable EXE, installer build, install/uninstall and shortcut-cleanup smoke, app launch, output verification, release manifest, SBOM, license inventory, SHA-256 checksums, and artifact upload.
+The automated release gates passed on this exact `main` commit:
 
-These are CI results and an Actions artifact, not a stable GitHub Release or trusted-publisher signature. All hands-on Windows acceptance items below intentionally remain unchecked.
+- [Desktop CI](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104552) — **PASS**: lint, compilation, Python 3.12/3.13/3.14 test jobs, Windows Qt UI smoke, and MySQL 8.4 integration.
+- [Dependency security audit](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104455) — **PASS**.
+- [Windows package workflow](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104411) — **PASS**: release test matrix, MySQL 8.4 integration, dependency audit, signing-helper syntax validation, app-folder and portable EXE builds, installer build, silent install/uninstall and shortcut cleanup, packaged-app launch, output validation, SBOM, provenance manifest, checksums, and artifact upload.
+
+The Windows workflow produced a `MySQLEditor-Windows` Actions artifact (about 220.7 MB; SHA-256 of the Actions artifact archive: `55b0cb75edb51538bf1b191562737ca174cfd2d68ea6818f6e789622375f1a4d`, artifact ID `12170265978`). Download it from the [Windows workflow run](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39216104411); the artifact expires on 17 January 2027. The separate `MySQLEditor-UI-Visual-QA` artifact contains simulated-scale captures and expires on 2 November 2026.
+
+**Signing status for this candidate: UNSIGNED.** The signing-configuration check succeeded, but no trusted certificate secrets were configured; both SignTool signing steps were skipped, and the release manifest explicitly reports the unsigned state. This run is not evidence that a publisher certificate or real signing path has been tested. Stable version tags now fail closed unless `WINDOWS_SIGNING_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` are configured and every published executable passes SignTool signature verification. See [`WINDOWS_SIGNING.md`](WINDOWS_SIGNING.md). A valid signature does not guarantee SmartScreen or antivirus will never warn.
+
+These results are hosted-CI evidence, not physical-PC acceptance. All hands-on Windows items below remain unchecked. Do not promote a stable release until both the manual acceptance record and the publisher-signing gate (if publisher trust is required) are complete.
+
+## Publisher-trust gate — stable releases
+
+- [ ] Configure a legitimate trusted Authenticode certificate using the two repository Actions secrets documented in `WINDOWS_SIGNING.md`.
+- [ ] Build a version tag through the release workflow and confirm the application-folder executable, portable EXE, and installer each pass SignTool verification with a timestamp.
+- [ ] Inspect the resulting `RELEASE-MANIFEST.json` and confirm `signing.status` is `signed` and `authenticode_verified` is `true`; verify the downloaded files against `SHA256SUMS`.
+
+Preview builds may remain unsigned, but their release notes and manifest must state that clearly. Never infer publisher identity from CI success or hashes alone.
 
 ## Hands-on acceptance — Windows 10/11 x64
 
