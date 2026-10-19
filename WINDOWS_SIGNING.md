@@ -44,9 +44,9 @@ For a stable version tag (for example, `v1.0.0`), the Windows release workflow:
 
 1. Requires both signing secrets; it refuses to publish a stable version tag unsigned.
 2. Checks that the PFX contains a currently valid Code Signing certificate and private key.
-3. For a self-signed certificate, temporarily adds the certificate to the hosted runner's current-user root store so SignTool can perform policy verification, then removes that temporary trust entry. This is **runner-local verification only**; it does not install trust on user PCs.
+3. For a self-signed certificate, does **not** modify the runner's trust store. It uses `Get-AuthenticodeSignature` to check signature status and signer-certificate thumbprint. `NotTrusted` is accepted only for the expected self-signed chain limitation; hash mismatches and all other statuses fail. This verifies signature integrity, not public publisher trust.
 4. Signs the app-folder executable, portable EXE, and setup installer with SHA-256 Authenticode and an RFC 3161 timestamp from DigiCert.
-5. Runs `SignTool verify /pa /all /v` for each signed EXE. Any signing or verification error fails the workflow.
+5. For self-signed mode, checks Authenticode signature integrity and confirms each signer matches the configured certificate. For `trusted` mode, runs `SignTool verify /pa /all /v` so Windows policy and certificate trust are verified. Any signing or verification error fails the workflow.
 6. Creates the folder ZIP, release manifest, and SHA-256 checksums after signing, so those hashes describe the final signed artifacts.
 
 The manifest records the signing status, certificate type, verification scope, and whether recipient trust is established by default. For the selected self-signed certificate, it reports `certificate_type = "self-signed"`, `recipient_trust = "not-trusted-by-default"`, and a runner-local verification scope. A trusted CA certificate uses Windows trust-policy verification instead; SmartScreen behavior still depends on reputation and client environment.
