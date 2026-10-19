@@ -369,7 +369,8 @@ Tasks:
 - Inspect races in query completion/status updates so an older background event cannot overwrite the status of a newer task.
 - Ensure every worker task has consistent start/completion/failure handling and the UI always leaves busy state on all expected error paths.
 - Test credential save/read/delete errors and missing or invalid Windows Credential Manager backend behavior.
-- Exercise SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
+- [x] Extend the SQL risk advisory to inspect MySQL `/*! ... */` and MariaDB `/*M! ... */` executable comments, while ignoring comment-like markers inside quoted strings, line comments, and ordinary block comments; add regression tests for hidden high-impact DML.
+- Continue exercising remaining SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
 - Test result spool cleanup on normal shutdown and exceptional shutdown; keep fetched rows and CSV files treated as sensitive.
 - [x] Implemented the opt-in stable-release update checker in PR #61 and its non-blocking shutdown follow-up in PR #62. Startup checks remain disabled by default; one-time manual checks do not enable the startup preference.
 - Audit all user-visible database errors for useful context and secret redaction without exposing raw credentials.

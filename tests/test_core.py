@@ -93,6 +93,41 @@ def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
     assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
 
 
+def test_risk_advisory_detects_mutations_in_mysql_executable_comments():
+    risk, message = classify_statement("/*!50000 DROP TABLE users */")
+    assert risk == "high"
+    assert "executable" in message.lower()
+
+    risk, message = classify_statement("SELECT 1 /*!50000 DELETE FROM users */")
+    assert risk == "high"
+    assert "executable" in message.lower()
+
+
+def test_risk_advisory_detects_mariadb_executable_comment_dml():
+    unbounded, _message = classify_statement(
+        "SELECT 1 /*M!100100 UPDATE users SET active=0 */"
+    )
+    bounded, message = classify_statement(
+        "SELECT 1 /*M!100100 UPDATE users SET active=0 WHERE id=9 */"
+    )
+
+    assert unbounded == "high"
+    assert bounded == "medium"
+    assert "executable" in message.lower()
+
+
+def test_risk_advisory_does_not_scan_executable_comment_markers_inside_strings_or_plain_comments():
+    assert classify_statement(
+        "SELECT '/*!50000 DROP TABLE users */' AS example"
+    )[0] == "low"
+    assert classify_statement(
+        "SELECT 1 /* ordinary prose mentioning /*!50000 DROP TABLE users */ */"
+    )[0] == "low"
+    assert classify_statement(
+        "SELECT 1 -- /*!50000 DROP TABLE users */\\n"
+    )[0] == "low"
+
+
 
 def test_split_supports_custom_delimiters_for_compound_stored_programs():
     source = (
