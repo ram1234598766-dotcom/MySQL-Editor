@@ -121,6 +121,7 @@ jobs:
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_TYPE: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_TYPE || 'self-signed' }}
           SIGNING_REF: ${{ github.ref }}
           SIGNING_REF_NAME: ${{ github.ref_name }}
         run: |
@@ -130,19 +131,30 @@ jobs:
             throw "Configure both WINDOWS_SIGNING_CERTIFICATE_BASE64 and WINDOWS_SIGNING_CERTIFICATE_PASSWORD secrets."
           }
 
+          $certificateType = $env:WINDOWS_SIGNING_CERTIFICATE_TYPE.Trim().ToLowerInvariant()
+          if ($certificateType -notin @("self-signed", "trusted")) {
+            throw "WINDOWS_SIGNING_CERTIFICATE_TYPE must be 'self-signed' or 'trusted'."
+          }
+
           $isTag = $env:SIGNING_REF.StartsWith("refs/tags/")
           $isPreviewTag = $env:SIGNING_REF_NAME -match '(?i)-(alpha|beta|rc|preview)([.-]|$)'
           $signingRequired = $isTag -and -not $isPreviewTag
           if ($signingRequired -and -not $hasCertificate) {
-            throw "Stable version tags require a trusted Authenticode certificate and password; refusing an unsigned stable release."
+            throw "Stable version tags require an Authenticode PFX certificate and password; refusing an unsigned stable release."
           }
 
-          $enabled = $hasCertificate -and $hasPassword
+          # Previews are intentionally unsigned even if release-signing secrets exist.
+          $enabled = $signingRequired -and $hasCertificate -and $hasPassword
           "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "certificate_type=$certificateType" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($enabled) {
-            Write-Host "Windows signing is configured; release executables will be signed and verified."
+            if ($certificateType -eq "self-signed") {
+              Write-Host "Stable release signing is enabled with a self-signed certificate. Recipient PCs may show unknown-publisher or SmartScreen warnings."
+            } else {
+              Write-Host "Stable release signing is enabled with a certificate expected to validate against Windows trust policy."
+            }
           } else {
-            Write-Host "No signing certificate configured; this preview/build remains explicitly unsigned."
+            Write-Host "Pull-request, main-branch, and preview-tag builds remain unsigned by policy."
           }
       - name: Create transparent brand assets
         run: python tools/build_brand_assets.py
@@ -183,12 +195,17 @@ jobs:
         run: python -m PyInstaller --clean --noconfirm pyinstaller/mysql_editor.spec
       - name: Build portable executable
         run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name MySQLEditor-Portable --icon assets/mysql-editor.ico --add-data "assets/mysql-editor-logo.webp;assets" --add-data "assets/mysql-editor-logo-transparent.png;assets" --add-data "assets/mysql-editor.ico;assets" --paths src src/mysql_editor/__main__.py
+      - name: Test self-signed signing flow with a temporary certificate
+        shell: pwsh
+        run: |
+          & "tools/test_self_signed_signing.ps1" -Target "dist/MySQLEditor-Portable.exe"
       - name: Sign and verify application executables
         if: steps.signing-config.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_TYPE: ${{ steps.signing-config.outputs.certificate_type }}
           WINDOWS_SIGNING_TIMESTAMP_URL: http://timestamp.digicert.com
         run: |
           & "tools/sign_windows_artifacts.ps1" -Targets @(
@@ -273,7 +290,11 @@ jobs:
           Compress-Archive -Path "dist/MySQLEditor/*" -DestinationPath "dist/MySQLEditor-Folder.zip" -CompressionLevel Optimal
           $manifestArgs = @("tools/create_release_manifest.py", "--dist", "dist", "--commit", $env:GITHUB_SHA)
           if ("${{ steps.signing-config.outputs.enabled }}" -eq "true") {
-            $manifestArgs += @("--signing-status", "signed", "--authenticode-verified")
+            $manifestArgs += @(
+              "--signing-status", "signed",
+              "--authenticode-verified",
+              "--signing-certificate-type", "${{ steps.signing-config.outputs.certificate_type }}"
+            )
           }
           python @manifestArgs
       - name: Create SHA-256 checksums for release assets
