@@ -596,7 +596,7 @@ class DatabaseWorker(QThread):
                 "ok": False, "error": "A result identifier is required.",
                 "result_id": chosen_result_id, "offset": page_offset, "rows": [],
             }
-        if chosen_result_id in self._invalid_table_previews:
+        if chosen_result_id in getattr(self, "_invalid_table_previews", set()):
             return {
                 "ok": False,
                 "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before loading more rows.",
@@ -1357,7 +1357,7 @@ class DatabaseWorker(QThread):
         """
         connection = self._connection
         result_id = str(payload.get("result_id", "") or "")
-        if result_id in self._invalid_table_previews:
+        if result_id in getattr(self, "_invalid_table_previews", set()):
             return {
                 "ok": False,
                 "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before editing.",
@@ -1667,7 +1667,7 @@ class DatabaseWorker(QThread):
 
 
     def _export_csv(self, result_id: str, path: str) -> dict[str, Any]:
-        if result_id in self._invalid_table_previews:
+        if result_id in getattr(self, "_invalid_table_previews", set()):
             return {
                 "ok": False,
                 "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before exporting.",
