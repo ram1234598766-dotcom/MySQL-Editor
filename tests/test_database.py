@@ -1397,6 +1397,7 @@ def test_single_cell_update_is_parameterized_optimistic_and_leaves_transaction_o
 
         result = worker._update_table_cell({
             "result_id": result_id,
+            "session_token": edit["session_token"],
             "row_index": 0,
             "column_index": 1,
             "schema": "analytics",
@@ -1442,6 +1443,7 @@ def test_single_cell_update_rejects_stale_values_without_overwriting_server_chan
 
         result = worker._update_table_cell({
             "result_id": item["result_id"],
+            "session_token": edit["session_token"],
             "row_index": 0,
             "column_index": 1,
             "schema": "analytics",
