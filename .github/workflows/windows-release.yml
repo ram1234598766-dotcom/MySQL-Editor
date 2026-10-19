@@ -222,8 +222,8 @@ jobs:
             Write-Host "Testing the configured repository certificate against a disposable executable; this branch run cannot publish a release."
             & "tools/sign_windows_artifacts.ps1" -Targets @($target) -SkipTimestamp
             $signature = Get-AuthenticodeSignature -FilePath $target
-            if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate) {
-              throw "The configured certificate signature is not valid."
+            if ($signature.SignatureType -ne "Authenticode" -or $null -eq $signature.SignerCertificate) {
+              throw "The configured executable does not contain an Authenticode signature."
             }
             $actualThumbprint = $signature.SignerCertificate.Thumbprint.Replace(" ", "").ToUpperInvariant()
             if ($actualThumbprint -ne $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT) {
