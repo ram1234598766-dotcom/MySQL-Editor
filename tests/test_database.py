@@ -1225,3 +1225,286 @@ def test_schema_inspector_uses_show_create_view_for_views():
     assert queries[1][0] == (
         f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
     )
+
+def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
+    import json
+    import sqlite3
+
+    worker = DatabaseWorker()
+    worker._spool = sqlite3.connect(":memory:")
+    worker._spool.executescript("""
+        CREATE TABLE result_meta (
+            result_id TEXT PRIMARY KEY, headers TEXT NOT NULL,
+            statement TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE result_rows (
+            result_id TEXT NOT NULL, row_idx INTEGER NOT NULL, values_json TEXT NOT NULL,
+            PRIMARY KEY(result_id, row_idx)
+        );
+    """)
+
+    state = {
+        "rows": [
+            {"id": 1, "label": "old", "quantity": 3},
+            {"id": 2, "label": "second", "quantity": 4},
+        ],
+        "table_type": table_type,
+        "primary_key": list(primary_key),
+        "queries": [],
+        "commits": 0,
+        "rollbacks": 0,
+    }
+    headers = ["id", "label", "quantity"]
+    column_rows = [
+        ("id", "int", "auto_increment"),
+        ("label", "varchar", ""),
+        ("quantity", "int", ""),
+    ]
+
+    class Cursor:
+        def __init__(self):
+            self.description = []
+            self.rows = []
+            self.rowcount = -1
+            self.closed = False
+
+        def execute(self, query, params=None):
+            params = tuple(params or ())
+            state["queries"].append((query, params))
+            self.description = []
+            self.rows = []
+            self.rowcount = -1
+            if query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
+                self.description = [(name,) for name in headers]
+                self.rows = [
+                    (row["id"], row["label"], row["quantity"])
+                    for row in state["rows"]
+                ]
+            elif query.startswith("SELECT TABLE_TYPE FROM information_schema.TABLES"):
+                self.description = [("TABLE_TYPE",)]
+                self.rows = [(state["table_type"],)]
+            elif query.startswith("SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS"):
+                self.description = [("COLUMN_NAME",), ("DATA_TYPE",), ("EXTRA",)]
+                self.rows = list(column_rows)
+            elif query.startswith("SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE"):
+                self.description = [("COLUMN_NAME",)]
+                self.rows = [(name,) for name in state["primary_key"]]
+            elif query.startswith("UPDATE "):
+                new_value, key_value, expected_old = params
+                matched = next(
+                    (row for row in state["rows"] if row["id"] == key_value),
+                    None,
+                )
+                if matched is not None and matched["label"] == expected_old:
+                    if matched["label"] != new_value:
+                        matched["label"] = new_value
+                        self.rowcount = 1
+                        connection.in_transaction = True
+                    else:
+                        self.rowcount = 0
+                else:
+                    self.rowcount = 0
+            elif query.startswith("SELECT * FROM ") and " WHERE " in query:
+                self.description = [(name,) for name in headers]
+                key_value = params[0]
+                matched = next(
+                    (row for row in state["rows"] if row["id"] == key_value),
+                    None,
+                )
+                self.rows = [] if matched is None else [
+                    (matched["id"], matched["label"], matched["quantity"])
+                ]
+            else:
+                raise AssertionError(f"Unexpected cell-edit SQL: {query!r}")
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+        def fetchall(self):
+            return list(self.rows)
+
+        def close(self):
+            self.closed = True
+
+    class Connection:
+        in_transaction = False
+
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            state["commits"] += 1
+            self.in_transaction = False
+
+        def rollback(self):
+            state["rollbacks"] += 1
+            self.in_transaction = False
+
+    connection = Connection()
+    worker._connection = connection
+    worker._cell_edit_test_state = state
+    return worker, state, connection
+
+
+def test_table_preview_enables_cell_edit_only_for_primary_key_base_tables():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        preview = worker._preview_table("analytics", "items")
+        item = preview["results"][0]
+        edit = item["table_edit"]
+
+        assert preview["ok"] is True
+        assert edit["enabled"] is True
+        assert edit["primary_key_columns"] == ["id"]
+        assert edit["primary_key_indices"] == [0]
+        assert edit["row_keys"] == [[1], [2]]
+        assert edit["editable_column_indices"] == [1, 2]
+        assert edit["original_values"]["1"] == ["old", "second"]
+        assert state["commits"] == 0
+        assert state["rollbacks"] == 0
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_table_preview_stays_read_only_for_views_and_tables_without_primary_keys():
+    view_worker, _view_state, _ = _editable_preview_worker(table_type="VIEW")
+    no_key_worker, _no_key_state, _ = _editable_preview_worker(primary_key=())
+    try:
+        view = view_worker._preview_table("analytics", "items")["results"][0]["table_edit"]
+        no_key = no_key_worker._preview_table("analytics", "items")["results"][0]["table_edit"]
+
+        assert view["enabled"] is False
+        assert "Only base tables" in view["reason"]
+        assert no_key["enabled"] is False
+        assert "no primary key" in no_key["reason"]
+    finally:
+        for worker in (view_worker, no_key_worker):
+            worker._spool.close()
+            worker._spool = None
+            worker._spool_dir.rmdir()
+
+
+def test_single_cell_update_is_parameterized_optimistic_and_leaves_transaction_open():
+    worker, state, connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        result_id = item["result_id"]
+        worker._spool.commit()
+
+        result = worker._update_table_cell({
+            "result_id": result_id,
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "updated",
+        })
+
+        assert result["ok"] is True
+        assert result["display_row"] == [1, "updated", 3]
+        assert result["raw_row"] == [1, "updated", 3]
+        assert result["transaction_open"] is True
+        assert state["rows"][0]["label"] == "updated"
+        assert state["commits"] == 0
+        assert state["rollbacks"] == 0
+        update_query, update_params = next(
+            pair for pair in state["queries"] if pair[0].startswith("UPDATE ")
+        )
+        assert "SET `label` = %s" in update_query
+        assert "WHERE `id` = %s AND `label` <=> %s" in update_query
+        assert update_params == ("updated", 1, "old")
+
+        spool_row = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (result_id,),
+        ).fetchone()
+        assert json.loads(spool_row[0]) == [1, "updated", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_single_cell_update_rejects_stale_values_without_overwriting_server_changes():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        state["rows"][0]["label"] = "changed elsewhere"
+
+        result = worker._update_table_cell({
+            "result_id": item["result_id"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "overwrite",
+        })
+
+        assert result["ok"] is False
+        assert "changed on MySQL" in result["error"]
+        assert state["rows"][0]["label"] == "changed elsewhere"
+        assert state["commits"] == 0
+        spool_row = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (item["result_id"],),
+        ).fetchone()
+        assert json.loads(spool_row[0]) == [1, "old", 3]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_single_cell_update_rejects_primary_key_columns_and_non_preview_results():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        primary_key_result = worker._update_table_cell({
+            "result_id": item["result_id"],
+            "row_index": 0,
+            "column_index": 0,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "id",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": 1,
+            "new_value": 9,
+        })
+        query_result = worker._update_table_cell({
+            "result_id": "result-from-arbitrary-query",
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": ["id"],
+            "primary_key_values": [1],
+            "expected_old": "old",
+            "new_value": "x",
+        })
+
+        assert primary_key_result["ok"] is False
+        assert "Primary-key cells are read-only" in primary_key_result["error"]
+        assert query_result["ok"] is False
+        assert "Schema Explorer table preview" in query_result["error"]
+        assert state["rows"][0]["id"] == 1
+        assert state["rows"][0]["label"] == "old"
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
