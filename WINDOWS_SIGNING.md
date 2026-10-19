@@ -36,7 +36,7 @@ Add these repository Actions **secrets**:
 
 The workflow defaults to self-signed mode. The optional repository **variable** `WINDOWS_SIGNING_CERTIFICATE_TYPE` accepts `self-signed` or `trusted`; leave it unset or set it to `self-signed` for the selected policy. Use `trusted` only when the supplied certificate is issued by a certificate authority and validates against Windows trust policy.
 
-Configure both secrets or neither. Partial configuration fails. Signing secrets are not made available to pull-request workflows. The self-signed test step creates a short-lived test certificate and signs a **temporary copy** of a built EXE; it does not sign or mutate a distributed preview artifact.
+Configure both secrets or neither. Partial configuration fails. Signing secrets are not made available to pull-request workflows. The self-signed test step creates a short-lived test certificate and signs a **temporary copy** of a built EXE; it does not sign or mutate a distributed preview artifact. On a push to `main`, when the signing secrets are configured, the workflow also signs and verifies a disposable copy of a Windows system executable against the approved certificate fingerprint. That check does not publish a release and does not change the preview binaries; if the secrets are absent, the optional certificate smoke step is skipped while stable tags remain blocked.
 
 ## 3. Stable-release signing and verification
 
