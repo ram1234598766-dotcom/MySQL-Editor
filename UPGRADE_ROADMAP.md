@@ -775,8 +775,27 @@ The signing-configuration check ran successfully on this main build, but the sig
 
 ### Approval gate — do not bypass
 
-- [ ] User explicitly approves the Phase 0 baseline audit.
-- [ ] User explicitly approves the proposed PR sequence.
+- [x] User explicitly approves the Phase 0 baseline audit.
+- [x] User explicitly approves the proposed PR sequence.
 - [ ] Only after both approvals may Phase B / feature implementation begin.
 - [ ] Every implementation phase must use a focused branch/PR, regression tests, CI evidence, and honest Windows validation reporting.
 - [ ] No application code, feature behavior, or release-signing workflow is authorized by this decision record alone.
+
+## Phase B — self-signed Windows signing path
+
+**Status:** Implementation in progress on branch `phase-b/self-signed-windows-signing`. This is a focused release-engineering phase following the user's Phase 0 approval. Existing theme-token, motion, delimiter parsing, result paging, and other previously merged roadmap work must not be reimplemented merely to replay the older sequence.
+
+### Scope
+- Keep pull-request builds, main-branch previews, and preview tags unsigned by policy.
+- Require signing configuration for stable version tags and fail closed when the certificate or password is missing.
+- Support the selected self-signed code-signing certificate by temporarily trusting it only on the hosted build runner for SignTool verification, then removing that trust entry.
+- Record the certificate type and verification trust scope in the release manifest; do not claim recipient trust for self-signed signatures.
+- Add a Windows end-to-end smoke test that generates a short-lived self-signed test certificate and signs a temporary copy of the built EXE. It must not mutate or publish that preview artifact.
+- Update the README, signing guide, and release-candidate checklist with the same signing and SmartScreen caveats.
+
+### Exit gate
+- Manifest tests reject a signed status without verified-signature evidence or a declared certificate type.
+- Workflow tests confirm previews remain unsigned, stable tags fail closed without secrets, and the signing helper is exercised in the Windows build.
+- The Windows workflow passes the complete test matrix, MySQL integration test, actual Windows signing smoke test, package/install/uninstall checks, and manifest/checksum validation.
+- The release manifest reports `certificate_type = "self-signed"` and `recipient_trust = "not-trusted-by-default"` when that mode signs a stable release.
+- No real stable release is published by this PR; a signed stable-tag run with the configured private PFX remains a separate release action.
