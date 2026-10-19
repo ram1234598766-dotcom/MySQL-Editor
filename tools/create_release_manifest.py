@@ -75,6 +75,8 @@ def build_release_manifest(
     commit_sha: str,
     *,
     project_root: str | Path | None = None,
+    signing_status: str = "unsigned",
+    authenticode_verified: bool = False,
 ) -> dict[str, Any]:
     """Validate required outputs and return JSON-compatible build provenance."""
     dist_path = Path(dist_dir)
@@ -82,6 +84,12 @@ def build_release_manifest(
     normalized_sha = commit_sha.strip().lower()
     if not COMMIT_SHA_PATTERN.fullmatch(normalized_sha):
         raise ValueError("Source commit must be a full 40-character Git SHA")
+    if signing_status not in {"unsigned", "signed"}:
+        raise ValueError("Signing status must be 'unsigned' or 'signed'")
+    if signing_status == "signed" and not authenticode_verified:
+        raise ValueError("A signed manifest requires successful Authenticode verification")
+    if signing_status == "unsigned" and authenticode_verified:
+        raise ValueError("An unsigned manifest cannot claim Authenticode verification")
     if not dist_path.is_dir():
         raise ValueError(f"Distribution directory does not exist: {dist_path}")
 
@@ -132,9 +140,20 @@ def build_release_manifest(
             ),
         },
         "signing": {
-            "status": "unsigned",
-            "authenticode_verified": False,
-            "details": "The configured Windows workflow does not sign these artifacts.",
+            "status": signing_status,
+            "authenticode_verified": authenticode_verified,
+            "timestamp_authority": (
+                "http://timestamp.digicert.com" if signing_status == "signed" else None
+            ),
+            "verification_method": (
+                "SignTool /verify /pa /all /v" if signing_status == "signed" else None
+            ),
+            "details": (
+                "Distributed executables were Authenticode-signed, timestamped, and verified "
+                "with SignTool by the Windows release workflow."
+                if signing_status == "signed"
+                else "No signing certificate was configured for this workflow run; these artifacts are unsigned."
+            ),
         },
         "artifacts": files,
     }
@@ -154,12 +173,29 @@ def main(argv: list[str] | None = None) -> int:
         default=REPOSITORY_ROOT,
         help="directory containing pyproject.toml",
     )
+    parser.add_argument(
+        "--signing-status",
+        choices=("unsigned", "signed"),
+        default="unsigned",
+        help="signed is allowed only after all published executables pass SignTool verification",
+    )
+    parser.add_argument(
+        "--authenticode-verified",
+        action="store_true",
+        help="assert that SignTool verification completed successfully for all published executables",
+    )
     args = parser.parse_args(argv)
     if not args.commit:
         parser.error("--commit is required when GITHUB_SHA is not set")
 
     try:
-        manifest = build_release_manifest(args.dist, args.commit, project_root=args.project_root)
+        manifest = build_release_manifest(
+            args.dist,
+            args.commit,
+            project_root=args.project_root,
+            signing_status=args.signing_status,
+            authenticode_verified=args.authenticode_verified,
+        )
         destination = args.dist / "RELEASE-MANIFEST.json"
         temporary = destination.with_suffix(destination.suffix + ".tmp")
         temporary.write_text(
@@ -173,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"Created {destination} for commit {manifest['source']['commit_sha']} "
-        f"({len(manifest['artifacts'])} validated artifacts; signing: unsigned)."
+        f"({len(manifest['artifacts'])} validated artifacts; signing: {manifest['signing']['status']})."
     )
     return 0
 

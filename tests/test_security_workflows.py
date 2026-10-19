@@ -101,6 +101,26 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "python -m pytest --ignore=tests/test_mysql_integration.py" in workflow
     assert "run: python -m pytest tests/test_mysql_integration.py -v" in workflow
     assert "needs: [release-tests, mysql-integration]" in workflow
-    assert "python tools/create_release_manifest.py --dist dist --commit $env:GITHUB_SHA" in workflow
+    assert '"tools/create_release_manifest.py", "--dist", "dist", "--commit", $env:GITHUB_SHA' in workflow
+    assert '"--signing-status", "signed", "--authenticode-verified"' in workflow
+    assert "Validate Windows signing configuration" in workflow
+    assert "if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))" in workflow
+    assert "Sign and verify application executables" in workflow
+    assert "Sign and verify Windows installer" in workflow
+    app_build_at = workflow.index("Build portable executable")
+    sign_app_at = workflow.index("Sign and verify application executables")
+    installer_build_at = workflow.index("Build setup installer")
+    sign_installer_at = workflow.index("Sign and verify Windows installer")
+    smoke_test_at = workflow.index("Smoke test installer install and uninstall")
+    assert app_build_at < sign_app_at < installer_build_at < sign_installer_at < smoke_test_at
+
+    signing_script = _read_workflow("tools/sign_windows_artifacts.ps1")
+    assert "WINDOWS_SIGNING_CERTIFICATE_BASE64" in signing_script
+    assert "WINDOWS_SIGNING_CERTIFICATE_PASSWORD" in signing_script
+    assert "sign /fd SHA256" in signing_script
+    assert "verify /pa /all /v" in signing_script
+    assert "Remove-Item -LiteralPath $certificatePath" in signing_script
+    assert "Stable version tags require a trusted Authenticode certificate" in workflow
+    assert "http://timestamp.digicert.com" in workflow
     assert "dist/RELEASE-MANIFEST.json" in workflow
     assert "dist/MySQLEditor/MySQLEditor.exe" in workflow
