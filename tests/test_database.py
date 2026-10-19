@@ -1233,7 +1233,7 @@ def test_schema_inspector_uses_show_create_view_for_views():
         f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
     )
 
-def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
+def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), engine="InnoDB", engine_transactions="YES"):
     import sqlite3
 
     worker = DatabaseWorker()
@@ -1255,6 +1255,8 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
             {"id": 2, "label": "second", "quantity": 4},
         ],
         "table_type": table_type,
+        "engine": engine,
+        "engine_transactions": engine_transactions,
         "primary_key": list(primary_key),
         "queries": [],
         "commits": 0,
@@ -1294,9 +1296,12 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
                     (row["id"], row["label"], row["quantity"])
                     for row in state["rows"]
                 ]
-            elif query.startswith("SELECT TABLE_TYPE FROM information_schema.TABLES"):
-                self.description = [("TABLE_TYPE",)]
-                self.rows = [(state["table_type"],)]
+            elif query.startswith("SELECT TABLE_TYPE, ENGINE FROM information_schema.TABLES"):
+                self.description = [("TABLE_TYPE",), ("ENGINE",)]
+                self.rows = [(state["table_type"], state["engine"])]
+            elif query.startswith("SELECT TRANSACTIONS FROM information_schema.ENGINES"):
+                self.description = [("TRANSACTIONS",)]
+                self.rows = [(state["engine_transactions"],)]
             elif query.startswith("SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS"):
                 self.description = [("COLUMN_NAME",), ("DATA_TYPE",), ("EXTRA",)]
                 self.rows = list(column_rows)
@@ -1324,6 +1329,8 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",)):
                     self.rowcount = 0
             elif query.startswith("SELECT * FROM ") and " WHERE " in query:
                 self.description = [(name,) for name in headers]
+                if " FOR UPDATE" in query.upper():
+                    connection.in_transaction = True
                 key_value = params[0]
                 matched = next(
                     (row for row in state["rows"] if row["id"] == key_value),
@@ -1700,6 +1707,89 @@ def test_single_cell_update_rejects_preview_from_prior_connection_session():
         assert "connection changed" in result["error"]
         assert state["rows"][0]["label"] == "old"
         assert not any(query.startswith("UPDATE ") for query, _params in state["queries"])
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_table_preview_is_read_only_when_storage_engine_cannot_rollback():
+    worker, _state, _connection = _editable_preview_worker(
+        engine="MyISAM", engine_transactions="NO"
+    )
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        assert item["table_edit"]["enabled"] is False
+        assert "cannot guarantee Rollback" in item["table_edit"]["reason"]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_single_cell_update_revalidates_storage_engine_before_writing():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        state["engine"] = "MyISAM"
+        state["engine_transactions"] = "NO"
+
+        result = worker._update_table_cell({
+            "result_id": item["result_id"],
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "must not write",
+        })
+
+        assert result["ok"] is False
+        assert "cannot guarantee Rollback" in result["error"]
+        assert not any(query.startswith("UPDATE ") for query, _params in state["queries"])
+        assert state["rows"][0]["label"] == "old"
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_single_cell_update_rejects_changes_to_other_columns_before_writing():
+    worker, state, _connection = _editable_preview_worker()
+    try:
+        item = worker._preview_table("analytics", "items")["results"][0]
+        edit = item["table_edit"]
+        state["rows"][0]["quantity"] = 77
+
+        result = worker._update_table_cell({
+            "result_id": item["result_id"],
+            "session_token": edit["session_token"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+            "primary_key_columns": edit["primary_key_columns"],
+            "primary_key_values": edit["row_keys"][0],
+            "expected_old": edit["original_values"]["1"][0],
+            "new_value": "must not overwrite a stale row",
+        })
+
+        assert result["ok"] is False
+        assert "Another column in this row changed" in result["error"]
+        assert state["rows"][0]["label"] == "old"
+        assert state["rows"][0]["quantity"] == 77
+        assert not any(query.startswith("UPDATE ") for query, _params in state["queries"])
+        cached = worker._spool.execute(
+            "SELECT values_json FROM result_rows WHERE result_id = ? AND row_idx = 0",
+            (item["result_id"],),
+        ).fetchone()
+        assert json.loads(cached[0]) == [1, "old", 3]
     finally:
         worker._spool.close()
         worker._spool = None
