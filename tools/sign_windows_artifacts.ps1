@@ -36,14 +36,17 @@ $certificatePublicPath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-publi
 $rootThumbprint = $null
 $certificate = $null
 try {
+    Write-Host "Decoding the supplied PFX payload."
     $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
     [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+    Write-Host "Loading the PFX certificate and private key."
 
     $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
         $certificatePath,
         $env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD,
         [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
     )
+    Write-Host "PFX loaded; validating private key and certificate metadata."
     if (-not $certificate.HasPrivateKey) {
         throw "The supplied PFX does not contain a usable private key."
     }
@@ -75,16 +78,17 @@ try {
         # certificate only to the hosted runner's CurrentUser\Root store and remove it
         # in finally. This does not make recipients trust the certificate.
         $rootStorePath = "Cert:\CurrentUser\Root"
-        $existingRoot = Get-ChildItem -Path $rootStorePath |
-            Where-Object { $_.Thumbprint -eq $certificate.Thumbprint } |
-            Select-Object -First 1
+        $thumbprintStorePath = Join-Path $rootStorePath $certificate.Thumbprint
+        $existingRoot = Get-Item -LiteralPath $thumbprintStorePath -ErrorAction SilentlyContinue
         if ($null -eq $existingRoot) {
             [System.IO.File]::WriteAllBytes(
                 $certificatePublicPath,
                 $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
             )
+            Write-Host "Temporarily trusting the self-signed certificate for this runner only."
             Import-Certificate -FilePath $certificatePublicPath -CertStoreLocation $rootStorePath | Out-Null
             $rootThumbprint = $certificate.Thumbprint
+            Write-Host "Temporary certificate trust installed."
         }
         Write-Host "Self-signed certificate trust is temporary and local to this runner; recipient PCs will not trust it by default."
     }
