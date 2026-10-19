@@ -2350,7 +2350,7 @@ class MainWindow(QMainWindow):
                 "The execution plan could not be produced. The original SELECT was not executed."
                 + (f"\n{detail}" if detail else "")
             )
-            self.status.setText("Explain failed · the SELECT statement was not executed.")
+            self.status.setText("Explain failed · SELECT was not executed.")
             QMessageBox.warning(
                 self,
                 "Explain SELECT",
@@ -2368,7 +2368,7 @@ class MainWindow(QMainWindow):
                 "MySQL returned a response that could not be shown as a JSON plan."
                 + (f"\n{detail}" if detail else "")
             )
-            self.status.setText("Explain failed · the SELECT statement was not executed.")
+            self.status.setText("Explain failed · SELECT was not executed.")
             QMessageBox.warning(
                 self,
                 "Explain SELECT",
