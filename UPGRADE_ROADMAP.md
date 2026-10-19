@@ -348,7 +348,7 @@ Tasks:
 - Confirm keyboard traversal order and visible focus for all forms, navigation, tree controls, menus, result actions, popups, and dialogs.
 - Check keyboard-only use for connect/test, editor completion, query execution, stop/cancel, results switching, export, and close-with-unsaved-changes.
 - Check screen-reader accessible names for icon-only controls, busy state and error messages.
-- Validate text contrast in normal, hover, selected, disabled, error, warning and high-DPI states.
+- [x] Add deterministic WCAG AA contrast tests for normal, hover, selected, disabled, error, warning and focus text states in both theme palettes. The tests caught and fixed two light-theme failures (selected navigation at 3.69:1 and generic disabled text at 4.35:1). Simulated display-scale screenshots remain CI evidence; physical Windows display review is still required before stable release.
 - Use UI copy that is precise: distinguish “request sent” from “cancelled,” “saved locally” from “encrypted,” and “connected” from “connection settings saved.”
 - Review installer welcome, progress, finish, shortcut and uninstaller screens for branding consistency, legible copy and fast completion—without inserting fake progress or long animations.
 
