@@ -202,6 +202,37 @@ jobs:
         shell: pwsh
         run: |
           & "tools/test_self_signed_signing.ps1" -Target "dist/MySQLEditor/MySQLEditor.exe"
+      - name: Verify configured self-signed certificate without publishing a release
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/phase-b/self-signed-windows-signing'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_TYPE: self-signed
+          WINDOWS_SIGNING_EXPECTED_THUMBPRINT: A716417B2EEF09FBD91C6E7E044C569438762D91C45C2AAF8F3A7AD2B317E3A8
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
+            throw "The repository signing secrets are unavailable; refusing to report configured-certificate validation."
+          }
+          $source = Join-Path $env:WINDIR "System32\\where.exe"
+          $target = Join-Path $env:RUNNER_TEMP "MySQLEditor-ConfiguredSigningSmoke.exe"
+          Copy-Item -LiteralPath $source -Destination $target -Force
+          try {
+            Write-Host "Testing the configured repository certificate against a disposable executable; this branch run cannot publish a release."
+            & "tools/sign_windows_artifacts.ps1" -Targets @($target) -SkipTimestamp
+            $signature = Get-AuthenticodeSignature -FilePath $target
+            if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate) {
+              throw "The configured certificate signature is not valid."
+            }
+            $actualThumbprint = $signature.SignerCertificate.Thumbprint.Replace(" ", "").ToUpperInvariant()
+            if ($actualThumbprint -ne $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT) {
+              throw "The configured PFX does not match the approved certificate fingerprint."
+            }
+            Write-Host "Configured self-signed certificate smoke test passed. The disposable executable will not be published."
+          } finally {
+            Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+          }
       - name: Sign and verify application executables
         if: steps.signing-config.outputs.enabled == 'true'
         shell: pwsh
