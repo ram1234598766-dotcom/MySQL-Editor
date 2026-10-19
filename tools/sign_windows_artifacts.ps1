@@ -77,18 +77,35 @@ try {
         # SignTool policy verification requires a root of trust. Temporarily add this
         # certificate only to the hosted runner's CurrentUser\Root store and remove it
         # in finally. This does not make recipients trust the certificate.
-        $rootStorePath = "Cert:\CurrentUser\Root"
-        $thumbprintStorePath = Join-Path $rootStorePath $certificate.Thumbprint
-        $existingRoot = Get-Item -LiteralPath $thumbprintStorePath -ErrorAction SilentlyContinue
-        if ($null -eq $existingRoot) {
-            [System.IO.File]::WriteAllBytes(
-                $certificatePublicPath,
-                $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+        $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        try {
+            Write-Host "Opening the current-user root certificate store for a temporary trust entry."
+            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $existingRoot = $rootStore.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $certificate.Thumbprint,
+                $false
             )
-            Write-Host "Temporarily trusting the self-signed certificate for this runner only."
-            Import-Certificate -FilePath $certificatePublicPath -CertStoreLocation $rootStorePath | Out-Null
-            $rootThumbprint = $certificate.Thumbprint
-            Write-Host "Temporary certificate trust installed."
+            if ($existingRoot.Count -eq 0) {
+                $rootPublicCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                    $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+                )
+                try {
+                    Write-Host "Temporarily trusting the self-signed certificate for this runner only."
+                    $rootStore.Add($rootPublicCertificate)
+                    $rootThumbprint = $certificate.Thumbprint
+                    Write-Host "Temporary certificate trust installed."
+                } finally {
+                    $rootPublicCertificate.Dispose()
+                }
+            } else {
+                Write-Host "The certificate is already present in the current-user root store; preserving the pre-existing trust entry."
+            }
+        } finally {
+            $rootStore.Close()
         }
         Write-Host "Self-signed certificate trust is temporary and local to this runner; recipient PCs will not trust it by default."
     }
@@ -143,7 +160,24 @@ try {
     }
 } finally {
     if ($rootThumbprint) {
-        Remove-Item -LiteralPath ("Cert:\CurrentUser\Root\{0}" -f $rootThumbprint) -Force -ErrorAction SilentlyContinue
+        $cleanupStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        try {
+            $cleanupStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $temporaryRoots = $cleanupStore.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $rootThumbprint,
+                $false
+            )
+            foreach ($temporaryRoot in $temporaryRoots) {
+                $cleanupStore.Remove($temporaryRoot)
+                $temporaryRoot.Dispose()
+            }
+        } finally {
+            $cleanupStore.Close()
+        }
     }
     if ($certificate) {
         $certificate.Dispose()
