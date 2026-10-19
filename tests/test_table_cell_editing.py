@@ -264,3 +264,66 @@ def test_cell_update_conflict_does_not_modify_preview_values(tmp_path, monkeypat
         window.close()
         repository.close()
         _APP.processEvents()
+
+def test_transaction_rollback_restores_display_and_raw_preview_values(tmp_path, monkeypatch):
+    window, repository, _worker = _make_window(tmp_path, monkeypatch)
+    item = _table_preview_item()
+    _set_current_preview(window, item)
+    try:
+        update_context = {
+            "result_id": item["result_id"],
+            "row_index": 0,
+            "column_index": 1,
+            "schema": "analytics",
+            "table": "items",
+            "column_name": "label",
+        }
+        window._jobs["cell-edit-rollback-test"] = ("update_table_cell", update_context)
+        window._cell_edit_pending = True
+        window.result_grid.setEnabled(False)
+
+        window._on_worker_completed("cell-edit-rollback-test", "update_table_cell", {
+            "ok": True,
+            "result_id": item["result_id"],
+            "row_index": 0,
+            "column_index": 1,
+            "column_name": "label",
+            "display_row": [7, "new label", 5],
+            "raw_row": [7, "new label", 5],
+            "no_change": False,
+            "transaction_open": True,
+        })
+
+        assert window._query_results[0]["rows"][0] == [7, "new label", 5]
+        assert window._query_results[0]["table_edit"]["original_values"]["1"][0] == "new label"
+        assert window._pending_table_preview_undo[("preview-items-1", 0)] == {
+            "display_row": [7, "old", 5],
+            "original_values": {"1": "old", "2": 5},
+        }
+
+        window._jobs["rollback-after-cell-edit"] = ("rollback", {})
+        window._on_worker_completed("rollback-after-cell-edit", "rollback", {
+            "ok": True,
+            "message": "Transaction rolled back. Restored 1 table-preview row snapshot(s).",
+            "transaction_open": False,
+            "preview_transaction_finalized": True,
+            "preview_rollback_rows": [{
+                "result_id": "preview-items-1",
+                "row_index": 0,
+                "display_row": [7, "old", 5],
+            }],
+            "preview_restore_errors": [],
+        })
+
+        assert window._query_results[0]["rows"][0] == [7, "old", 5]
+        assert window.result_model.rows[0] == [7, "old", 5]
+        assert window._query_results[0]["table_edit"]["original_values"]["1"][0] == "old"
+        assert window._query_results[0]["table_edit"]["original_values"]["2"][0] == 5
+        assert window._pending_table_preview_undo == {}
+        assert window._transaction_open is False
+        assert "Transaction rolled back" in window.status.text()
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
