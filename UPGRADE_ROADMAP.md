@@ -367,6 +367,7 @@ Tasks:
 - Test credential save/read/delete errors and missing or invalid Windows Credential Manager backend behavior.
 - Exercise SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
 - Test result spool cleanup on normal shutdown and exceptional shutdown; keep fetched rows and CSV files treated as sensitive.
+- Implement an optional stable-release update check that is disabled by default, uses a bounded background HTTPS request, validates release versions and canonical project release URLs, has no automatic download/install path, and sends no database or usage data.
 - Audit all user-visible database errors for useful context and secret redaction without exposing raw credentials.
 - Run \`pip-audit\`, review dependency licence inventory, keep a deliberate version support matrix and update dependencies in small, tested batches.
 - Avoid broad “upgrade everything to latest” changes without checking Python/Qt/connector/PyInstaller/Inno Setup compatibility.
@@ -377,6 +378,7 @@ Exit gate:
 - No known blocking regression remains in the release-candidate test suite.
 - Dependency audit result is reviewed; failures are resolved or explicitly documented before release.
 - Tests prove cleanup/recovery behaviour; visual finish does not substitute for reliability.
+- Update-check tests prove the default state makes no network request, non-stable/unsafe metadata is rejected, time/response size are bounded, and release URLs are restricted to this repository.
 
 ### Phase 8 — Release candidate and real Windows QA
 
