@@ -248,7 +248,6 @@ class ExplainPlanDialog(QDialog):
             sql_note = QLabel("Plan requested for: " + self.sql)
             sql_note.setObjectName("mutedText")
             sql_note.setWordWrap(True)
-            sql_note.setTextInteractionFlags(sql_note.textInteractionFlags())
             layout.addWidget(sql_note)
 
         footer = QHBoxLayout()
