@@ -5,6 +5,10 @@
 
 This is a clean-room Windows desktop SQL editor for MySQL. Release metadata identifies preview versus stable status. The Windows build workflow validates expected output files, launches packaged executables, and exercises installation/uninstallation before publishing assets.
 
+## Unreleased changes
+
+- Optional stable-release update checking is disabled by default. After the user opts in, the app can check public GitHub Release metadata at startup or through Help → Check for updates. Network work runs off the UI thread, release tags/URLs are validated, and the app opens the release page for manual review; it never downloads or installs updates automatically. The request does not send SQL or database credentials. See `PRIVACY_POLICY.md`.
+
 ## Downloadable Windows packages
 
 The release workflow attaches the following files when the package job succeeds:
