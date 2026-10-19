@@ -32,13 +32,7 @@ if ($certificateType -notin @("self-signed", "trusted")) {
 }
 
 $certificatePath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-{0}.pfx" -f [Guid]::NewGuid().ToString("N"))
-$certificatePublicPath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-public-{0}.cer" -f [Guid]::NewGuid().ToString("N"))
 $certificate = $null
-$rootCertificateAdded = $false
-$certutil = Join-Path $env:WINDIR "System32\certutil.exe"
-if (!(Test-Path -LiteralPath $certutil -PathType Leaf)) {
-    throw "certutil.exe was not found at the expected Windows system path: $certutil"
-}
 try {
     Write-Host "Decoding the supplied PFX payload."
     $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERTIFICATE_BASE64)
@@ -77,16 +71,7 @@ try {
         if (-not [StringComparer]::Ordinal.Equals($certificate.Subject, $certificate.Issuer)) {
             throw "The certificate type is self-signed, but its subject and issuer do not match."
         }
-        Write-Host "Preparing temporary runner-local trust so Windows can verify the self-signed Authenticode chain."
-        $publicCertificateBytes = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-        [System.IO.File]::WriteAllBytes($certificatePublicPath, $publicCertificateBytes)
-        Write-Host "Adding only the public self-signed certificate to this runner's current-user Root store via certutil.exe."
-        "y" | & $certutil -user -f -addstore Root $certificatePublicPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "certutil.exe failed to add the temporary public certificate to the current-user Root store (exit code $LASTEXITCODE)."
-        }
-        $rootCertificateAdded = $true
-        Write-Host "Temporary public-certificate trust installed for this runner."
+        Write-Host "Checking self-signed Authenticode integrity without modifying any certificate store."
         Write-Host "Recipient PCs will not trust this self-signed certificate by default."
     }
 
@@ -132,19 +117,25 @@ try {
         }
 
         if ($certificateType -eq "self-signed") {
-            Write-Host "Verifying Authenticode signature with temporary runner-local trust: $target"
+            Write-Host "Verifying Authenticode signature integrity without asserting public publisher trust: $target"
             $signature = Get-AuthenticodeSignature -FilePath $target
             $signatureStatus = $signature.Status.ToString()
-            if ($signatureStatus -ne "Valid") {
-                throw "Authenticode signature verification failed for $target (status: $signatureStatus)."
+            $signatureStatusMessage = [string]$signature.StatusMessage
+            $expectedUntrustedRoot = (
+                $signatureStatus -in @("UnknownError", "NotTrusted") -and
+                $signatureStatusMessage -match '(?i)^(A certificate chain processed, but (?:terminated|ended) in a root certificate which is not trusted by the trust provider\.?|A certificate chain could not be built to a trusted root authority\.?)$'
+            )
+            if ($signatureStatus -ne "Valid" -and -not $expectedUntrustedRoot) {
+                throw "Authenticode signature integrity check failed for $target (status: $signatureStatus; message: $signatureStatusMessage)."
             }
             if ($null -eq $signature.SignerCertificate -or
                 $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
                 throw "The Authenticode signature for $target does not match the configured self-signed certificate."
             }
-            & $signTool verify /pa /all /v $target
-            if ($LASTEXITCODE -ne 0) {
-                throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
+            if ($expectedUntrustedRoot) {
+                Write-Host "Signature integrity and signer identity verified; only the expected self-signed root-trust error was accepted."
+            } else {
+                Write-Host "Signature integrity and signer identity verified with a Valid Authenticode status."
             }
         } else {
             Write-Host "Verifying Authenticode signature and certificate trust: $target"
@@ -156,17 +147,8 @@ try {
         Write-Host "Signed and verified: $(Split-Path $target -Leaf) (certificate type: $certificateType)"
     }
 } finally {
-    if ($rootCertificateAdded) {
-        Write-Host "Removing the temporary self-signed certificate from this runner's current-user Root store."
-        & $certutil -user -delstore Root $certificate.Thumbprint
-        if ($LASTEXITCODE -ne 0) {
-            throw "certutil.exe failed to remove the temporary public certificate from the current-user Root store (exit code $LASTEXITCODE)."
-        }
-        Write-Host "Removed the temporary self-signed certificate from this runner's Root store."
-    }
     if ($certificate) {
         $certificate.Dispose()
     }
     Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $certificatePublicPath -Force -ErrorAction SilentlyContinue
 }
