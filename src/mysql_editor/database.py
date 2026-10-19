@@ -94,6 +94,8 @@ class DatabaseWorker(QThread):
         self._connection_id: int | None = None
         # Prevent a stale preview from one connection being edited after a session switch.
         self._session_token = uuid.uuid4().hex
+        # Snapshot each preview row once while an inline edit belongs to an open transaction.
+        self._table_preview_undo: dict[tuple[str, int], list[Any]] = {}
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -282,7 +284,52 @@ class DatabaseWorker(QThread):
                 options["ssl_ca"] = ca_file
         return options
 
-    def _close_connection(self) -> None:
+    def _restore_table_preview_undo(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """Restore local preview snapshots when an uncommitted edit is rolled back."""
+        if not self._table_preview_undo:
+            return [], []
+
+        restored: list[dict[str, Any]] = []
+        errors: list[str] = []
+        try:
+            for (result_id, row_index), baseline in list(self._table_preview_undo.items()):
+                if self._spool is None:
+                    errors.append("The local result cache is unavailable.")
+                else:
+                    cursor = self._spool.execute(
+                        "UPDATE result_rows SET values_json = ? WHERE result_id = ? AND row_idx = ?",
+                        (json.dumps(baseline, ensure_ascii=False), result_id, row_index),
+                    )
+                    if cursor.rowcount != 1:
+                        errors.append(
+                            "A local preview row is no longer cached; re-preview that table before exporting."
+                        )
+                # Restore the UI snapshot even if its disk-backed row has expired.
+                restored.append({
+                    "result_id": result_id,
+                    "row_index": row_index,
+                    "display_row": list(baseline),
+                })
+            if self._spool is not None:
+                self._spool.commit()
+        except Exception as exc:
+            if self._spool is not None:
+                try:
+                    self._spool.rollback()
+                except Exception:
+                    pass
+            return [], [
+                "MySQL rolled back the transaction, but the local preview cache could not be restored: "
+                + safe_db_error(exc)
+            ]
+
+        self._table_preview_undo.clear()
+        return restored, errors
+
+    def _close_connection(self) -> dict[str, Any]:
+        # Closing a connection can implicitly roll back uncommitted cell edits. Keep
+        # the local result cache and the visible table-preview snapshot consistent.
+        preview_rows, preview_errors = self._restore_table_preview_undo()
         with self._lock:
             connection = self._connection
             self._connection = None
@@ -294,6 +341,10 @@ class DatabaseWorker(QThread):
                 connection.close()
             except Exception:
                 pass
+        return {
+            "preview_rollback_rows": preview_rows,
+            "preview_restore_errors": preview_errors,
+        }
 
     def _dispatch(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "connect":
@@ -327,7 +378,15 @@ class DatabaseWorker(QThread):
                 self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
                 self._session_token = uuid.uuid4().hex
+            preview_restore = {"preview_rollback_rows": [], "preview_restore_errors": []}
             if previous is not None and previous is not candidate:
+                # Replacing the session implicitly rolls back a pending transaction on
+                # the previous connection, so restore its preview snapshots as well.
+                restored_rows, restore_errors = self._restore_table_preview_undo()
+                preview_restore = {
+                    "preview_rollback_rows": restored_rows,
+                    "preview_restore_errors": restore_errors,
+                }
                 try:
                     previous.close()
                 except Exception:
@@ -337,6 +396,7 @@ class DatabaseWorker(QThread):
                 "database": str(row[1] or "") if row else "",
                 "current_user": str(row[2] or "") if row else "",
                 "transaction_open": bool(getattr(candidate, "in_transaction", False)),
+                **preview_restore,
             }
         if action == "test":
             import mysql.connector
@@ -353,8 +413,8 @@ class DatabaseWorker(QThread):
             finally:
                 connection.close()
         if action == "disconnect":
-            self._close_connection()
-            return {"ok": True}
+            preview_restore = self._close_connection()
+            return {"ok": True, **preview_restore}
         # Reading already-fetched rows from the local SQLite spool does not require
         # an active MySQL connection and never re-executes the user's SQL.
         if action == "fetch_result_page":
@@ -405,15 +465,24 @@ class DatabaseWorker(QThread):
             )
         if action == "commit":
             self._connection.commit()
+            self._table_preview_undo.clear()
             return {
                 "ok": True, "message": "Transaction committed.",
                 "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
             }
         if action == "rollback":
             self._connection.rollback()
+            preview_rows, preview_errors = self._restore_table_preview_undo()
+            message = "Transaction rolled back."
+            if preview_rows:
+                message += f" Restored {len(preview_rows):,} table-preview row snapshot(s)."
+            if preview_errors:
+                message += " Some local preview snapshots could not be restored; refresh affected previews."
             return {
-                "ok": True, "message": "Transaction rolled back.",
+                "ok": True, "message": message,
                 "transaction_open": bool(getattr(self._connection, "in_transaction", False)),
+                "preview_rollback_rows": preview_rows,
+                "preview_restore_errors": preview_errors,
             }
         if action == "export_csv":
             return self._export_csv(str(payload["result_id"]), str(payload["path"]))
