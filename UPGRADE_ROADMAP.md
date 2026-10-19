@@ -641,6 +641,7 @@ Implemented and regression-tested:
 - Predictable keyboard traversal in the connection and unlock forms; regression tests traverse the controls using Qt keyboard events.
 - Dark/light theme-switch regression coverage that preserves the active SQL tab, SQL buffer, cursor and selection, result filter and fetched rows, connection context, and splitter state.
 - Correct disabled-primary-button styling in both themes, including the disabled-hover state. The tested foreground/background contrast ratios are approximately 5.94:1 in dark mode and 5.78:1 in light mode.
+- [x] Correct generic disabled-control text contrast in the light theme from 4.35:1 to approximately 4.98:1 by using `#5D6B7B` on `#F2F5F9`. The regression test now asserts the actual `QPushButton:disabled` stylesheet rule; selected navigation remains at the already-verified `#056C78` and approximately 4.71:1 contrast.
 - The visual-QA fixture now resolves its synthetic initial schema refresh instead of leaving a stale loading message. The screenshot states it is an offline preview using synthetic rows and does not suggest an active MySQL connection.
 - The native Windows Qt runner generates eight screenshots: dark and light themes at simulated 100%, 125%, 150%, and 200% display scales. The manifest records theme, requested scale, image dimensions, and file size.
 

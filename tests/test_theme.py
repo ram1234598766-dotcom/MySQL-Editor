@@ -248,3 +248,14 @@ def test_focus_indicators_meet_non_text_contrast_in_both_themes():
         ratio = _contrast_ratio(foreground, background)
         assert ratio >= 3.0, f"{state} contrast is only {ratio:.2f}:1"
 
+def test_generic_disabled_control_text_meets_wcag_aa_in_light_theme():
+    light = stylesheet_for_theme("light")
+
+    # Tie the contrast assertion to the actual generic disabled-widget rule.
+    assert (
+        "QPushButton:disabled { color: #5D6B7B; "
+        "background: #F2F5F9; border-color: #D6DEE8;"
+    ) in light
+    ratio = _contrast_ratio("#5D6B7B", "#F2F5F9")
+    assert ratio >= 4.5, f"light disabled-control contrast is only {ratio:.2f}:1"
+
