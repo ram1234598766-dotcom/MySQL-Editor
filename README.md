@@ -58,6 +58,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - Release gating includes lint, compilation and unit/UI tests across Python 3.12–3.14, disposable MySQL integration, dependency audits, Windows UI/launch checks, silent install/uninstall verification, a per-artifact provenance manifest, SBOM/license records, and SHA-256 checksums.
 - Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
+- Optional stable-release checking is disabled by default. When enabled under Settings → Updates, the app checks public GitHub Release metadata at startup and through Help → Check for updates; it never downloads or installs updates automatically.
 
 ## UX and upgrade roadmap
 
@@ -231,6 +232,7 @@ The **Settings** menu groups working preferences by purpose:
 - **Editor → SQL font family:** choose an installed monospace font. The family applies immediately to all open tabs and is remembered for new tabs; font size remains independent.
 - **Editor → Tab width:** choose 2, 4, or 8 spaces. This changes the visual tab stop in all open and new query tabs; it does not rewrite existing SQL text.
 - **Results → Row height:** choose Compact (24 px), Comfortable (28 px), or Spacious (36 px) for the results grid.
+- **Updates:** automatic stable-release checks are off by default. Enabling them authorizes a lightweight public GitHub Releases metadata request at startup. Use Help → Check for updates for an on-demand check after enabling; the app never downloads or installs updates.
 - **Query History:** history is opt-in and stored locally; disabling it clears the saved history. Use Clear query history when needed.
 
 Tab width, font family, and result row height are validated when settings load. Missing or malformed values fall back to 4 spaces, Cascadia Code, and 28 px, respectively. Editor font size remains available under **View** and is persisted separately.
@@ -252,7 +254,7 @@ The **File → Recent SQL files** menu keeps a bounded list of local file paths 
 The master password is an application-session gate local to this PC. It is not a MySQL password, cloud identity, cross-device key, or encryption key for a Windows Credential Manager entry. Windows protects saved credentials under the Windows user account and operating system. Protect your Windows login and use appropriate device-lock and disk-encryption policies for sensitive databases.
 
 ### Network and telemetry
-The app connects directly from this computer to the MySQL host and port selected by the user. This desktop implementation has no hosted account system, mandatory relay service, analytics endpoint, advertisements, or usage telemetry. SQL and credentials are sent to the database server subject to the selected protocol and TLS policy.
+The app connects directly from this computer to the MySQL host and port selected by the user. This desktop implementation has no hosted account system, mandatory relay service, analytics endpoint, advertisements, or usage telemetry. SQL and credentials are sent to the database server subject to the selected protocol and TLS policy. The optional update checker is off by default; when enabled, it requests the public latest stable GitHub Release metadata using the app version in its User-Agent. GitHub receives normal request metadata such as the network IP address. The update request does not include SQL, database connection details, credentials, result rows, or usage history. See PRIVACY_POLICY.md for details.
 
 See **SECURITY.md** and **PRIVACY_POLICY.md** for policy details.
 
