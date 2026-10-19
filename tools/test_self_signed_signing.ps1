@@ -13,11 +13,6 @@ if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw "RUNNER_TEMP must be configured for the signing smoke test."
 }
 
-$smokeSource = Join-Path $env:WINDIR "System32\where.exe"
-if (!(Test-Path -LiteralPath $smokeSource -PathType Leaf)) {
-    throw "A small Windows executable for the signing smoke test was not found: $smokeSource"
-}
-
 $testId = [Guid]::NewGuid().ToString("N")
 $testDirectory = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-smoke-{0}" -f $testId)
 New-Item -ItemType Directory -Path $testDirectory -Force | Out-Null
@@ -28,10 +23,10 @@ $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 $certificate = $null
 
 try {
-    # Check that the product build exists, but sign a small disposable PE executable
-    # to avoid making the CI smoke test depend on the size of the packaged application.
-    Write-Host "Preparing a small disposable executable for signing verification."
-    Copy-Item -LiteralPath $smokeSource -Destination $testTarget
+    # The target must be genuinely unsigned so Get-AuthenticodeSignature returns
+    # the newly applied test signer rather than a pre-existing Microsoft signature.
+    Write-Host "Preparing a minimal unsigned executable for signing verification."
+    & (Join-Path $PSScriptRoot "create_signing_smoke_executable.ps1") -OutputPath $testTarget
 
     Write-Host "Creating a temporary RSA code-signing certificate."
     $certificate = New-SelfSignedCertificate `
