@@ -162,7 +162,7 @@ jobs:
       - name: Validate signing helper scripts parse
         shell: pwsh
         run: |
-          foreach ($scriptPath in @("tools/sign_windows_artifacts.ps1", "tools/test_self_signed_signing.ps1")) {
+          foreach ($scriptPath in @("tools/sign_windows_artifacts.ps1", "tools/test_self_signed_signing.ps1", "tools/create_signing_smoke_executable.ps1")) {
             $tokens = $null
             $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $scriptPath), [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -216,11 +216,10 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD)) {
             throw "The repository signing secrets are unavailable; refusing to report configured-certificate validation."
           }
-          $source = Join-Path $env:WINDIR "System32\where.exe"
           $target = Join-Path $env:RUNNER_TEMP "MySQLEditor-ConfiguredSigningSmoke.exe"
-          Copy-Item -LiteralPath $source -Destination $target -Force
           try {
-            Write-Host "Testing the configured repository certificate against a disposable executable; this branch run cannot publish a release."
+            & "tools/create_signing_smoke_executable.ps1" -OutputPath $target
+            Write-Host "Testing the configured repository certificate against a disposable unsigned executable; this branch run cannot publish a release."
             & "tools/sign_windows_artifacts.ps1" -Targets @($target) -SkipTimestamp
             $signature = Get-AuthenticodeSignature -FilePath $target
             if ($signature.SignatureType -ne "Authenticode" -or $null -eq $signature.SignerCertificate) {
