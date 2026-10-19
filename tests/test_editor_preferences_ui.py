@@ -484,3 +484,90 @@ def test_manual_update_check_is_explicit_opt_in_without_enabling_startup_checks(
         repository.close()
         _APP.processEvents()
 
+def test_close_defers_without_blocking_ui_until_update_thread_finishes(tmp_path, monkeypatch):
+    import mysql_editor.ui.main_window as main_window_module
+
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    callbacks = []
+    monkeypatch.setattr(
+        main_window_module.QTimer,
+        "singleShot",
+        lambda delay, callback: callbacks.append((delay, callback)),
+    )
+
+    class FakeUpdateThread:
+        def __init__(self):
+            self.running = True
+            self.deleted = False
+            self.wait_called = False
+
+        def isRunning(self):
+            return self.running
+
+        def wait(self, *_args, **_kwargs):
+            self.wait_called = True
+            raise AssertionError("close must not synchronously wait for the update thread")
+
+        def deleteLater(self):
+            self.deleted = True
+
+    class CloseEvent:
+        ignored = False
+
+        def ignore(self):
+            self.ignored = True
+
+    repository = LocalRepository(tmp_path / "update-close.sqlite3")
+    worker = StubWorker()
+    profile = {
+        "id": "profile-update-close",
+        "name": "Development",
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+    }
+    config = {
+        "host": "localhost",
+        "port": 3306,
+        "username": "reader",
+        "default_schema": "app_db",
+        "tls_mode": "Automatic TLS",
+    }
+    window = MainWindow(worker, repository, object(), profile, config, {"database": "app_db"})
+    update_thread = FakeUpdateThread()
+    window._update_check_thread = update_thread
+    event = CloseEvent()
+    try:
+        window.closeEvent(event)
+
+        assert event.ignored is True
+        assert update_thread.wait_called is False
+        assert window._close_after_update_check is True
+        assert not window.isEnabled()
+        assert "before closing" in window.status.text()
+
+        update_thread.running = False
+        window._on_update_check_finished()
+
+        assert update_thread.deleted is True
+        assert window._update_check_thread is None
+        assert window._close_after_update_check is False
+        assert window._close_after_update_check_approved is True
+        assert window.isEnabled()
+        close_callbacks = [
+            callback
+            for delay, callback in callbacks
+            if delay == 0
+            and getattr(callback, "__self__", None) is window
+            and getattr(callback, "__name__", "") == "close"
+        ]
+        assert len(close_callbacks) == 1
+    finally:
+        window._close_after_update_check = False
+        window._close_after_update_check_approved = False
+        window._update_check_thread = None
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
