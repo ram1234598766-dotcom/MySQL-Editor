@@ -227,7 +227,7 @@ jobs:
             }
             $actualThumbprint = $signature.SignerCertificate.Thumbprint.Replace(" ", "").ToUpperInvariant()
             if ($actualThumbprint -ne $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT) {
-              throw "The configured PFX does not match the approved certificate fingerprint."
+              throw "Configured PFX thumbprint $actualThumbprint does not match approved thumbprint $env:WINDOWS_SIGNING_EXPECTED_THUMBPRINT."
             }
             Write-Host "Configured self-signed certificate smoke test passed. The disposable executable will not be published."
           } finally {
