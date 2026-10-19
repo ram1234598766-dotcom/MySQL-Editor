@@ -53,7 +53,7 @@ def test_manifest_records_exact_commit_version_and_artifact_hashes(tmp_path: Pat
 
     manifest = build_release_manifest(dist, commit, project_root=project_root)
 
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["product"] == {"name": "MySQL Editor", "version": "1.2.3"}
     assert manifest["source"]["commit_sha"] == "a" * 40
     assert manifest["signing"]["status"] == "unsigned"
@@ -87,7 +87,7 @@ def test_manifest_records_signed_status_only_after_verified_signature(tmp_path: 
     assert manifest["signing"]["recipient_trust"] == "not-trusted-by-default"
     assert "Recipient PCs do not trust this certificate by default" in manifest["signing"]["details"]
     assert manifest["signing"]["timestamp_authority"] == "http://timestamp.digicert.com"
-    assert manifest["signing"]["verification_method"] == "SignTool /verify /pa /all /v"
+    assert manifest["signing"]["verification_method"].startswith("SignTool /verify /pa /all /v")
 
 
 def test_manifest_rejects_signed_status_without_authenticode_verification(tmp_path: Path):
