@@ -144,10 +144,10 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert 'if ($signatureStatus -ne "Valid")' in signing_script
     assert 'signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint' in signing_script
     assert "Import-Certificate" not in signing_script
-    assert "certutil.exe" not in signing_script
-    assert "X509Store" in signing_script
-    assert "$rootStore.Add($publicCertificate)" in signing_script
-    assert "$cleanupStore.Remove($publicCertificate)" in signing_script
+    assert "System32\\certutil.exe" in signing_script
+    assert "X509Store" not in signing_script
+    assert "$certutil -user -f -addstore Root $certificatePublicPath" in signing_script
+    assert "$certutil -user -delstore Root $certificate.Thumbprint" in signing_script
     assert "Removed the temporary self-signed certificate" in signing_script
     assert "& $signTool verify /pa /all /v $target" in signing_script
     assert "Recipient PCs will not trust this self-signed certificate by default." in signing_script
