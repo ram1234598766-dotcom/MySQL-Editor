@@ -2736,7 +2736,7 @@ class MainWindow(QMainWindow):
 
         table_edit = entry["table_edit"]
         key_summary = ", ".join(
-            f"{name}={json_value(value)}"
+            f"{name}={'(NULL)' if value is None else str(value)}"
             for name, value in zip(entry["primary_key_columns"], entry["primary_key_values"], strict=False)
         )
         dialog = EditTableCellDialog(
@@ -3334,6 +3334,9 @@ class MainWindow(QMainWindow):
         return True
 
     def open_connection_dialog(self):
+        if self._cell_edit_pending:
+            self.status.setText("Connection change paused · wait for the cell update to finish.")
+            return
         if self._query_running:
             self._report_query_busy("connection")
             return
@@ -3348,6 +3351,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _switch_connection(self, profile: dict, config: dict, connect_result: dict):
+        if self._cell_edit_pending:
+            self.status.setText("Connection change blocked · the cell update is still finishing.")
+            return
         if self._query_running:
             self._report_query_busy("connection")
             return
@@ -3397,8 +3403,8 @@ class MainWindow(QMainWindow):
     def _sync_connection_controls(self) -> None:
         """Keep database-only controls consistent with connection, query and refresh state."""
         available = self._connection_available and not self._disconnect_pending
-        idle = available and not self._query_running
-        self.connect_button.setEnabled(not self._disconnect_pending)
+        idle = available and not self._query_running and not self._cell_edit_pending
+        self.connect_button.setEnabled(not self._disconnect_pending and not self._cell_edit_pending)
         self.disconnect_button.setEnabled(idle)
         self.run_button.setEnabled(idle)
         self.run_selection_button.setEnabled(idle)
@@ -3406,10 +3412,15 @@ class MainWindow(QMainWindow):
         self.commit_button.setEnabled(idle)
         self.rollback_button.setEnabled(idle)
         self.stop_button.setEnabled(self._query_running)
-        self.schema_refresh_button.setEnabled(available and self._schema_request_id is None)
+        self.schema_refresh_button.setEnabled(
+            available and self._schema_request_id is None and not self._cell_edit_pending
+        )
 
     def disconnect_from_mysql(self) -> None:
         """Queue a session close without blocking the UI or discarding local query work."""
+        if self._cell_edit_pending:
+            self.status.setText("Disconnect paused · wait for the cell update to finish.")
+            return
         if self._query_running:
             self._report_query_busy("connection")
             return
