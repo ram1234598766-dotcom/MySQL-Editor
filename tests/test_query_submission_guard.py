@@ -388,3 +388,50 @@ def test_malformed_delimiter_script_is_rejected_before_queueing_any_query(tmp_pa
     finally:
         window.close()
         repository.close()
+
+def test_late_export_progress_and_completion_cannot_overwrite_newer_query_status(
+    tmp_path, monkeypatch
+):
+    window, repository, _worker = _make_window(tmp_path)
+
+    def unexpected_modal(*_args, **_kwargs):
+        raise AssertionError("export feedback must stay non-modal while preserving query status")
+
+    monkeypatch.setattr(main_window_module.QMessageBox, "information", unexpected_modal)
+    monkeypatch.setattr(main_window_module.QMessageBox, "warning", unexpected_modal)
+    try:
+        export_job = window._dispatch(
+            "export_csv", {"result_id": "result-older", "path": "older-results.csv"}
+        )
+        query_job = window._dispatch("query", {"sql": "SELECT 1;"})
+        assert window._task_sequences[export_job] < window._task_sequences[query_job]
+
+        # Simulate the newer query's completion being handled before a progress or
+        # completion signal that was already queued by the older export.
+        window._on_worker_completed(
+            query_job, "query", {"ok": True, "results": [], "duration_ms": 1}
+        )
+        query_status = window.status.text()
+        assert query_status.startswith("Statement complete")
+
+        window._on_task_activity(export_job, "Exporting CSV rows…")
+        window._on_task_activity(export_job, "Exported 10 CSV row(s) so far…")
+        assert window.status.text() == query_status
+
+        window._on_worker_completed(
+            export_job,
+            "export_csv",
+            {"ok": True, "row_count": 10, "path": "older-results.csv"},
+        )
+
+        assert window.status.text() == query_status
+        assert not window.export_feedback.isHidden()
+        assert "10 row(s)" in window.export_feedback.text()
+        assert "older-results.csv" in window.export_feedback.text()
+        assert export_job not in window._task_sequences
+        assert query_job not in window._task_sequences
+    finally:
+        window._query_running = False
+        window.close()
+        repository.close()
+
