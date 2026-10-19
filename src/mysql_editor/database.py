@@ -1320,11 +1320,11 @@ class DatabaseWorker(QThread):
             display_row = [json_value(value) for value in current_row]
             cursor.close()
             cursor = None
-            self._spool.execute(
+            cache_update = self._spool.execute(
                 "UPDATE result_rows SET values_json = ? WHERE result_id = ? AND row_idx = ?",
                 (json.dumps(display_row, ensure_ascii=False), result_id, row_index),
             )
-            if self._spool.total_changes == 0:
+            if cache_update.rowcount != 1:
                 return {
                     "ok": False,
                     "error": "MySQL accepted the update, but the local preview cache could not be refreshed. Re-preview the table.",
