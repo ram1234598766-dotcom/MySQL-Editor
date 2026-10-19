@@ -32,8 +32,6 @@ if ($certificateType -notin @("self-signed", "trusted")) {
 }
 
 $certificatePath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-{0}.pfx" -f [Guid]::NewGuid().ToString("N"))
-$certificatePublicPath = Join-Path $env:RUNNER_TEMP ("mysql-editor-signing-public-{0}.cer" -f [Guid]::NewGuid().ToString("N"))
-$rootThumbprint = $null
 $certificate = $null
 try {
     Write-Host "Decoding the supplied PFX payload."
@@ -73,23 +71,8 @@ try {
         if (-not [StringComparer]::Ordinal.Equals($certificate.Subject, $certificate.Issuer)) {
             throw "The certificate type is self-signed, but its subject and issuer do not match."
         }
-
-        # SignTool policy verification requires a root of trust. Temporarily add this
-        # certificate only to the hosted runner's CurrentUser\Root store and remove it
-        # in finally. This does not make recipients trust the certificate.
-        [System.IO.File]::WriteAllBytes(
-            $certificatePublicPath,
-            $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-        )
-        $certUtil = Join-Path $env:WINDIR "System32\certutil.exe"
-        Write-Host "Temporarily trusting the self-signed certificate in the hosted runner's current-user root store."
-        & $certUtil -user -f -addstore Root $certificatePublicPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "certutil failed to add the temporary root certificate (exit code $LASTEXITCODE)."
-        }
-        $rootThumbprint = $certificate.Thumbprint
-        Write-Host "Temporary certificate trust installed."
-        Write-Host "Self-signed certificate trust is temporary and local to this runner; recipient PCs will not trust it by default."
+        Write-Host "Self-signed signatures will be checked for Authenticode integrity without adding the certificate to the runner trust store."
+        Write-Host "Recipient PCs will not trust this self-signed certificate by default."
     }
 
     $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
@@ -133,24 +116,32 @@ try {
             throw "SignTool failed to sign $target (exit code $LASTEXITCODE)."
         }
 
-        Write-Host "Verifying Authenticode signature: $target"
-        & $signTool verify /pa /all /v $target
-        if ($LASTEXITCODE -ne 0) {
-            throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
+        if ($certificateType -eq "self-signed") {
+            Write-Host "Verifying Authenticode signature integrity without asserting publisher trust: $target"
+            $signature = Get-AuthenticodeSignature -FilePath $target
+            $signatureStatus = $signature.Status.ToString()
+            if ($signatureStatus -notin @("Valid", "NotTrusted")) {
+                throw "Authenticode signature integrity check failed for $target (status: $signatureStatus)."
+            }
+            if ($null -eq $signature.SignerCertificate -or
+                $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+                throw "The Authenticode signature for $target does not match the configured self-signed certificate."
+            }
+            if ($signatureStatus -eq "NotTrusted") {
+                Write-Host "Signature integrity verified; certificate chain is untrusted by design for this self-signed mode."
+            }
+        } else {
+            Write-Host "Verifying Authenticode signature and certificate trust: $target"
+            & $signTool verify /pa /all /v $target
+            if ($LASTEXITCODE -ne 0) {
+                throw "SignTool failed to verify the Authenticode signature for $target (exit code $LASTEXITCODE)."
+            }
         }
         Write-Host "Signed and verified: $(Split-Path $target -Leaf) (certificate type: $certificateType)"
     }
 } finally {
-    if ($rootThumbprint) {
-        $certUtil = Join-Path $env:WINDIR "System32\certutil.exe"
-        & $certUtil -user -delstore Root $rootThumbprint | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "certutil could not remove the temporary root certificate $rootThumbprint."
-        }
-    }
     if ($certificate) {
         $certificate.Dispose()
     }
     Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $certificatePublicPath -Force -ErrorAction SilentlyContinue
 }
