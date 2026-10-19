@@ -116,7 +116,7 @@ jobs:
         run: python -m pip_audit
       - name: Validate Windows signing configuration
         id: signing-config
-        if: github.event_name != 'pull_request'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}

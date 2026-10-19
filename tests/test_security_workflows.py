@@ -104,7 +104,7 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert '"tools/create_release_manifest.py", "--dist", "dist", "--commit", $env:GITHUB_SHA' in workflow
     assert '"--signing-status", "signed", "--authenticode-verified"' in workflow
     assert "Validate Windows signing configuration" in workflow
-    assert "if: github.event_name != 'pull_request'" in workflow
+    assert "if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))" in workflow
     assert "Sign and verify application executables" in workflow
     assert "Sign and verify Windows installer" in workflow
     app_build_at = workflow.index("Build portable executable")
