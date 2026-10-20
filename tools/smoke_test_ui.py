@@ -275,8 +275,11 @@ def main():
         assert "Choose CSV, JSON array, or newline-delimited JSON." in export_description
         assert RESULT_EXPORT_SEMANTICS in export_description
         assert first.result_filter.toolTip() == (
-            "Filters the visible preview only. " + RESULT_EXPORT_SEMANTICS
+            "Searches all fetched rows for large query results using a disk-backed index; "
+            "smaller results are filtered locally. " + RESULT_EXPORT_SEMANTICS
         )
+        assert "all fetched rows" in first.result_filter.accessibleDescription().lower()
+        assert "exports keep the full original result" in first.result_filter.accessibleDescription().lower()
         assert "fetch order" in first.result_grid.accessibleDescription().lower()
         # CSV's NULL/empty-text convention remains format-specific, rather than
         # misleadingly applying to the new JSON and NDJSON formats.
