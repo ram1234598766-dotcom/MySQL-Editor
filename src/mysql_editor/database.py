@@ -1981,25 +1981,137 @@ class DatabaseWorker(QThread):
         }
 
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
+        """Load a bounded first page, enabling keyset paging only with a primary key."""
         if self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
-        cursor = self._connection.cursor()
+        schema = str(schema or "")
+        table = str(table or "")
+        if not schema or not table:
+            return {"ok": False, "error": "A schema and table name are required for preview."}
+
+        qualified = f"{safe_identifier(schema)}.{safe_identifier(table)}"
+        cursor = None
         try:
-            cursor.execute(f"SELECT * FROM {safe_identifier(schema)}.{safe_identifier(table)} LIMIT 1000")
+            cursor = self._connection.cursor()
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            primary_key_columns = [str(row[0]) for row in cursor.fetchall()]
+
+            cursor.execute(f"SELECT * FROM {qualified} LIMIT 0")
             headers = [str(desc[0]) for desc in (cursor.description or [])]
+            header_index = {name.casefold(): index for index, name in enumerate(headers)}
+            primary_key_indices = [
+                header_index[name.casefold()]
+                for name in primary_key_columns
+                if name.casefold() in header_index
+            ]
+            can_page = (
+                bool(primary_key_columns)
+                and len(primary_key_indices) == len(primary_key_columns)
+                and bool(headers)
+            )
+
+            cursor.execute(f"SELECT COUNT(*) FROM {qualified}")
+            count_row = cursor.fetchone()
+            total_count = max(0, int(count_row[0] or 0)) if count_row else 0
+
+            query = f"SELECT * FROM {qualified}"
+            if can_page:
+                query += " ORDER BY " + ", ".join(
+                    safe_identifier(name) for name in primary_key_columns
+                )
+            page_size = RESULT_PAGE_ROWS
+            query += " LIMIT %s"
+            cursor.execute(query, (page_size,))
+            current_headers = [str(desc[0]) for desc in (cursor.description or [])]
+            if [name.casefold() for name in current_headers] != [
+                name.casefold() for name in headers
+            ]:
+                return {
+                    "ok": False,
+                    "error": "The table structure changed while the preview loaded. Refresh and try again.",
+                }
             raw_rows = [tuple(row) for row in cursor.fetchall()]
+        except Exception as exc:
+            return {"ok": False, "error": safe_db_error(exc)}
         finally:
-            cursor.close()
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+        if len(raw_rows) > total_count or (
+            len(raw_rows) < min(page_size, total_count)
+        ):
+            return {
+                "ok": False,
+                "error": "The table changed while the preview was loading. Refresh the table and try again.",
+            }
 
         rows = [[json_value(value) for value in row] for row in raw_rows]
         result_id = uuid.uuid4().hex
         statement = f"Preview {schema}.{table}"
         self._save_rows(result_id, headers, statement, rows)
+        if self._spool is None:
+            return {"ok": False, "error": "The result cache is no longer available."}
+        # result_meta records the MySQL row count, while only the first bounded page
+        # lives in result_rows until the user scrolls/fetches additional pages.
+        self._spool.execute(
+            "UPDATE result_meta SET row_count=? WHERE result_id=?",
+            (total_count, result_id),
+        )
+        self._spool.commit()
         table_edit = self._table_preview_edit_context(schema, table, headers, raw_rows)
-        return {"ok": True, "results": [{
-            "result_id": result_id, "headers": headers, "rows": rows, "row_count": len(rows),
-            "preview_truncated": False, "kind": "rows", "duration_ms": 0,
+        page_context = {
+            "schema": schema,
+            "table": table,
+            "headers": headers,
+            "primary_key_columns": list(primary_key_columns),
+            "primary_key_indices": list(primary_key_indices),
+            "session_token": self._session_token,
+            "total_count": total_count,
+            "loaded_count": len(raw_rows),
+            "last_key_values": (
+                [raw_rows[-1][index] for index in primary_key_indices]
+                if can_page and raw_rows else None
+            ),
+            "enabled": can_page and total_count > len(raw_rows),
             "table_edit": table_edit,
+        }
+        # Only one schema-preview operation is active per database worker, so keep the
+        # active keyset cursor small; cached row values themselves remain in SQLite.
+        self._table_preview_pages.clear()
+        if page_context["enabled"]:
+            self._table_preview_pages[result_id] = page_context
+        complete = len(raw_rows) >= total_count
+        reason = ""
+        if not can_page and not complete:
+            reason = (
+                "Automatic paging is disabled because MySQL did not provide a verified primary key. "
+                "Use Create SELECT preview to review the rows returned by a custom query."
+            )
+        return {"ok": True, "results": [{
+            "result_id": result_id,
+            "headers": headers,
+            "rows": rows,
+            "row_count": total_count,
+            "preview_truncated": not complete,
+            "kind": "rows",
+            "duration_ms": 0,
+            "table_edit": table_edit,
+            "table_preview_paging": {
+                "enabled": bool(page_context["enabled"]),
+                "page_size": page_size,
+                "row_count": total_count,
+                "cached_rows": len(rows),
+                "complete": complete,
+                "reason": reason,
+            },
         }]}
 
     def _table_preview_edit_context(
