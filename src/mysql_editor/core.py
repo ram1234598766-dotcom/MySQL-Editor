@@ -500,6 +500,20 @@ def format_sql(sql: str) -> str:
     if not source:
         return ""
 
+    # A MySQL-client DELIMITER directive is not server SQL. Refuse to format these
+    # scripts until the formatter can preserve their client-side statement boundaries.
+    masked = _mask_sql_literals_and_comments(source)
+    offset = 0
+    for raw_line in source.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        masked_line = masked[offset:offset + len(line)]
+        if _DELIMITER_PREFIX.match(line) and _DELIMITER_PREFIX.match(masked_line):
+            raise ValueError(
+                "SQL formatting does not yet support MySQL-client DELIMITER directives; "
+                "the editor text was not changed."
+            )
+        offset += len(raw_line)
+
     expressions = _sqlglot_parse(source, read="mysql")
     formatted = [
         expression.sql(dialect="mysql", pretty=True, comments=True)
