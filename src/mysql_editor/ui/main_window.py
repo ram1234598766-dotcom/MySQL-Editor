@@ -2630,6 +2630,140 @@ class MainWindow(QMainWindow):
             )
         self._set_result_message(message)
 
+    def _handle_spool_sort_completed(
+        self, job_id: str, result: dict, context: dict
+    ) -> None:
+        """Install a completed globally sorted view only when its request is still current."""
+        request = self._spool_filter_request
+        view_id = str(result.get("view_id") or "")
+        if request is None or request.get("job_id") != job_id:
+            if view_id:
+                self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            return
+        self._spool_filter_request = None
+        generation = request.get("generation")
+        result_id = str(request.get("result_id") or "")
+        query = str(request.get("query") or "")
+        is_current = (
+            generation == self._filter_generation
+            and result_id == self._current_result_id
+            and query == self.result_filter.text().strip()
+        )
+        item = self._result_item_by_id(result_id)
+        if not is_current or item is None:
+            if view_id:
+                self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            if self._pending_spool_filter is not None:
+                QTimer.singleShot(0, self._dispatch_spool_filter)
+            self._set_result_controls()
+            return
+
+        if not result.get("ok") or not view_id:
+            # Keep the prior view intact if a replacement could not be built. Restore
+            # its committed sort metadata rather than claiming a global sort succeeded.
+            previous_column = request.get("previous_sort_column")
+            previous_descending = request.get("previous_sort_descending")
+            if previous_column is None:
+                item.pop("sort_column", None)
+                item.pop("sort_descending", None)
+            else:
+                item["sort_column"] = previous_column
+                item["sort_descending"] = bool(previous_descending)
+            self.result_model.set_paging_state(
+                pending=False, available=not bool(item.get("page_load_unavailable"))
+            )
+            detail = sanitize_error_message(
+                result.get("error"),
+                fallback="The full local result could not be sorted.",
+            )
+            self.status.setText("Full-result sort failed · the existing view remains available.")
+            self._set_result_message(
+                f"Full-result sort failed: {detail} The current grid view remains available; "
+                "exports keep all original rows in MySQL fetch order."
+            )
+            self._set_result_controls()
+            return
+
+        old_view_id = str(item.get("view_id") or "")
+        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+        headers = item.get("headers", [])
+        rows = [list(row) for row in (result.get("rows") or [])]
+        try:
+            source_total = max(
+                0, int(result.get("source_row_count", item.get("row_count", 0)) or 0)
+            )
+            view_total = max(0, int(result.get("row_count", source_total) or 0))
+            source_offsets = [int(value) for value in (result.get("source_offsets") or [])]
+            sort_column = int(request.get("sort_column", result.get("sort_column", 0)))
+        except (TypeError, ValueError, OverflowError):
+            self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText("Full-result sort returned invalid row metadata.")
+            self._set_result_controls()
+            return
+        if len(source_offsets) != len(rows) or len(rows) > ResultsModel.MAX_RETAINED_ROWS:
+            self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText("Full-result sort returned an invalid result page.")
+            self._set_result_controls()
+            return
+
+        descending = bool(request.get("sort_descending", result.get("sort_descending", False)))
+        item["view_id"] = view_id
+        item["view_query"] = query
+        item["view_row_count"] = view_total
+        item["row_count"] = source_total
+        item["window_start_offset"] = 0
+        item["rows"] = rows
+        item["source_offsets"] = source_offsets
+        item["sort_column"] = sort_column
+        item["sort_descending"] = descending
+        item["preview_truncated"] = view_total > len(rows)
+        item.pop("page_load_unavailable", None)
+        self.result_proxy.setFilterFixedString("")
+        self.result_model.update(
+            headers,
+            rows,
+            base_offset=0,
+            source_offsets=source_offsets,
+            total_rows=view_total,
+        )
+        item["rows"] = self.result_model.rows
+        item["source_offsets"] = list(self.result_model._row_offsets)
+        self.result_model.set_paging_state(
+            total_rows=view_total, pending=False, available=True
+        )
+        self._result_fetched_row_count = source_total
+        column_name = (
+            str(headers[sort_column])
+            if 0 <= sort_column < len(headers) else f"column {sort_column + 1}"
+        )
+        if query:
+            self.query_meta.setText(
+                f"{view_total:,} match(es) · {source_total:,} fetched row(s)"
+            )
+            self._set_spool_filter_message(item)
+        else:
+            direction = "descending" if descending else "ascending"
+            self.query_meta.setText(
+                f"{view_total:,} row(s) sorted by {column_name} ({direction})"
+            )
+            self._set_result_message(
+                result_window_message(item, 0, len(rows), view_total)
+            )
+        start, end, total = self._result_window_bounds(item)
+        self.status.setText(
+            f"Full-result sort ready · {start + 1:,}–{end:,} of {total:,} view row(s); "
+            "source row numbers are preserved and exports remain in original MySQL fetch order."
+        )
+        self._set_result_controls()
+        if old_view_id and old_view_id != view_id:
+            self._dispatch(
+                "drop_result_filter",
+                {"view_id": old_view_id},
+                {"view_id": old_view_id},
+            )
+
     def _handle_spool_filter_completed(
         self, job_id: str, result: dict, context: dict
     ) -> None:
@@ -3045,6 +3179,9 @@ class MainWindow(QMainWindow):
         outcome = None
         if action == "filter_result_spool":
             self._handle_spool_filter_completed(job_id, result, context)
+            return
+        if action == "sort_result_spool":
+            self._handle_spool_sort_completed(job_id, result, context)
             return
         if action == "query":
             if "transaction_open" in result:
