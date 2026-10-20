@@ -3625,16 +3625,22 @@ class MainWindow(QMainWindow):
             item = self._result_item_by_id(result_id)
             try:
                 row_index = int(context.get("row_index", result.get("row_index", -1)))
+                local_row_index = int(
+                    context.get(
+                        "local_row_index",
+                        row_index - int((item or {}).get("window_start_offset", 0) or 0),
+                    )
+                )
                 column_index = int(context.get("column_index", result.get("column_index", -1)))
             except (TypeError, ValueError, OverflowError):
-                row_index = column_index = -1
+                row_index = local_row_index = column_index = -1
             display_row = result.get("display_row")
             raw_row = result.get("raw_row")
             if (
                 item is None
                 or not isinstance(display_row, list)
                 or not isinstance(raw_row, list)
-                or not 0 <= row_index < len(item.get("rows", []))
+                or not 0 <= local_row_index < len(item.get("rows", []))
                 or len(display_row) != len(item.get("headers", []))
                 or len(raw_row) != len(display_row)
                 or not 0 <= column_index < len(display_row)
@@ -3647,25 +3653,27 @@ class MainWindow(QMainWindow):
 
             edit_context = item.get("table_edit") or {}
             original_values = edit_context.get("original_values") or {}
+            # The worker/spool row index is absolute; UI snapshots are relative to the
+            # current bounded window. Rollback uses the former to find the correct row.
             undo_key = (result_id, row_index)
             if self._transaction_open and not result.get("no_change"):
                 if undo_key not in self._pending_table_preview_undo:
                     self._pending_table_preview_undo[undo_key] = {
-                        "display_row": list(item["rows"][row_index]),
+                        "display_row": list(item["rows"][local_row_index]),
                         "original_values": {
-                            str(index): values[row_index]
+                            str(index): values[local_row_index]
                             for index, values in original_values.items()
-                            if isinstance(values, list) and row_index < len(values)
+                            if isinstance(values, list) and local_row_index < len(values)
                         },
                     }
-            item["rows"][row_index] = list(display_row)
+            item["rows"][local_row_index] = list(display_row)
             for index, raw_value in enumerate(raw_row):
                 values_for_column = original_values.get(str(index))
-                if isinstance(values_for_column, list) and row_index < len(values_for_column):
-                    values_for_column[row_index] = raw_value
+                if isinstance(values_for_column, list) and local_row_index < len(values_for_column):
+                    values_for_column[local_row_index] = raw_value
 
             if self._current_result_id == result_id:
-                self.result_model.update_cell_row(row_index, display_row)
+                self.result_model.update_cell_row(local_row_index, display_row)
                 filter_text = self.result_filter.text().strip()
                 if filter_text:
                     self._filter_results(filter_text)
@@ -4422,6 +4430,7 @@ class MainWindow(QMainWindow):
         context = {
             "result_id": result_id,
             "row_index": entry["row_index"],
+            "local_row_index": entry["local_row_index"],
             "column_index": entry["column_index"],
             "schema": str(table_edit.get("schema") or ""),
             "table": str(table_edit.get("table") or ""),
