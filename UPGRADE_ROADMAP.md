@@ -881,7 +881,7 @@ The bounded active-grid window and spool-backed full-result quick-filter portion
 - UI feedback is persistent, non-modal, format-specific, and redacts credential-like error fragments; tests cover format selection, null/empty/Unicode/duplicate headers, fetch-order semantics, success feedback, failure cleanup, and preservation of pre-existing files.
 - README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
 
-**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Full-spool sorting remains subject to CI on the focused implementation branch; the Schema Explorer preview cap remains unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by this change.
+**Acceptance still open:** the streaming XLSX implementation is in branch `feat/streaming-xlsx-export` and must pass its Python 3.12–3.14 matrix, MySQL 8.4 integration, dependency audit, and full Windows packaging/install/uninstall/startup checks before merge. Full-spool sorting remains subject to CI on its focused implementation branch; the Schema Explorer preview cap remains unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by hosted CI.
 
 ### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
 
