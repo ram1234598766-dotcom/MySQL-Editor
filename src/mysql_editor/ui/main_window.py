@@ -1044,16 +1044,18 @@ class MainWindow(QMainWindow):
         theme = normalize_theme(value)
         resolved_theme = resolve_theme(theme)
         self._settings.setValue("ui/theme", theme)
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(stylesheet_for_theme(resolved_theme))
+        # Scope repolishing to this workspace and its child dialogs/menus. Updating
+        # QApplication globally forces Qt to restyle every live top-level widget,
+        # including unrelated/hidden windows; window-local inheritance is sufficient
+        # because application dialogs are parented to this main window.
+        self.setStyleSheet(stylesheet_for_theme(resolved_theme))
         result_model = getattr(self, "result_model", None)
         if result_model is not None:
             result_model.set_theme(resolved_theme)
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
-                # QApplication stylesheet changes can repolish fonts; restore the explicit
+                # A theme stylesheet change can repolish fonts; restore the explicit
                 # SQL editor preferences so appearance switches never reset readability.
                 font = editor.font()
                 font.setFamily(self._editor_font_family)
