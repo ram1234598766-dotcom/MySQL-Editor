@@ -258,32 +258,39 @@ def test_result_model_scroll_request_dispatches_a_spool_page(tmp_path, monkeypat
             {"server_version": "MySQL test", "database": ""},
         )
         result_id = "large-result"
+        rows = [[index] for index in range(2000)]
         window._query_results = [{
             "result_id": result_id,
             "kind": "rows",
             "headers": ["id"],
-            "rows": [[0], [1]],
-            "row_count": 5,
+            "rows": rows,
+            "row_count": 2005,
         }]
         window._current_result_id = result_id
-        window.result_model.update(["id"], [[0], [1]])
-        window.result_model.set_paging_state(total_rows=5)
+        window.result_model.update(["id"], rows)
+        window.result_model.set_paging_state(total_rows=2005)
+        window.resize(1000, 700)
+        window.show()
+        _APP.processEvents()
 
-        # The model signal must route page loading through the worker, not query MySQL
-        # or perform spool I/O on the UI thread.
-        window.result_model.fetchMore(QModelIndex())
+        scrollbar = window.result_grid.verticalScrollBar()
+        assert scrollbar.maximum() > 0
+        # Reaching the end of the visible grid asynchronously asks the worker for
+        # the next spool page. It does not rerun the MySQL query on the UI thread.
+        scrollbar.setValue(scrollbar.maximum())
+        _APP.processEvents()
 
         action, payload, task_id = worker.submissions[-1]
         assert action == "fetch_result_page"
         assert payload == {
             "result_id": result_id,
-            "offset": 2,
+            "offset": 2000,
             "limit": main_window_module.RESULT_PAGE_ROWS,
         }
         assert window._result_page_load_pending == {
             "job_id": task_id,
             "result_id": result_id,
-            "offset": 2,
+            "offset": 2000,
         }
         assert window.result_model.canFetchMore(QModelIndex()) is False
     finally:
