@@ -1,8 +1,10 @@
 import pytest
 
+import mysql_editor.core as core_module
+
 from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source,
-    iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
+    format_sql, iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -363,3 +365,74 @@ def test_sanitize_error_message_bounds_controls_empty_values_and_fallbacks():
     assert sanitize_error_message(None, fallback="") == ""
     assert sanitize_error_message("  \x00  ", fallback="Safe fallback") == "Safe fallback"
 
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_risk"),
+    [
+        (
+            "UPDATE users AS u JOIN flags AS f ON f.user_id = u.id "
+            "SET u.active = 0 WHERE EXISTS "
+            "(SELECT 1 FROM permissions p WHERE p.user_id = u.id)",
+            "medium",
+        ),
+        (
+            "WITH flagged AS (SELECT id FROM users WHERE active = 0) "
+            "UPDATE users SET active = 1",
+            "high",
+        ),
+        (
+            "WITH flagged AS (SELECT id FROM users WHERE active = 0) "
+            "DELETE FROM users WHERE id IN (SELECT id FROM flagged)",
+            "medium",
+        ),
+        (
+            "DELETE FROM users WHERE id IN "
+            "(SELECT user_id FROM user_map WHERE active = 0)",
+            "medium",
+        ),
+    ],
+)
+def test_parser_backed_mutation_advisory_uses_outer_where(sql, expected_risk):
+    assert classify_statement(sql)[0] == expected_risk
+
+
+def test_mutation_advisory_falls_back_when_sqlglot_is_unavailable(monkeypatch):
+    monkeypatch.setattr(core_module, "_sqlglot_parse_one", None)
+
+    assert classify_statement("DELETE FROM users")[0] == "high"
+    assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
+
+
+def test_parseable_mutations_use_sqlglot_ast_before_heuristic_fallback(monkeypatch):
+    parsed_delete = core_module._sqlglot_parse_one("DELETE FROM users", read="mysql")
+    assert isinstance(parsed_delete, core_module.sqlglot_exp.Delete), type(parsed_delete).__name__
+
+    def fail_if_fallback(sql):
+        pytest.fail(f"SQLGlot parsed the mutation, but the heuristic fallback ran: {sql}")
+
+    monkeypatch.setattr(core_module, "_classify_statement_core_heuristic", fail_if_fallback)
+
+    assert classify_statement("DELETE FROM users")[0] == "high"
+    assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
+
+
+def test_sqlglot_formatter_formats_multiple_statements_without_dropping_them():
+    formatted = format_sql("select id,name from users where id=1; select count(*) from orders;")
+
+    assert "SELECT" in formatted
+    assert "FROM users" in formatted
+    assert "COUNT(*)" in formatted
+    assert formatted.count(";") == 2
+    assert "\n\n" in formatted
+
+
+def test_sqlglot_formatter_returns_empty_for_whitespace_only():
+    assert format_sql("  \n\t ") == ""
+
+
+def test_sqlglot_formatter_refuses_delimiter_scripts_without_changing_source():
+    source = "DELIMITER //\nCREATE PROCEDURE demo() BEGIN SELECT 1; END//\nDELIMITER ;"
+
+    with pytest.raises(ValueError, match="DELIMITER directives"):
+        format_sql(source)

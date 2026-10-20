@@ -394,7 +394,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 - Table preview is limited to 1,000 rows. Large query results initially load 2,000 rows; additional rows are loaded in pages from the session spool, while CSV export retains the complete fetched result.
 - Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
 - Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.
-- SQL risk classification is heuristic. It can miss destructive or expensive queries and is not an authorization boundary.
+- SQL risk classification uses SQLGlot's MySQL AST for parseable UPDATE/DELETE outer-WHERE checks and keeps a heuristic fallback for unsupported syntax and executable comments. It can still miss destructive or expensive queries and is not an authorization boundary.
 - Query-history redaction is heuristic and cannot guarantee detection of every secret or sensitive literal.
 - Automatic TLS does not verify server identity; Disabled TLS does not encrypt the connection.
 - Windows Credential Manager behavior, high-DPI appearance, upgrade-in-place, and varied external-server TLS configurations still require real-environment testing.
