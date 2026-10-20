@@ -421,6 +421,9 @@ class MainWindow(QMainWindow):
         self._current_result_id: str | None = None
         self._result_fetched_row_count = 0
         self._result_page_load_pending = None
+        self._filter_generation = 0
+        self._pending_spool_filter: dict | None = None
+        self._spool_filter_request: dict | None = None
         self._result_base_message = "Ready. Run a query to view results."
         self._query_results: list[dict] = []
         self._last_duration = 0
@@ -449,6 +452,10 @@ class MainWindow(QMainWindow):
         self._find_count_timer.setSingleShot(True)
         self._find_count_timer.setInterval(80)
         self._find_count_timer.timeout.connect(self._refresh_find_count)
+        self._filter_debounce_timer = QTimer(self)
+        self._filter_debounce_timer.setSingleShot(True)
+        self._filter_debounce_timer.setInterval(300)
+        self._filter_debounce_timer.timeout.connect(self._dispatch_spool_filter)
         try:
             font_size = int(self._settings.value("ui/editorFontSize", 10))
         except (TypeError, ValueError):
@@ -663,13 +670,19 @@ class MainWindow(QMainWindow):
         self.result_picker.currentIndexChanged.connect(self._select_result)
         self.result_filter = QLineEdit()
         self.result_filter.setObjectName("resultQuickFilter")
-        self.result_filter.setPlaceholderText("Filter visible rows…")
-        self.result_filter.setAccessibleName("Filter result rows")
+        self.result_filter.setPlaceholderText("Filter fetched rows…")
+        self.result_filter.setAccessibleName("Filter fetched result rows")
+        self.result_filter.setAccessibleDescription(
+            "Searches all fetched rows for large query results using the local SQLite result cache. "
+            "The grid stays memory-bounded and exports keep the full original result."
+        )
+        self.result_filter.setMaxLength(256)
         self.result_filter.setClearButtonEnabled(True)
         self.result_filter.setMinimumWidth(150)
         self.result_filter.setMaximumWidth(250)
         self.result_filter.setToolTip(
-            "Filters the visible preview only. " + RESULT_EXPORT_SEMANTICS
+            "Searches all fetched rows for large query results using a disk-backed index; "
+            "smaller results are filtered locally. " + RESULT_EXPORT_SEMANTICS
         )
         self.result_filter.textChanged.connect(self._filter_results)
         self.query_meta = QLabel("Ready")
