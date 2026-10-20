@@ -1559,6 +1559,154 @@ def test_table_preview_stays_read_only_for_views_and_tables_without_primary_keys
             worker._spool_dir.rmdir()
 
 
+def test_table_preview_is_bounded_and_can_load_a_following_keyset_page():
+    rows = [
+        {"id": index, "label": f"row-{index}", "quantity": index % 9}
+        for index in range(1, 1006)
+    ]
+    worker, state, _connection = _editable_preview_worker(rows=rows)
+    try:
+        result = worker._preview_table("analytics", "items")
+        item = result["results"][0]
+        result_id = item["result_id"]
+
+        assert result["ok"] is True
+        assert len(item["rows"]) == RESULT_PAGE_ROWS
+        assert item["row_count"] == RESULT_PAGE_ROWS
+        assert item["preview_truncated"] is True
+        assert item["preview_has_more"] is True
+        assert item["preview_stable_order"] is True
+        assert item["table_preview"] is True
+        assert item["table_edit"]["enabled"] is True
+        assert len(item["table_edit"]["row_keys"]) == RESULT_PAGE_ROWS
+        assert len(item["table_edit"]["original_values"]["1"]) == RESULT_PAGE_ROWS
+        assert "ORDER BY" in state["queries"][1][0] and "LIMIT 1001" in state["queries"][1][0]
+        assert worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == RESULT_PAGE_ROWS
+
+        page = worker._fetch_table_preview_page({
+            "result_id": result_id, "offset": RESULT_PAGE_ROWS,
+            "limit": RESULT_PAGE_ROWS, "direction": "next",
+        })
+
+        assert page["ok"] is True
+        assert page["rows"] == [
+            [index, f"row-{index}", index % 9]
+            for index in range(1001, 1006)
+        ]
+        assert page["source_offsets"] == list(range(1000, 1005))
+        assert page["row_count"] == 1005
+        assert page["loaded_count"] == 1005
+        assert page["has_more"] is False
+        assert page["table_edit"]["enabled"] is True
+        assert page["table_edit"]["row_keys"] == [[index] for index in range(1001, 1006)]
+        assert worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == 1005
+        assert worker._spool.execute(
+            "SELECT row_count FROM result_meta WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == 1005
+        assert state["commits"] == 0
+        assert state["rollbacks"] == 0
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_table_preview_cached_page_revalidates_source_rows_without_duplicate_spool_rows():
+    rows = [
+        {"id": index, "label": f"row-{index}", "quantity": index % 9}
+        for index in range(1, 1006)
+    ]
+    worker, _state, _connection = _editable_preview_worker(rows=rows)
+    try:
+        preview = worker._preview_table("analytics", "items")["results"][0]
+        result_id = preview["result_id"]
+        next_page = worker._fetch_table_preview_page({
+            "result_id": result_id, "offset": 1000, "limit": 1000, "direction": "next",
+        })
+        assert next_page["ok"] is True
+
+        cached_page = worker._fetch_table_preview_page({
+            "result_id": result_id, "offset": 0, "limit": 1000, "direction": "cached",
+        })
+
+        assert cached_page["ok"] is True
+        assert len(cached_page["rows"]) == RESULT_PAGE_ROWS
+        assert cached_page["rows"][0] == [1, "row-1", 1]
+        assert cached_page["table_edit"]["row_keys"][0] == [1]
+        assert worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == 1005
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_table_preview_paging_rejects_changed_primary_key_and_source_rows():
+    rows = [
+        {"id": index, "label": f"row-{index}", "quantity": index % 9}
+        for index in range(1, 1006)
+    ]
+    worker, state, _connection = _editable_preview_worker(rows=rows)
+    try:
+        preview = worker._preview_table("analytics", "items")["results"][0]
+        result_id = preview["result_id"]
+        state["rows"][0]["label"] = "changed outside the cached snapshot"
+
+        cached_page = worker._fetch_table_preview_page({
+            "result_id": result_id, "offset": 0, "limit": 10, "direction": "cached",
+        })
+        assert cached_page["ok"] is False
+        assert "source table changed" in cached_page["error"]
+
+        state["primary_key"] = []
+        next_page = worker._fetch_table_preview_page({
+            "result_id": result_id, "offset": 1000, "limit": 1000, "direction": "next",
+        })
+        assert next_page["ok"] is False
+        assert "primary key changed" in next_page["error"]
+        assert worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == RESULT_PAGE_ROWS
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
+def test_table_preview_without_stable_primary_key_keeps_safe_read_only_cap():
+    rows = [
+        {"id": index, "label": f"row-{index}", "quantity": index % 9}
+        for index in range(1, 1006)
+    ]
+    worker, state, _connection = _editable_preview_worker(primary_key=(), rows=rows)
+    try:
+        result = worker._preview_table("analytics", "items")
+        item = result["results"][0]
+        result_id = item["result_id"]
+
+        assert len(item["rows"]) == RESULT_PAGE_ROWS
+        assert item["preview_truncated"] is True
+        assert item["preview_has_more"] is False
+        assert item["preview_stable_order"] is False
+        assert "primary-key order" in item["preview_limit_reason"]
+        assert item["table_edit"]["enabled"] is False
+        assert "capped at 1,000 rows" in item["table_edit"]["reason"]
+        preview_select = next(query for query, _ in state["queries"] if query.startswith("SELECT * FROM "))
+        assert "ORDER BY" not in preview_select
+        assert worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0] == RESULT_PAGE_ROWS
+    finally:
+        worker._spool.close()
+        worker._spool = None
+        worker._spool_dir.rmdir()
+
+
 def test_single_cell_update_is_parameterized_optimistic_and_leaves_transaction_open():
     worker, state, connection = _editable_preview_worker()
     try:
