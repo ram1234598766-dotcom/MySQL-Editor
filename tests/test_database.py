@@ -259,7 +259,7 @@ def test_structured_exports_preserve_fetch_order_null_empty_unicode_and_duplicat
 
 
 def test_structured_export_failure_preserves_existing_destination_and_cleans_temporary_file(
-    tmp_path, monkeypatch
+    tmp_path
 ):
     import json
 
