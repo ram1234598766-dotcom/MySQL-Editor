@@ -2338,6 +2338,10 @@ class MainWindow(QMainWindow):
         item["window_start_offset"] = window_start
         self._current_result_id = new_result_id
         self.result_model.update(headers, rows, base_offset=window_start)
+        # The selected result and the Qt model share one bounded cache list. Only
+        # the first-page recovery snapshot is retained separately while this result
+        # is active, so browsing does not keep two copies of every loaded page.
+        item["rows"] = self.result_model.rows
         self._size_result_columns(headers, rows)
         try:
             total = max(window_start + len(rows), int(item.get("row_count", window_start + len(rows)) or 0))
@@ -2587,26 +2591,22 @@ class MainWindow(QMainWindow):
                 return
 
             item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-            loaded_rows = item.setdefault("rows", [])
             scrollbar = self.result_grid.verticalScrollBar()
             scroll_before = scrollbar.value()
             page_count = len(page_rows)
 
             if direction == "previous":
-                loaded_rows[0:0] = page_rows
-                item["window_start_offset"] = expected_offset
-                excess = max(0, len(loaded_rows) - self.result_model.MAX_RETAINED_ROWS)
-                if excess:
-                    del loaded_rows[-excess:]
                 evicted = self.result_model.prepend_rows(
                     page_rows,
                     start_offset=expected_offset,
                 )
-                if evicted != excess:
+                if self.result_model.base_offset != expected_offset:
                     item["page_load_unavailable"] = True
                     self.result_model.set_paging_state(pending=False, available=False)
                     self._set_result_controls()
                     return
+                item["rows"] = self.result_model.rows
+                item["window_start_offset"] = self.result_model.base_offset
                 if not self.result_filter.text().strip() and self.result_proxy.sortColumn() < 0:
                     QTimer.singleShot(
                         0,
@@ -2616,26 +2616,17 @@ class MainWindow(QMainWindow):
                     )
                 page_description = "earlier"
             else:
-                loaded_rows.extend(page_rows)
-                excess = max(0, len(loaded_rows) - self.result_model.MAX_RETAINED_ROWS)
-                if excess:
-                    del loaded_rows[:excess]
-                    item["window_start_offset"] = window_start + excess
-                else:
-                    item["window_start_offset"] = window_start
                 evicted = self.result_model.append_rows(page_rows)
-                if evicted != excess:
-                    item["page_load_unavailable"] = True
-                    self.result_model.set_paging_state(pending=False, available=False)
-                    self._set_result_controls()
-                    return
-                if excess:
+                item["rows"] = self.result_model.rows
+                item["window_start_offset"] = self.result_model.base_offset
+                if evicted:
                     QTimer.singleShot(
                         0,
-                        lambda value=max(0, scroll_before - excess): scrollbar.setValue(value),
+                        lambda value=max(0, scroll_before - evicted): scrollbar.setValue(value),
                     )
                 page_description = "additional"
 
+            loaded_rows = item["rows"]
             item["row_count"] = total
             item["preview_truncated"] = (
                 item.get("window_start_offset", 0) > 0
