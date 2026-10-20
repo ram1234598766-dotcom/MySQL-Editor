@@ -321,7 +321,7 @@ Tasks:
 - Refine query lifecycle: queued, running, fetching rows, complete, cancelled, partial failure, export in progress, and failed.
 - Disable only actions that conflict with the actual current operation; preserve navigation and SQL editing when safe.
 - Improve result metadata: row count, visible preview count, elapsed duration, affected rows, warnings, and which script statement produced each result.
-- [x] Keep the quick filter case-insensitive and document that it filters the visible preview while CSV, JSON, and NDJSON exports include the full fetched result set.
+- [x] Keep the quick filter case-insensitive and document that CSV, JSON, and NDJSON exports include the full fetched result set. The focused spool-backed implementation now searches every fetched row for ordinary query results; editable table previews remain window-only.
 - Add clear “no rows”, “no result set”, “filter has no matches”, “query failed”, and “connection lost” states.
 - Add column-width behavior that balances readable values and speed; do not auto-size thousands of cells on every load.
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
@@ -864,10 +864,10 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 
 - [x] The active Qt grid model now uses a 5,000-row bounded window over the existing SQLite result spool. Later and earlier 1,000-row pages evict the opposite edge while retaining absolute spool offsets and absolute vertical row labels. One first-page restore snapshot may remain in memory while that result is actively paged; switching to another result restores the inactive entry to its first page.
 - Schema Explorer table preview remains capped at 1,000 rows. Removing that cap safely requires a separately tested preview paging/data-consistency path that preserves guarded cell-edit semantics and does not fetch an unexpectedly large table into memory.
-- Sorting and quick filtering still operate on the active in-memory window rather than query the full SQLite spool. Full spool-backed sort/filter belongs to the remaining results workstream.
+- [x] Full-result quick filtering for ordinary query results scans the local SQLite spool in the worker, stores matching source offsets in a disk-backed view index, and pages through a bounded match window with original source-row labels. Exports remain tied to the original result ID, source values, and MySQL fetch order. Sorting still operates on the active in-memory window; editable table previews still filter only their loaded window.
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
-This increment closes the bounded active-grid window portion of the results workstream, but not the entire large-results exit gate. Remaining work: spool-backed sort/filter, Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
+The bounded active-grid window and spool-backed full-result quick-filter portions of the results workstream are implemented on this branch. Remaining work: full-spool sorting, Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
@@ -879,7 +879,7 @@ This increment closes the bounded active-grid window portion of the results work
 - UI feedback is persistent, non-modal, format-specific, and redacts credential-like error fragments; tests cover format selection, null/empty/Unicode/duplicate headers, fetch-order semantics, success feedback, failure cleanup, and preservation of pre-existing files.
 - README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
 
-**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Bounded model-row retention, spool-backed filtering/sorting, and the Schema Explorer preview cap are still unresolved. Large-result performance and physical-Windows QA have not been measured by this change.
+**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Full-spool sorting and the Schema Explorer preview cap remain unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by this change.
 
 ### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
 
