@@ -4345,10 +4345,10 @@ class MainWindow(QMainWindow):
         old_values = original_values.get(str(column_index))
         primary_key_columns = table_edit.get("primary_key_columns") or []
         if (
-            not 0 <= row_index < len(row_keys)
-            or not isinstance(old_values, list)
-            or not 0 <= row_index < len(old_values)
-            or len(row_keys[row_index]) != len(primary_key_columns)
+            not isinstance(old_values, list)
+            or not 0 <= display_row_index < len(row_keys)
+            or not 0 <= display_row_index < len(old_values)
+            or len(row_keys[display_row_index]) != len(primary_key_columns)
         ):
             return None
         headers = item.get("headers") or []
