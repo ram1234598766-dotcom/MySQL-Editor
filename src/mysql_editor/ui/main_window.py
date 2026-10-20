@@ -1857,6 +1857,34 @@ class MainWindow(QMainWindow):
                 if isinstance(values, list) and row_index < len(values):
                     values[row_index] = value
 
+    def _sync_result_view_interactions(self, item: dict | None) -> None:
+        """Do not present a partial Schema Explorer page as a fully filterable/sortable table."""
+        paging = item.get("table_preview_paging") if isinstance(item, dict) else None
+        incomplete = isinstance(paging, dict) and not bool(item.get("table_preview_complete", False))
+        self.result_filter.setEnabled(not incomplete)
+        self.result_filter.setPlaceholderText(
+            "Load all table rows to filter…" if incomplete else "Filter fetched rows…"
+        )
+        self.result_filter.setToolTip(
+            "Load all Schema Explorer table-preview pages before filtering the complete table."
+            if incomplete
+            else (
+                "Searches all fetched rows for large query results using a disk-backed index; "
+                "smaller results are filtered locally. " + RESULT_EXPORT_SEMANTICS
+            )
+        )
+        target_sort_enabled = not incomplete
+        if self.result_grid.isSortingEnabled() != target_sort_enabled:
+            header = self.result_grid.horizontalHeader()
+            header.blockSignals(True)
+            try:
+                if incomplete:
+                    self.result_proxy.sort(-1, Qt.SortOrder.AscendingOrder)
+                    header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+                self.result_grid.setSortingEnabled(target_sort_enabled)
+            finally:
+                header.blockSignals(False)
+
     def _set_result_controls(self):
         item = self._result_item_by_id(self._current_result_id)
         preview_incomplete = bool(
@@ -3301,6 +3329,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self._set_result_message(result_summary_message(item, len(rows), source_total))
+        self._sync_result_view_interactions(item)
         self._set_result_controls()
 
     def _on_worker_completed(self, job_id: str, action: str, result: dict):
@@ -3457,6 +3486,7 @@ class MainWindow(QMainWindow):
                 if isinstance(paging, dict) and not preview_item.get("table_preview_complete", False):
                     cached_count = int(paging.get("cached_rows", 0) or 0)
                     total_count = int(paging.get("row_count", preview_item.get("row_count", 0)) or 0)
+                    self.query_meta.setText(f"{cached_count:,} of {total_count:,} table row(s) cached")
                     if paging.get("enabled"):
                         self.status.setText(
                             f"Table preview loaded · {cached_count:,} of {total_count:,} rows cached. "
@@ -3696,6 +3726,7 @@ class MainWindow(QMainWindow):
                         total,
                     )
                 )
+            self._sync_result_view_interactions(item)
             self._set_result_controls()
             if not self._query_running:
                 start, end, _ = self._result_window_bounds(item)
