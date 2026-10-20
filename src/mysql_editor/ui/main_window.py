@@ -1839,19 +1839,29 @@ class MainWindow(QMainWindow):
             and not item.get("view_id")
             and item.get("preview_stable_order")
             and item.get("preview_has_more")
-            and end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+            and (
+                end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+                or (self._connection_available and not self._disconnect_pending)
+            )
         ):
-            self.fetch_more_button.setText("Fetch Next Preview Page")
+            loaded_count = int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+            is_source_page = end >= loaded_count
+            self.fetch_more_button.setText(
+                "Fetch Next Preview Page" if is_source_page else "Verify Cached Preview Rows"
+            )
             self.fetch_more_button.setToolTip(
-                "Read up to 1,000 additional rows from MySQL in primary-key order. "
-                "The preview remains bounded in memory and keeps cell-edit metadata aligned with visible rows."
+                "Read up to 1,000 more rows from MySQL in primary-key order."
+                if is_source_page
+                else "Re-check the next cached page against MySQL before making its cell-edit metadata active."
             )
             self.fetch_more_button.setEnabled(
-                not self._query_running and self._connection_available and not self._disconnect_pending
+                not self._query_running
+                and not self._disconnect_pending
+                and (self._connection_available or not is_source_page)
             )
             if not self._connection_available or self._disconnect_pending:
                 self.fetch_more_button.setToolTip(
-                    "Reconnect to MySQL to fetch additional table-preview rows. Already cached rows remain available."
+                    "Reconnect to MySQL to fetch additional table-preview rows. Already cached rows remain available locally."
                 )
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
