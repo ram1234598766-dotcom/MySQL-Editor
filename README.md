@@ -36,7 +36,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Multiple SQL tabs with unsaved-change markers and a confirmation before discarding modified tabs.
 - SQL syntax highlighting, configurable line numbers and current-line highlighting, tab-width-aware indentation, bracket matching, and a monospace font.
 - A live editor position indicator shows line/column and selected character count; the active connection and unsaved-tab state remain visible.
-- MySQL keyword/function completion plus context-aware schema columns and tables, including comma-separated `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Use **Ctrl+Space** to open completion on demand; completion remains a lightweight aid rather than a full MySQL parser.
+- The SQL editor supports MySQL-aware line comments with **Ctrl+/** on the current line or selected lines, preserving indentation and grouping the toggle as one undo action. MySQL keyword/function completion includes context-aware schema columns and tables, including comma-separated `SELECT`, `GROUP BY`, `ORDER BY`, and `UPDATE ... SET` lists. Use **Ctrl+Space** to open completion on demand; completion remains a lightweight aid rather than a full MySQL parser.
 - SQL formatting, an inline Find/Replace bar with match counts and case-sensitive search, SQL-file open/save, and saved query snippets.
 - Resizable editor/results and workspace/inspector panes. Window geometry, pane sizes, inspector tab, editor font family/size, tab width, line-number visibility, and current-line highlight preference are stored locally.
 - Five-step guided tour with a short, interruptible content transition that respects Reduce Motion; it can insert a sample SELECT into the editor.
@@ -224,6 +224,7 @@ Shortcuts can depend on which widget has focus.
 | **Ctrl+Minus** | Decrease editor font size |
 | **Ctrl+0** | Reset editor font size |
 | **F5** | Refresh schema |
+| **Ctrl+/** | Toggle MySQL line comments on the current line or selected lines in the SQL editor |
 | **F1** | Open the guided tour |
 | **Alt+F4** | Exit the application |
 
@@ -350,7 +351,7 @@ A successful automated run is evidence only for the checks that actually ran. It
 | **src/mysql_editor/core.py** | SQL boundaries, risk advisories, formatting integration, and secret-redaction helpers |
 | **src/mysql_editor/database.py** | Background MySQL worker, query execution, schema inspection, result spool, cancellation request, and streaming CSV/JSON/NDJSON exports |
 | **src/mysql_editor/storage.py** | Local SQLite metadata, history/preferences, Argon2id verifier, Credential Manager adapter |
-| **src/mysql_editor/ui/editor.py** | SQL editor, highlighting, line numbers, indentation, and completion |
+| **src/mysql_editor/ui/editor.py** | SQL editor, MySQL line-comment toggle, highlighting, line numbers, indentation, and completion |
 | **src/mysql_editor/ui/find_replace_bar.py** | Inline literal Find/Replace controls and match counting |
 | **src/mysql_editor/ui/connection_dialog.py** | Connection form, profile selection, test/connect actions, first-run lock setup |
 | **src/mysql_editor/ui/main_window.py** | Workspace navigation, query tabs, cursor status, result grid, schema/history/snippets, transaction controls and export |

@@ -5,6 +5,10 @@
 **Platform:** Windows 10/11 x64  
 **Source and verification:** See `RELEASE-MANIFEST.json` for the exact source commit, package hashes, build metadata, and signing state.
 
+## Unreleased
+
+- **SQL editor line comments:** Press Ctrl+/ to comment or uncomment the current line or selected block with MySQL `-- ` line comments. Indentation and selection are preserved; the edit is a single undo step.
+
 ## What's new in this preview
 
 - **Visual JSON execution plans:** Explain SELECT uses `EXPLAIN FORMAT=JSON` and opens an expandable plan tree with a raw JSON tab and Copy JSON action. It does not execute the original SELECT. Row counts and optimizer costs are estimates.
