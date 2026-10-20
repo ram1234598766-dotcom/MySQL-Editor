@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication, QLabel, QTreeWidgetItem
 
 import mysql_editor.ui.main_window as main_window_module
+import mysql_editor.ui.explain_plan as explain_plan_module
 from mysql_editor.storage import LocalRepository
 from mysql_editor.ui.explain_plan import (
     ExplainPlanDialog,
@@ -268,3 +269,78 @@ def test_explain_failure_is_reported_without_opening_plan_dialog(tmp_path, monke
         window.close()
         repository.close()
         _APP.processEvents()
+
+def _tree_count(item: QTreeWidgetItem) -> int:
+    return 1 + sum(_tree_count(item.child(index)) for index in range(item.childCount()))
+
+
+def test_extract_explain_json_rejects_oversized_and_excessively_nested_payloads(monkeypatch):
+    monkeypatch.setattr(explain_plan_module, "MAX_EXPLAIN_JSON_CHARS", 24)
+    oversized = {
+        "ok": True,
+        "results": [{
+            "kind": "rows",
+            "headers": ["EXPLAIN"],
+            "rows": [['{"query_block":{"select_id":1}}']],
+        }],
+    }
+    with pytest.raises(ExplainPlanError, match="larger than the .*character limit"):
+        extract_explain_json(oversized)
+
+    monkeypatch.setattr(explain_plan_module, "MAX_EXPLAIN_JSON_CHARS", 100_000)
+    deeply_nested = "[" * 1500 + "0" + "]" * 1500
+    nested = {
+        "ok": True,
+        "results": [{
+            "kind": "rows",
+            "headers": ["EXPLAIN"],
+            "rows": [[deeply_nested]],
+        }],
+    }
+    with pytest.raises(ExplainPlanError, match="malformed or excessively nested JSON"):
+        extract_explain_json(nested)
+
+
+def test_explain_tree_enforces_node_budget_for_large_plan(monkeypatch):
+    monkeypatch.setattr(explain_plan_module, "MAX_PLAN_TREE_NODES", 18)
+    plan = {
+        "query_block": {
+            "tables": [
+                {
+                    "table_name": f"table_{index}",
+                    "access_type": "ref",
+                    "rows_examined_per_scan": index + 1,
+                }
+                for index in range(80)
+            ]
+        }
+    }
+    dialog = ExplainPlanDialog(plan)
+
+    try:
+        root = dialog.plan_tree.topLevelItem(0)
+        assert _tree_count(root) <= explain_plan_module.MAX_PLAN_TREE_NODES + 1
+        assert _tree_contains(root, "tree size limit reached")
+        assert "omitted" in dialog.json_view.toPlainText() or len(dialog.raw_json) > 0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_explain_tree_enforces_depth_budget_and_keeps_raw_json(monkeypatch):
+    monkeypatch.setattr(explain_plan_module, "MAX_PLAN_TREE_DEPTH", 4)
+    plan = {"root": {"a": {"b": {"c": {"d": {"e": {"select_id": 1}}}}}}}
+    dialog = ExplainPlanDialog(plan)
+
+    try:
+        root = dialog.plan_tree.topLevelItem(0)
+        assert _tree_contains(root, "maximum plan depth reached")
+        assert json.loads(dialog.json_view.toPlainText()) == plan
+        # The visual tree is bounded; the unmodified JSON remains available in its tab.
+        assert _tree_count(root) < 20
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
