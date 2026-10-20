@@ -402,7 +402,6 @@ def test_next_window_page_dispatch_starts_at_absolute_window_end():
         "job_id": "next-job",
         "result_id": "result-id",
         "offset": 7_500,
-        "direction": "next",
     }
     assert window.result_model.paging == [{"pending": True}]
     assert window.controls_updated == 1
