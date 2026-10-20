@@ -16,7 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
-from mysql_editor.core import ScriptParseError, redact_sql_secrets, safe_identifier, sanitize_error_message, split_sql_statements
+from mysql_editor.core import ScriptParseError, safe_identifier, sanitize_error_message, split_sql_statements
 
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
