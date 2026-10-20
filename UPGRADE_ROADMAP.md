@@ -59,7 +59,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 
 ### Current product limitations that should inform the plan
 
-- SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
+- SQL completion remains an editing aid, not a full semantic engine. It now resolves nested aliases and correlated outer scopes using a conservative lexical scope finder, but it does not fully resolve every join scope, column type, or MySQL semantic context.
 - The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
 - Query results initially load up to 2,000 rows; additional pages are read from the local result spool on demand. Table preview remains capped at 1,000 rows. CSV, JSON, and NDJSON export read the full fetched result spool in server-fetch order; the visible grid sort/filter does not reduce exported rows.
 - Query cancellation is best-effort and depends on server permissions/state.
@@ -327,7 +327,8 @@ Tasks:
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
 - [x] Add guarded single-cell editing for verified Schema Explorer base-table previews: exclude primary keys/generated and unsupported types; require a transactional engine; parameterize writes; re-read and lock the row to reject stale changes; do not auto-commit; restore edited rows in the local cache after full rollback.
 - [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and result export of invalidated previews until re-preview.
-- Ensure result sorting does not reorder the underlying result spool. CSV, JSON, and NDJSON exports preserve server-fetch order rather than the current sorted-grid order, and quick filtering never reduces the exported row set.
+- [x] Add bounded Schema Explorer preview paging for tables with a verified primary-key order. The worker fetches sequential 1,000-row keyset pages, validates connection/session and source metadata, verifies cached rows before making their edit metadata active, and keeps results in the local spool. Views and tables without a verified primary key remain read-only and capped at 1,000 rows rather than being paged in an unstable order.
+- [x] Sort the full fetched result through a disk-backed global row-order index without reordering the underlying spool. CSV, JSON, NDJSON, and XLSX exports preserve original MySQL fetch order rather than the current sorted-grid order; quick filtering does not reduce the exported row set.
 - [x] Add JSON-array and NDJSON export alongside CSV without adding a runtime dependency; tests cover type preservation, duplicate column labels, fetch order, and atomic-failure cleanup.
 - [x] Implement XLSX export using XlsxWriter `constant_memory` mode and sequential row writes. XlsxWriter is declared in `requirements.txt` and `pyproject.toml`; export disables string-to-formula, string-to-URL, and string-to-number conversion, writes text explicitly as literal strings, preserves existing destinations through same-directory temporary files and atomic replacement, and rolls over to numbered worksheets at the Excel row limit. The dependency uses BSD-2-Clause. Regression coverage verifies spool/fetch order, formula and hyperlink safety, NULL/empty limitations, long-cell rejection, numbered-sheet rollover, malformed-spool failures, and preservation of existing workbooks.
 - [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
@@ -861,15 +862,15 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 - Regression tests cover one-page-at-a-time behavior, duplicate suppression while a page is pending, incremental row insertion without a model reset, child-index/failure states, proxy-model forwarding, and the scroll-to-end worker-dispatch path.
 - README and release notes explain the automatic paging behavior and the existing manual fallback.
 
-**Acceptance still open; do not describe WS4 as complete:**
+**Acceptance status:** automated result-grid and export behaviors below are implemented; large-dataset physical-PC performance and aggregate memory still require measurement.
 
 - [x] The active Qt grid model now uses a 5,000-row bounded window over the existing SQLite result spool. Later and earlier 1,000-row pages evict the opposite edge while retaining absolute spool offsets and absolute vertical row labels. One first-page restore snapshot may remain in memory while that result is actively paged; switching to another result restores the inactive entry to its first page.
-- Schema Explorer table preview remains capped at 1,000 rows. Removing that cap safely requires a separately tested preview paging/data-consistency path that preserves guarded cell-edit semantics and does not fetch an unexpectedly large table into memory.
+- [x] Schema Explorer previews can fetch subsequent bounded pages for tables with a verified primary-key order while preserving source offsets, row-cache consistency, and guarded-edit metadata. A missing/unknown primary key intentionally retains a read-only 1,000-row cap; it is not safe to promise deterministic paging for those objects.
 - [x] Full-result quick filtering for ordinary query results scans the local SQLite spool in the worker, stores matching source offsets in a disk-backed view index, and pages through a bounded match window with original source-row labels. Exports remain tied to the original result ID, source values, and MySQL fetch order. Editable table previews still filter only their loaded window.
-- Full-spool sorting is implemented in branch `feat/spool-backed-result-sort` and is pending CI validation. It uses a disk-backed sort-key table, batch processing, numeric-aware comparison, `NULL`-last ordering, original source-row labels, and filter/sort composition. Do not mark this task complete until the Python matrices, MySQL integration, security audit, and full Windows packaging workflow pass.
+- [x] Full-spool sorting is merged to `main` in [commit `4f371c8`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/4f371c85a0589567cdc02de4ec6ead0059c172e3). It uses a disk-backed sort-key table, batch processing, numeric-aware comparison, `NULL`-last ordering, original source-row labels, and filter/sort composition; regression coverage includes combined sorting/filtering and preservation of export fetch order.
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
-The bounded active-grid window and spool-backed full-result quick-filter portions of the results workstream are implemented on main. Full-spool sorting is under validation in `feat/spool-backed-result-sort`; once the exact branch passes CI and is merged, the remaining tasks are Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
+The bounded 5,000-row active grid, spool-backed full-result filtering, disk-backed full-spool sorting, stable-primary-key Schema Explorer paging, and streaming XLSX/JSON/NDJSON/CSV exports are implemented on `main`. Table-preview paging intentionally remains unavailable for views and tables without a verified primary key. Remaining Phase 5 acceptance items are the aggregate-memory review across many simultaneous result sets, measured one-million-row responsiveness on physical Windows, and the manual Windows release-acceptance checklist.
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
@@ -881,7 +882,7 @@ The bounded active-grid window and spool-backed full-result quick-filter portion
 - UI feedback is persistent, non-modal, format-specific, and redacts credential-like error fragments; tests cover format selection, null/empty/Unicode/duplicate headers, fetch-order semantics, success feedback, failure cleanup, and preservation of pre-existing files.
 - README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
 
-**Acceptance still open:** the streaming XLSX implementation is in branch `feat/streaming-xlsx-export` and must pass its Python 3.12–3.14 matrix, MySQL 8.4 integration, dependency audit, and full Windows packaging/install/uninstall/startup checks before merge. Full-spool sorting remains subject to CI on its focused implementation branch; the Schema Explorer preview cap remains unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by hosted CI.
+**Merged status:** Streaming XLSX export is merged to `main` in [commit `6e406e6`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/6e406e61d651f8a94675a2a7eb909624fea89695) via PR #88 after the Python 3.12–3.14 matrix, MySQL 8.4 integration, dependency audit, and complete Windows packaging/install/uninstall/startup workflow passed on its exact PR head. The XLSX export remains in the unreleased code until a later public release is published. Full-spool sorting and stable-primary-key table-preview paging are also merged and have regression coverage. Aggregate memory across multiple cached results, one-million-row responsiveness on physical Windows, and hands-on Windows acceptance remain unmeasured and open.
 
 ### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
 
@@ -891,10 +892,22 @@ Regression tests cover current-line comment/uncomment, selected multi-line block
 
 ### Phase 3 follow-up — nested SQL completion scopes — 20 October 2026
 
-**Status: implementation in branch `feat/scoped-sql-completion`; CI validation pending.**
+**Status: merged to `main` in [commit `470649c`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/470649cb8a0c3fc48ca28e3b9a787d2824a0b7a7); required CI passed.** [Desktop CI #516](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432952017), [dependency security #585](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432952353), and [Windows packages #397](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432951953) completed successfully.
 
 - Qualified alias completion now scans the innermost balanced `SELECT`/`WITH`/`VALUES` query scope first. A local alias shadows an identically named alias in an outer query.
 - If no local alias matches, qualified-column completion checks enclosing query scopes so correlated outer aliases remain available.
 - Unqualified column suggestions aggregate metadata from the active scope and visible enclosing scopes, but hide nested query bodies while scanning a parent. Columns from sibling subqueries therefore cannot leak into the current suggestion list.
 - The change uses a conservative lexical scope finder on top of existing comment/string masking; it does not claim full MySQL grammar coverage or type-level semantic analysis.
-- Added regressions for nested alias shadowing, correlated outer alias resolution, and exclusion of sibling-subquery columns. Validation of these tests and all packaging gates is pending the focused PR.
+- Regression coverage for nested alias shadowing, correlated outer-alias resolution, and exclusion of sibling-subquery columns passed in the merged implementation's Python test matrix and full Windows package workflow.
+
+### Runtime theme repaint reliability follow-up — 20 October 2026
+
+**Status: merged and verified.** PR #89 is merged as [commit `883d6f3`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/883d6f301a8ad308cd2bea165ba9e5ad5727d021). It addresses a reproducible Linux/Python 3.12 Qt segmentation fault that occurred when changing the theme through the application-wide `QApplication.setStyleSheet()` path. Runtime theme changes now apply to the main window/subtree instead of repolishing all top-level application widgets. The regression test verifies the global application stylesheet stays unchanged and still checks editor contents/selection, tabs, result rows/filter, splitter state, connection labels, and explicit font preferences.
+
+The exact post-merge main workflows passed:
+- [Desktop CI #523](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446511147) — PASS; Python 3.12/3.13/3.14 matrices, Qt UI smoke, and MySQL 8.4 integration passed, including the previously crashing Python 3.12 Linux unit suite.
+- [Dependency security #592](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446508587) — PASS.
+- [Windows packages #404](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446507664) — PASS, all 28 build steps. It built the application-folder EXE and portable EXE, passed the signing smoke test, built and exercised the installer, validated package startup and expected files, generated the SBOM/provenance/checksums, and uploaded `MySQLEditor-Windows` and `MySQLEditor-UI-Visual-QA` artifacts. The publication job was skipped as expected; this did not publish a new release or sign preview binaries.
+
+These hosted checks do not close Phase 8 manual acceptance: target-machine DPI/rendering, keyboard-only interaction, screen-reader behavior, real Credential Manager state, external MySQL/TLS environment, and measured one-million-row responsiveness still require physical Windows validation.
+
