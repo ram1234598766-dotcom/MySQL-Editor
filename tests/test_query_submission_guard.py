@@ -5,7 +5,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication
 
 import mysql_editor.ui.main_window as main_window_module
@@ -613,6 +613,184 @@ def test_programmatic_long_filter_is_clamped_to_the_visible_256_character_limit(
         assert window._pending_spool_filter is not None
         assert window._pending_spool_filter["query"] == window.result_filter.text()
         assert len(window._pending_spool_filter["query"]) == 256
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+def test_spool_backed_global_sort_dispatches_and_keeps_absolute_source_rows(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "global-sort-result",
+        "kind": "rows",
+        "headers": ["name", "score"],
+        "rows": [["old-window-first", 2], ["old-window-second", 1]],
+        "row_count": 8,
+        "preview_truncated": True,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=8)
+    window._result_fetched_row_count = 8
+    try:
+        window._on_result_sort_indicator_changed(1, Qt.SortOrder.DescendingOrder)
+        window._filter_debounce_timer.stop()
+
+        pending = dict(window._pending_spool_filter)
+        assert pending["operation"] == "sort"
+        assert pending["sort_column"] == 1
+        assert pending["sort_descending"] is True
+        assert pending["result_id"] == item["result_id"]
+
+        window._dispatch_spool_filter()
+        action, payload, job_id = worker.submissions[-1]
+        assert action == "sort_result_spool"
+        assert payload == {
+            "result_id": item["result_id"],
+            "column": 1,
+            "descending": True,
+            "base_view_id": None,
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+        assert window._spool_filter_request["job_id"] == job_id
+
+        window._on_worker_completed(
+            job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "global-desc-score",
+                "query": "",
+                "offset": 0,
+                "rows": [["highest", 99], ["next", 90]],
+                "source_offsets": [6, 2],
+                "row_count": 8,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": True,
+                "sort_column": 1,
+                "sort_descending": True,
+            },
+        )
+
+        assert item["view_id"] == "global-desc-score"
+        assert item["sort_column"] == 1
+        assert item["sort_descending"] is True
+        assert item["row_count"] == 8
+        assert item["view_row_count"] == 8
+        assert window.result_model.rows == [["highest", 99], ["next", 90]]
+        assert window.result_model.absolute_row_index(0) == 6
+        assert window.result_model.absolute_row_index(1) == 2
+        assert window.result_model.total_rows == 8
+        assert window._result_fetched_row_count == 8
+        assert worker.submissions[-1][0] == "sort_result_spool"
+        assert "original MySQL fetch order" in window.status.text()
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_full_result_filter_carries_global_sort_and_paging_context(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "filter-sort-result",
+        "kind": "rows",
+        "headers": ["name", "score"],
+        "rows": [["preview alpha", 1], ["preview beta", 2]],
+        "row_count": 8,
+        "preview_truncated": True,
+        "sort_column": 1,
+        "sort_descending": True,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=8)
+    try:
+        window.result_filter.setText("alpha")
+        window._filter_debounce_timer.stop()
+        window._dispatch_spool_filter()
+
+        action, payload, job_id = worker.submissions[-1]
+        assert action == "filter_result_spool"
+        assert payload["query"] == "alpha"
+        assert payload["sort_column"] == 1
+        assert payload["sort_descending"] is True
+
+        window._on_worker_completed(
+            job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "filtered-desc-score",
+                "query": "alpha",
+                "offset": 0,
+                "rows": [["Alpha high", 95], ["alphabet middle", 60]],
+                "source_offsets": [6, 3],
+                "row_count": 3,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": True,
+                "sort_column": 1,
+                "sort_descending": True,
+            },
+        )
+
+        assert item["view_id"] == "filtered-desc-score"
+        assert item["view_query"] == "alpha"
+        assert item["sort_column"] == 1
+        assert item["sort_descending"] is True
+        assert item["row_count"] == 8
+        assert item["view_row_count"] == 3
+        assert item["source_offsets"] == [6, 3]
+        assert window.result_model.rows == [["Alpha high", 95], ["alphabet middle", 60]]
+        assert window._result_fetched_row_count == 8
+        assert "exports still include all 8" in window.result_message.text()
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_sorting_an_existing_filtered_view_sorts_that_view_not_the_source_query(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "filtered-sort-result",
+        "kind": "rows",
+        "headers": ["name", "score"],
+        "rows": [["Alpha", 1], ["alphabet", 2]],
+        "initial_rows": [["Alpha", 1], ["beta", 9], ["alphabet", 2], ["other", 6]],
+        "row_count": 8,
+        "view_id": "active-alpha-view",
+        "view_query": "alpha",
+        "view_row_count": 3,
+        "source_offsets": [0, 2],
+        "window_start_offset": 0,
+        "sort_column": 0,
+        "sort_descending": False,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], source_offsets=[0, 2], total_rows=3)
+    window._result_fetched_row_count = 8
+    try:
+        window.result_filter.setText("alpha")
+        window._on_result_sort_indicator_changed(1, Qt.SortOrder.DescendingOrder)
+        window._filter_debounce_timer.stop()
+        window._dispatch_spool_filter()
+
+        action, payload, _job_id = worker.submissions[-1]
+        assert action == "sort_result_spool"
+        assert payload["base_view_id"] == "active-alpha-view"
+        assert payload["result_id"] == item["result_id"]
+        assert payload["column"] == 1
+        assert payload["descending"] is True
+        assert payload["query"] if False else True
     finally:
         window._filter_debounce_timer.stop()
         window.close()
