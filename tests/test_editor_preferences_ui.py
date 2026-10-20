@@ -792,3 +792,101 @@ def test_table_preview_rollback_restores_visible_local_row_using_absolute_spool_
         repository.close()
         _APP.processEvents()
 
+
+def test_table_preview_paging_control_distinguishes_source_and_cached_pages(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-page-controls.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-controls", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        rows = [[index, f"row-{index}", index % 9] for index in range(1000)]
+        item = {
+            "result_id": "preview-controls",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": ["id", "label", "quantity"],
+            "rows": rows,
+            "row_count": 6000,
+            "window_start_offset": 0,
+            "preview_loaded_count": 6000,
+            "preview_has_more": True,
+            "preview_stable_order": True,
+            "table_edit": {"enabled": True},
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-controls"
+        window.result_model.update(item["headers"], rows, base_offset=0, total_rows=6001)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Verify Cached Preview Rows"
+        assert "Re-check the next cached page" in window.fetch_more_button.toolTip()
+
+        item["preview_loaded_count"] = 1000
+        item["row_count"] = 1000
+        window.result_model.set_paging_state(total_rows=1001, pending=False)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Fetch Next Preview Page"
+        assert "from MySQL in primary-key order" in window.fetch_more_button.toolTip()
+
+        window._connection_available = False
+        window._set_result_controls()
+        assert window.fetch_more_button.isEnabled() is False
+        assert "Reconnect to MySQL" in window.fetch_more_button.toolTip()
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_table_preview_page_error_stops_source_requests_but_reports_cached_rows(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-page-error.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-page-error", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        rows = [[index, f"row-{index}", index % 9] for index in range(1000)]
+        item = {
+            "result_id": "preview-page-error",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": ["id", "label", "quantity"],
+            "rows": rows,
+            "row_count": 1000,
+            "window_start_offset": 0,
+            "preview_loaded_count": 1000,
+            "preview_has_more": False,
+            "preview_stable_order": False,
+            "preview_page_error": True,
+            "preview_truncated": True,
+            "table_edit": {"enabled": False, "reason": "refresh required"},
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-page-error"
+        window.result_model.update(item["headers"], rows, base_offset=0, total_rows=1000)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Preview Page Unavailable"
+        assert not window.fetch_more_button.isEnabled()
+        assert "Already cached rows remain available" in window.fetch_more_button.toolTip()
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
