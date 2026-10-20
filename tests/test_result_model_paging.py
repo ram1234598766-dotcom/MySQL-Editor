@@ -179,3 +179,26 @@ def test_result_model_previous_page_signal_is_single_flight_and_offset_aware():
         model.deleteLater()
         _APP.processEvents()
 
+def test_proxy_vertical_headers_keep_absolute_row_numbers_after_sorting():
+    model = ResultsModel(headers=["id"], rows=[[9], [1], [5]])
+    model.update(["id"], [[9], [1], [5]], base_offset=500)
+    model.set_paging_state(total_rows=2_000)
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(model)
+
+    try:
+        proxy.sort(0, Qt.SortOrder.AscendingOrder)
+        assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == ["1", "5", "9"]
+        assert [proxy.headerData(row, Qt.Orientation.Vertical) for row in range(proxy.rowCount())] == [
+            "502", "503", "501",
+        ]
+        # A partial source window must not be sorted in place, because page
+        # offsets must continue to address the original fetch order in SQLite.
+        assert [row[0] for row in model.rows] == [9, 1, 5]
+        assert model.base_offset == 500
+    finally:
+        proxy.setSourceModel(None)
+        proxy.deleteLater()
+        model.deleteLater()
+        _APP.processEvents()
+
