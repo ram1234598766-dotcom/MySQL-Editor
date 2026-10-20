@@ -2114,3 +2114,121 @@ def test_prepare_result_filter_streams_large_spool_and_reports_progress():
         assert any("scanned 10,000" in message for message in worker.activities)
     finally:
         spool.close()
+
+def test_prepare_result_sort_is_numeric_aware_stable_and_keeps_nulls_last():
+    rows = [["10"], ["2"], ["Alpha"], [None], ["alpha"], ["-1"], ["2.0"]]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        ascending = DatabaseWorker._prepare_result_sort(
+            worker, result_id, 0, False, limit=3
+        )
+        assert ascending["ok"] is True
+        assert ascending["rows"] == [["-1"], ["2"], ["2.0"]]
+        assert ascending["source_offsets"] == [5, 1, 6]
+        assert ascending["row_count"] == len(rows)
+        assert ascending["source_row_count"] == len(rows)
+        assert ascending["has_more"] is True
+
+        page_two = DatabaseWorker._fetch_result_page(
+            worker, result_id, offset=3, limit=3, view_id=ascending["view_id"]
+        )
+        assert page_two["ok"] is True
+        assert page_two["rows"] == [["10"], ["Alpha"], ["alpha"]]
+        assert page_two["source_offsets"] == [0, 2, 4]
+
+        page_three = DatabaseWorker._fetch_result_page(
+            worker, result_id, offset=6, limit=3, view_id=ascending["view_id"]
+        )
+        assert page_three["ok"] is True
+        assert page_three["rows"] == [[None]]
+        assert page_three["source_offsets"] == [3]
+        assert page_three["has_more"] is False
+
+        descending = DatabaseWorker._prepare_result_sort(
+            worker, result_id, 0, True, limit=10
+        )
+        assert descending["ok"] is True
+        assert descending["rows"] == [
+            ["Alpha"], ["alpha"], ["10"], ["2"], ["2.0"], ["-1"], [None]
+        ]
+        assert descending["source_offsets"] == [2, 4, 0, 1, 6, 5, 3]
+
+        # The visible sort must never mutate fetch-order rows used by CSV/JSON export.
+        fetched = spool.execute(
+            "SELECT row_idx, values_json FROM result_rows WHERE result_id=? ORDER BY row_idx",
+            (result_id,),
+        ).fetchall()
+        assert [json.loads(value_json) for _row_idx, value_json in fetched] == rows
+    finally:
+        spool.close()
+
+
+def test_prepare_result_sort_composes_with_filtered_view_and_preserves_source_offsets():
+    rows = [
+        ["Alpha", 5],
+        ["beta", 9],
+        ["alphabet", 2],
+        ["ALPHA", 1],
+        ["other", 6],
+    ]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        filtered = DatabaseWorker._prepare_result_filter(
+            worker, result_id, "alpha", limit=10
+        )
+        assert filtered["ok"] is True
+        assert filtered["source_offsets"] == [0, 2, 3]
+
+        sorted_view = DatabaseWorker._prepare_result_sort(
+            worker,
+            result_id,
+            1,
+            True,
+            limit=2,
+            base_view_id=filtered["view_id"],
+        )
+        assert sorted_view["ok"] is True
+        assert sorted_view["query"] == "alpha"
+        assert sorted_view["row_count"] == 3
+        assert sorted_view["source_row_count"] == len(rows)
+        assert sorted_view["rows"] == [["Alpha", 5], ["alphabet", 2]]
+        assert sorted_view["source_offsets"] == [0, 2]
+        assert sorted_view["has_more"] is True
+
+        next_page = DatabaseWorker._fetch_result_page(
+            worker,
+            result_id,
+            offset=2,
+            limit=2,
+            view_id=sorted_view["view_id"],
+        )
+        assert next_page["ok"] is True
+        assert next_page["rows"] == [["ALPHA", 1]]
+        assert next_page["source_offsets"] == [3]
+        assert next_page["has_more"] is False
+
+        assert DatabaseWorker._drop_result_filter(worker, sorted_view["view_id"])["ok"]
+        assert DatabaseWorker._drop_result_filter(worker, filtered["view_id"])["ok"]
+    finally:
+        spool.close()
+
+
+def test_prepare_result_sort_rejects_invalid_column_and_expired_base_view():
+    rows = [["one", 1], ["two", 2]]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        invalid = DatabaseWorker._prepare_result_sort(worker, result_id, 99)
+        assert invalid["ok"] is False
+        assert "sort column is invalid" in invalid["error"]
+
+        expired = DatabaseWorker._prepare_result_sort(
+            worker, result_id, 1, base_view_id="does-not-exist"
+        )
+        assert expired["ok"] is False
+        assert "expired" in expired["error"].casefold()
+    finally:
+        spool.close()
+
