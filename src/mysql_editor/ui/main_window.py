@@ -1814,6 +1814,7 @@ class MainWindow(QMainWindow):
             item
             and item.get("table_preview")
             and not item.get("view_id")
+            and item.get("preview_stable_order")
             and item.get("preview_has_more")
             and end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
         ):
@@ -1822,7 +1823,13 @@ class MainWindow(QMainWindow):
                 "Read up to 1,000 additional rows from MySQL in primary-key order. "
                 "The preview remains bounded in memory and keeps cell-edit metadata aligned with visible rows."
             )
-            self.fetch_more_button.setEnabled(not self._query_running)
+            self.fetch_more_button.setEnabled(
+                not self._query_running and self._connection_available and not self._disconnect_pending
+            )
+            if not self._connection_available or self._disconnect_pending:
+                self.fetch_more_button.setToolTip(
+                    "Reconnect to MySQL to fetch additional table-preview rows. Already cached rows remain available."
+                )
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
@@ -1892,6 +1899,18 @@ class MainWindow(QMainWindow):
         if item.get("page_load_unavailable"):
             self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
+            return
+
+        loaded_preview_count = max(
+            0, int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+        )
+        if (
+            item.get("table_preview")
+            and item.get("preview_has_more")
+            and offset >= loaded_preview_count
+            and (not self._connection_available or self._disconnect_pending)
+        ):
+            self.status.setText("Reconnect to MySQL to fetch another table-preview page.")
             return
 
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
@@ -3213,6 +3232,8 @@ class MainWindow(QMainWindow):
             )
         except (TypeError, ValueError, OverflowError):
             window_total = window_start + len(rows)
+        if item.get("table_preview") and item.get("preview_has_more") and not is_filtered_view:
+            window_total = max(window_total, source_total + 1)
         self._current_result_id = new_result_id
         self.result_model.update(
             headers,
