@@ -3510,6 +3510,16 @@ class MainWindow(QMainWindow):
 
             if not result.get("ok"):
                 item["page_load_unavailable"] = True
+                if isinstance(item.get("table_preview_paging"), dict):
+                    # A revalidated keyset page can expose external table changes after
+                    # the original count. Do not allow export/edit against that stale view.
+                    item["export_unavailable"] = True
+                    edit_context = item.get("table_edit")
+                    if isinstance(edit_context, dict):
+                        edit_context["enabled"] = False
+                        edit_context["reason"] = (
+                            "The table preview changed or could not be revalidated. Refresh before editing or exporting."
+                        )
                 self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     detail = sanitize_error_message(
@@ -3630,6 +3640,26 @@ class MainWindow(QMainWindow):
                     )
                 page_description = "additional"
 
+            if result.get("table_preview_page") and isinstance(item.get("table_preview_paging"), dict):
+                page_data = result.get("table_edit_page")
+                edit_context = item.get("table_edit")
+                if isinstance(edit_context, dict) and edit_context.get("enabled"):
+                    if isinstance(page_data, dict):
+                        self._sync_table_edit_page_metadata(
+                            item, page_data, direction=direction, evicted=evicted
+                        )
+                    else:
+                        edit_context["enabled"] = False
+                        edit_context["reason"] = (
+                            "Raw row identity could not be revalidated for this page; refresh before editing."
+                        )
+                complete = bool(result.get("cache_complete", item.get("table_preview_complete", False)))
+                item["table_preview_complete"] = complete
+                paging = item["table_preview_paging"]
+                paging["cached_rows"] = int(result.get("cached_rows", paging.get("cached_rows", 0)) or 0)
+                paging["row_count"] = int(result.get("row_count", paging.get("row_count", 0)) or 0)
+                paging["complete"] = complete
+
             loaded_rows = item["rows"]
             if item.get("view_id"):
                 item["view_row_count"] = total
@@ -3701,15 +3731,21 @@ class MainWindow(QMainWindow):
             try:
                 row_index = int(context.get("row_index", result.get("row_index", -1)))
                 column_index = int(context.get("column_index", result.get("column_index", -1)))
+                display_row_index = int(
+                    context.get(
+                        "display_row_index",
+                        row_index - int((item or {}).get("window_start_offset", 0) or 0),
+                    )
+                )
             except (TypeError, ValueError, OverflowError):
-                row_index = column_index = -1
+                row_index = column_index = display_row_index = -1
             display_row = result.get("display_row")
             raw_row = result.get("raw_row")
             if (
                 item is None
                 or not isinstance(display_row, list)
                 or not isinstance(raw_row, list)
-                or not 0 <= row_index < len(item.get("rows", []))
+                or not 0 <= display_row_index < len(item.get("rows", []))
                 or len(display_row) != len(item.get("headers", []))
                 or len(raw_row) != len(display_row)
                 or not 0 <= column_index < len(display_row)
@@ -3726,21 +3762,22 @@ class MainWindow(QMainWindow):
             if self._transaction_open and not result.get("no_change"):
                 if undo_key not in self._pending_table_preview_undo:
                     self._pending_table_preview_undo[undo_key] = {
-                        "display_row": list(item["rows"][row_index]),
+                        "display_row": list(item["rows"][display_row_index]),
                         "original_values": {
-                            str(index): values[row_index]
+                            str(index): values[display_row_index]
                             for index, values in original_values.items()
-                            if isinstance(values, list) and row_index < len(values)
+                            if isinstance(values, list) and display_row_index < len(values)
                         },
                     }
-            item["rows"][row_index] = list(display_row)
+            item["rows"][display_row_index] = list(display_row)
             for index, raw_value in enumerate(raw_row):
                 values_for_column = original_values.get(str(index))
-                if isinstance(values_for_column, list) and row_index < len(values_for_column):
-                    values_for_column[row_index] = raw_value
+                if isinstance(values_for_column, list) and display_row_index < len(values_for_column):
+                    values_for_column[display_row_index] = raw_value
+            self._update_initial_table_edit_snapshot(item, row_index, raw_row=raw_row)
 
             if self._current_result_id == result_id:
-                self.result_model.update_cell_row(row_index, display_row)
+                self.result_model.update_cell_row(display_row_index, display_row)
                 filter_text = self.result_filter.text().strip()
                 if filter_text:
                     self._filter_results(filter_text)
