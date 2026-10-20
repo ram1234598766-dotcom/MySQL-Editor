@@ -4208,10 +4208,12 @@ class MainWindow(QMainWindow):
             else:
                 detail = (
                     RESULT_EXPORT_SEMANTICS + " The workbook is streamed in row order to limit "
-                    "memory use; oversized sheets continue on numbered worksheets. SQL NULL is a "
-                    "blank cell, numeric and Boolean JSON values use native Excel cells, and text "
-                    "is written literally (not as formulas or hyperlinks). Long values that exceed "
-                    "Excel's cell limit fail without replacing an existing destination."
+                    "memory use; oversized sheets continue on numbered worksheets. SQL NULL and "
+                    "empty text both appear as blank cells, so use JSON/NDJSON when that distinction "
+                    "matters. Integer, finite floating-point, and Boolean values use native Excel "
+                    "cells where safe; integers over 15 digits are written as text to prevent "
+                    "precision loss. Text is written literally, not as formulas or hyperlinks. "
+                    "Values exceeding Excel's cell limit fail without replacing an existing file."
                 )
             self.export_feedback.setObjectName("statusSuccess")
             self.export_feedback.setText(
