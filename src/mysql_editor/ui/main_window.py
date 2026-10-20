@@ -4164,7 +4164,7 @@ class MainWindow(QMainWindow):
     def _restore_table_preview_rows(
         self, rows: list[dict[str, Any]], *, disable_editing: bool = False
     ) -> None:
-        """Restore visible rows and raw cell metadata after MySQL rolls back edits."""
+        """Restore spool row snapshots and only patch cells present in the visible window."""
         current_result_changed = False
         for entry in rows:
             if not isinstance(entry, dict):
@@ -4179,40 +4179,58 @@ class MainWindow(QMainWindow):
             item = self._result_item_by_id(result_id)
             undo = self._pending_table_preview_undo.pop((result_id, row_index), None)
             baseline = undo.get("display_row") if isinstance(undo, dict) else entry.get("display_row")
-            if item is None or not isinstance(baseline, list):
-                continue
-            if row_index >= len(item.get("rows", [])) or len(baseline) != len(item.get("headers", [])):
+            if item is None:
                 continue
 
-            restored_row = list(baseline)
-            item["rows"][row_index] = restored_row
+            try:
+                window_start = max(0, int(item.get("window_start_offset", 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                window_start = 0
+            local_row_index = row_index - window_start
             edit_context = item.get("table_edit")
             if disable_editing:
                 item["export_unavailable"] = True
-            if isinstance(edit_context, dict):
-                if disable_editing:
+                if isinstance(edit_context, dict):
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
-                        "The preview cache could not be restored reliably; refresh before editing."
+                        "The preview cache could not be restored reliably; refresh before editing or exporting."
                     )
+
+            # The row may have been evicted from the 5,000-row visible window. The
+            # worker already restored its SQLite snapshot; do not index it as a UI row.
+            if not 0 <= local_row_index < len(item.get("rows", [])):
+                continue
+            if not isinstance(baseline, list) or len(baseline) != len(item.get("headers", [])):
+                if isinstance(edit_context, dict):
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "This preview was restored after rollback; refresh it before editing again."
+                    )
+                continue
+
+            restored_row = list(baseline)
+            item["rows"][local_row_index] = restored_row
+            if isinstance(edit_context, dict):
+                if disable_editing:
+                    pass
                 elif isinstance(undo, dict):
                     raw_baselines = undo.get("original_values") or {}
                     current_originals = edit_context.get("original_values") or {}
                     for column_key, raw_value in raw_baselines.items():
                         per_column = current_originals.get(str(column_key))
-                        if isinstance(per_column, list) and row_index < len(per_column):
-                            per_column[row_index] = raw_value
+                        if isinstance(per_column, list) and local_row_index < len(per_column):
+                            per_column[local_row_index] = raw_value
                 else:
                     # A worker-reported rollback without a matching live UI snapshot
-                    # cannot safely restore raw Python values such as datetimes.
-                    # Show the confirmed display row but require a fresh preview to edit.
+                    # cannot safely restore Python values such as datetimes. Display
+                    # the confirmed row but require a fresh preview before editing.
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
                         "This preview was restored after rollback; refresh it before editing again."
                     )
 
             if self._current_result_id == result_id:
-                self.result_model.update_cell_row(row_index, restored_row)
+                self.result_model.update_cell_row(local_row_index, restored_row)
                 current_result_changed = True
 
         if current_result_changed:
