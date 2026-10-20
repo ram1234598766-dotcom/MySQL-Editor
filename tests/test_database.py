@@ -297,7 +297,7 @@ def test_structured_export_failure_preserves_existing_destination_and_cleans_tem
 
 def test_xlsx_export_streams_rows_and_keeps_untrusted_text_literal(tmp_path):
     import json
-    import xml.etree.ElementTree as ET
+    from defusedxml import ElementTree as ET
     import zipfile
 
     spool_owner = _csv_spool()
@@ -377,7 +377,7 @@ def test_xlsx_export_streams_rows_and_keeps_untrusted_text_literal(tmp_path):
 
 def test_xlsx_export_rolls_over_to_numbered_sheets_in_spool_order(tmp_path, monkeypatch):
     import json
-    import xml.etree.ElementTree as ET
+    from defusedxml import ElementTree as ET
     import zipfile
 
     import mysql_editor.database as database_module
