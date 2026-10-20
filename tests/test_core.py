@@ -1,5 +1,7 @@
 import pytest
 
+import mysql_editor.core as core_module
+
 from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source,
     iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
@@ -363,3 +365,40 @@ def test_sanitize_error_message_bounds_controls_empty_values_and_fallbacks():
     assert sanitize_error_message(None, fallback="") == ""
     assert sanitize_error_message("  \x00  ", fallback="Safe fallback") == "Safe fallback"
 
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_risk"),
+    [
+        (
+            "UPDATE users AS u JOIN flags AS f ON f.user_id = u.id "
+            "SET u.active = 0 WHERE EXISTS "
+            "(SELECT 1 FROM permissions p WHERE p.user_id = u.id)",
+            "medium",
+        ),
+        (
+            "WITH flagged AS (SELECT id FROM users WHERE active = 0) "
+            "UPDATE users SET active = 1",
+            "high",
+        ),
+        (
+            "WITH flagged AS (SELECT id FROM users WHERE active = 0) "
+            "DELETE FROM users WHERE id IN (SELECT id FROM flagged)",
+            "medium",
+        ),
+        (
+            "DELETE FROM users WHERE id IN "
+            "(SELECT user_id FROM user_map WHERE active = 0)",
+            "medium",
+        ),
+    ],
+)
+def test_parser_backed_mutation_advisory_uses_outer_where(sql, expected_risk):
+    assert classify_statement(sql)[0] == expected_risk
+
+
+def test_mutation_advisory_falls_back_when_sqlglot_is_unavailable(monkeypatch):
+    monkeypatch.setattr(core_module, "_sqlglot_parse_one", None)
+
+    assert classify_statement("DELETE FROM users")[0] == "high"
+    assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
