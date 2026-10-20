@@ -2027,13 +2027,14 @@ class MainWindow(QMainWindow):
 
         job_id = self._dispatch(action, payload, context)
         if job_id:
-            self._result_page_load_pending = {
+            pending_page = {
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
-                "direction": "next",
-                "action": action,
             }
+            if action == "table_preview_page":
+                pending_page.update({"direction": "next", "action": action})
+            self._result_page_load_pending = pending_page
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
         else:
@@ -2105,14 +2106,16 @@ class MainWindow(QMainWindow):
                 )
         job_id = self._dispatch(action, payload, context)
         if job_id:
-            self._result_page_load_pending = {
+            pending_page = {
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
                 "direction": "previous",
                 "expected_end": start,
-                "action": action,
             }
+            if action == "table_preview_page":
+                pending_page["action"] = action
+            self._result_page_load_pending = pending_page
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
         else:
