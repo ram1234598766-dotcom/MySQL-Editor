@@ -2981,11 +2981,26 @@ class MainWindow(QMainWindow):
             page_rows = [list(row) for row in (result.get("rows") or [])]
             try:
                 expected_offset = max(0, int(context.get("offset", 0) or 0))
+                source_offsets = [
+                    int(value) for value in (result.get("source_offsets") or [])
+                ]
             except (TypeError, ValueError, OverflowError):
                 expected_offset = -1
+                source_offsets = []
 
             direction = str(pending_page.get("direction", context.get("direction", "next")))
             window_start, window_end, old_total = self._result_window_bounds(item)
+            expected_view_id = str(context.get("view_id") or "")
+            filtered_view_valid = (
+                expected_view_id == str(item.get("view_id") or "")
+                and (
+                    not expected_view_id
+                    or (
+                        str(result.get("view_id") or "") == expected_view_id
+                        and len(source_offsets) == len(page_rows)
+                    )
+                )
+            )
             try:
                 total = max(
                     window_end,
@@ -3014,7 +3029,11 @@ class MainWindow(QMainWindow):
                 (direction == "next" and expected_offset < total)
                 or (direction == "previous" and expected_offset < window_start)
             )
-            if not page_range_valid or (not page_rows and page_required):
+            if (
+                not filtered_view_valid
+                or not page_range_valid
+                or (not page_rows and page_required)
+            ):
                 item["page_load_unavailable"] = True
                 self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
@@ -3034,6 +3053,7 @@ class MainWindow(QMainWindow):
                 evicted = self.result_model.prepend_rows(
                     page_rows,
                     start_offset=expected_offset,
+                    source_offsets=source_offsets if item.get("view_id") else None,
                 )
                 if self.result_model.base_offset != expected_offset:
                     item["page_load_unavailable"] = True
@@ -3042,6 +3062,8 @@ class MainWindow(QMainWindow):
                     return
                 item["rows"] = self.result_model.rows
                 item["window_start_offset"] = self.result_model.base_offset
+                if item.get("view_id"):
+                    item["source_offsets"] = list(self.result_model._row_offsets)
                 if not self.result_filter.text().strip() and self.result_proxy.sortColumn() < 0:
                     QTimer.singleShot(
                         0,
@@ -3051,9 +3073,14 @@ class MainWindow(QMainWindow):
                     )
                 page_description = "earlier"
             else:
-                evicted = self.result_model.append_rows(page_rows)
+                evicted = self.result_model.append_rows(
+                    page_rows,
+                    source_offsets=source_offsets if item.get("view_id") else None,
+                )
                 item["rows"] = self.result_model.rows
                 item["window_start_offset"] = self.result_model.base_offset
+                if item.get("view_id"):
+                    item["source_offsets"] = list(self.result_model._row_offsets)
                 if evicted:
                     QTimer.singleShot(
                         0,
@@ -3062,7 +3089,16 @@ class MainWindow(QMainWindow):
                 page_description = "additional"
 
             loaded_rows = item["rows"]
-            item["row_count"] = total
+            if item.get("view_id"):
+                item["view_row_count"] = total
+                try:
+                    item["row_count"] = max(
+                        total, int(result.get("source_row_count", item.get("row_count", 0)) or 0)
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            else:
+                item["row_count"] = total
             item["preview_truncated"] = (
                 item.get("window_start_offset", 0) > 0
                 or item.get("window_start_offset", 0) + len(loaded_rows) < total
@@ -3072,7 +3108,10 @@ class MainWindow(QMainWindow):
                 pending=False,
                 available=not bool(item.get("page_load_unavailable")),
             )
-            self._result_fetched_row_count = total
+            self._result_fetched_row_count = (
+                int(item.get("row_count", total) or total)
+                if item.get("view_id") else total
+            )
 
             if self.result_filter.text().strip():
                 self._filter_results(self.result_filter.text())
