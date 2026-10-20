@@ -5,3 +5,4 @@ argon2-cffi>=23.1,<26
 sqlglot>=26,<31
 platformdirs>=4.3,<5
 Pillow>=11,<14
+XlsxWriter>=3.2.9,<4
