@@ -1696,6 +1696,12 @@ class MainWindow(QMainWindow):
             total = end
         return start, end, total
 
+    def _release_result_filter_views(self, items) -> None:
+        """Drop materialized full-result filter indexes before result sets are discarded."""
+        for item in list(items or []):
+            if isinstance(item, dict) and item.get("view_id"):
+                self._restore_initial_result_window(item)
+
     def _restore_initial_result_window(self, item: dict | None) -> None:
         """Restore a result's original preview and release its temporary filtered view."""
         if not isinstance(item, dict):
@@ -2327,7 +2333,11 @@ class MainWindow(QMainWindow):
             return
 
         if len(query) > 256:
+            # Keep the displayed query and the debounced request identical.
             query = query[:256]
+            if self.result_filter.text() != query:
+                self.result_filter.setText(query)
+                return
 
         original_rows = item.get("initial_rows", item.get("rows", []))
         try:
@@ -2880,6 +2890,10 @@ class MainWindow(QMainWindow):
             self._flush_deferred_export_notifications()
             return
         if action in {"query", "table_preview"}:
+            # A fresh result set replaces the previous result list. Release any
+            # disk-backed filter indexes first instead of retaining orphaned view
+            # rows in the session spool until application shutdown.
+            self._release_result_filter_views(self._query_results)
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
                 self._set_result_message(sanitize_error_message(result.get("error"), fallback="Query failed."))
