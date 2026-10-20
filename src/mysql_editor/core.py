@@ -6,12 +6,12 @@ from collections.abc import Iterator
 
 try:
     from sqlglot import exp as sqlglot_exp
-    from sqlglot import format as format_sqlglot
+    from sqlglot import parse as _sqlglot_parse
     from sqlglot import parse_one as _sqlglot_parse_one
     from sqlglot.errors import SqlglotError
 except ImportError:  # pragma: no cover
     sqlglot_exp = None
-    format_sqlglot = None
+    _sqlglot_parse = None
     _sqlglot_parse_one = None
     SqlglotError = None
 
@@ -492,10 +492,24 @@ def classify_statement(sql: str) -> tuple[str, str]:
     return highest_risk, highest_message
 
 def format_sql(sql: str) -> str:
-    """Format SQL without executing it."""
-    if format_sqlglot is None:
+    """Format parseable MySQL statements without executing them or dropping later statements."""
+    if _sqlglot_parse is None:
         raise RuntimeError("SQL formatter is unavailable. Install the SQLGlot dependency.")
-    return format_sqlglot(sql, dialect="mysql", pretty=True, comments=True)
+
+    source = sql.strip()
+    if not source:
+        return ""
+
+    expressions = _sqlglot_parse(source, read="mysql")
+    formatted = [
+        expression.sql(dialect="mysql", pretty=True, comments=True)
+        for expression in expressions
+        if expression is not None
+    ]
+    result = ";\n\n".join(formatted)
+    if result and source.endswith(";"):
+        result += ";"
+    return result
 
 _SECRET = re.compile(
     r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)\b(\s*[:=]\s*)"
