@@ -254,3 +254,31 @@ def test_manual_page_action_can_load_earlier_rows_when_filter_hides_scrollbar():
     assert final_window.previous_requests == 1
     assert final_window.next_requests == 0
 
+def test_repeated_page_appends_keep_the_row_window_bounded_to_five_thousand():
+    total = 100_000
+    retained = ResultsModel.MAX_RETAINED_ROWS
+    model = ResultsModel(headers=["id"], rows=[[index] for index in range(retained)])
+    model.set_paging_state(total_rows=total)
+
+    try:
+        for offset in range(retained, total, RESULT_PAGE_SIZE):
+            page = [[index] for index in range(offset, min(total, offset + RESULT_PAGE_SIZE))]
+            model.append_rows(page)
+
+            assert model.rowCount() <= retained
+            assert len(model.rows) <= retained
+            assert len(model._row_offsets) == len(model.rows)
+            assert model.base_offset + len(model.rows) <= total
+
+        assert model.rowCount() == retained
+        assert model.base_offset == total - retained
+        assert model.headerData(0, Qt.Orientation.Vertical) == str(total - retained + 1)
+        assert model.data(model.index(0, 0), Qt.ItemDataRole.UserRole) == total - retained
+        assert model.headerData(retained - 1, Qt.Orientation.Vertical) == str(total)
+        assert model.data(model.index(retained - 1, 0), Qt.ItemDataRole.UserRole) == total - 1
+        assert model.canFetchMore() is False
+        assert model.canFetchPrevious() is True
+    finally:
+        model.deleteLater()
+        _APP.processEvents()
+
