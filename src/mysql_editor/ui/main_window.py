@@ -66,8 +66,8 @@ RESULT_EXPORT_SEMANTICS = (
     "Exports include every fetched row in MySQL fetch order, independent of grid sorting "
     "and the visible-row filter."
 )
-EXPORT_ACTIONS = frozenset({"export_csv", "export_json", "export_ndjson"})
-EXPORT_FORMAT_LABELS = {"csv": "CSV", "json": "JSON", "ndjson": "NDJSON"}
+EXPORT_ACTIONS = frozenset({"export_csv", "export_json", "export_ndjson", "export_xlsx"})
+EXPORT_FORMAT_LABELS = {"csv": "CSV", "json": "JSON", "ndjson": "NDJSON", "xlsx": "XLSX"}
 
 
 class ResultsModel(QAbstractTableModel):
@@ -4199,11 +4199,19 @@ class MainWindow(QMainWindow):
                     "SQL NULL is JSON null and empty text is an empty string. Duplicate column "
                     "labels receive numbered suffixes so no values are lost."
                 )
-            else:
+            elif export_format == "ndjson":
                 detail = (
                     RESULT_EXPORT_SEMANTICS + " Each line is one JSON row object; SQL NULL is "
                     "JSON null and empty text is an empty string. Duplicate column labels receive "
                     "numbered suffixes so no values are lost."
+                )
+            else:
+                detail = (
+                    RESULT_EXPORT_SEMANTICS + " The workbook is streamed in row order to limit "
+                    "memory use; oversized sheets continue on numbered worksheets. SQL NULL is a "
+                    "blank cell, numeric and Boolean JSON values use native Excel cells, and text "
+                    "is written literally (not as formulas or hyperlinks). Long values that exceed "
+                    "Excel's cell limit fail without replacing an existing destination."
                 )
             self.export_feedback.setObjectName("statusSuccess")
             self.export_feedback.setText(
@@ -4296,7 +4304,7 @@ class MainWindow(QMainWindow):
                 "Reload the table preview before exporting."
             )
             return
-        filters = "CSV files (*.csv);;JSON array (*.json);;NDJSON files (*.ndjson)"
+        filters = "CSV files (*.csv);;JSON array (*.json);;NDJSON files (*.ndjson);;Excel workbook (*.xlsx)"
         path, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export result grid",
@@ -4311,7 +4319,7 @@ class MainWindow(QMainWindow):
             self.export_feedback.hide()
             self.export_feedback.setToolTip("")
             self.export_feedback.setAccessibleDescription(
-                "Result export status. CSV, JSON, and NDJSON export results will appear here."
+                "Result export status. CSV, JSON, NDJSON, and XLSX export results will appear here."
             )
             action = f"export_{export_format}"
             self._dispatch(action, {"result_id": result_id, "path": path})
@@ -4347,7 +4355,7 @@ class MainWindow(QMainWindow):
         copy_rows_action = menu.addAction("Copy selected rows")
         copy_headers_action = menu.addAction("Copy column headers")
         menu.addSeparator()
-        export_action = menu.addAction("Export fetched result… (CSV, JSON, or NDJSON)")
+        export_action = menu.addAction("Export fetched result… (CSV, JSON, NDJSON, or XLSX)")
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
         if chosen == details_action:
             self.show_cell_details(clicked)
