@@ -164,6 +164,8 @@ class DatabaseWorker(QThread):
         self._table_preview_undo: dict[tuple[str, int], list[Any]] = {}
         # Rollback-to-savepoint can invalidate a cached preview without ending the transaction.
         self._invalid_table_previews: set[str] = set()
+        # Keep bounded paging state separate from the UI and bind it to the MySQL session.
+        self._table_preview_states: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -228,6 +230,7 @@ class DatabaseWorker(QThread):
     def _cleanup_resources(self) -> None:
         """Release connections and remove the temporary result cache after any exit path."""
         self._close_connection()
+        self._table_preview_states.clear()
         if self._spool is not None:
             spool, self._spool = self._spool, None
             try:
@@ -455,6 +458,7 @@ class DatabaseWorker(QThread):
             self._connection_id = None
             self._connection_config = None
             self._session_token = uuid.uuid4().hex
+        self._table_preview_states.clear()
         if connection is not None:
             try:
                 connection.close()
@@ -497,6 +501,7 @@ class DatabaseWorker(QThread):
                 self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
                 self._session_token = uuid.uuid4().hex
+            self._table_preview_states.clear()
             preview_restore = {"preview_rollback_rows": [], "preview_restore_errors": []}
             if previous is not None and previous is not candidate:
                 # Replacing the session implicitly rolls back a pending transaction on
@@ -562,8 +567,8 @@ class DatabaseWorker(QThread):
         if action == "drop_result_filter":
             return self._drop_result_filter(str(payload.get("view_id", "") or ""))
         if action in {
-            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
-            "update_table_cell", "use_schema", "commit", "rollback",
+            "query", "schema", "schema_objects", "table_preview", "table_preview_page",
+            "inspect_schema_object", "update_table_cell", "use_schema", "commit", "rollback",
         } and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
@@ -593,6 +598,8 @@ class DatabaseWorker(QThread):
             return self._read_schema_objects(str(payload.get("schema", "")))
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
+        if action == "table_preview_page":
+            return self._fetch_table_preview_page(dict(payload))
         if action == "update_table_cell":
             result = self._update_table_cell(dict(payload))
             result.setdefault(
@@ -1723,30 +1730,349 @@ class DatabaseWorker(QThread):
             "warnings": warnings,
         }
 
+    def _table_preview_primary_key_columns(self, schema: str, table: str) -> list[str]:
+        """Return the current primary-key order, or an empty list if metadata is unavailable."""
+        if self._connection is None:
+            return []
+        cursor = None
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                (schema, table),
+            )
+            return [str(row[0]) for row in cursor.fetchall()]
+        except Exception:
+            # Browsing remains available when metadata privileges are restricted; such
+            # previews are read-only and keep the conservative single-page limit.
+            return []
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _preview_order_clause(primary_key_columns: list[str]) -> str:
+        if not primary_key_columns:
+            return ""
+        return " ORDER BY " + ", ".join(safe_identifier(name) for name in primary_key_columns)
+
+    @staticmethod
+    def _preview_key_expression(primary_key_columns: list[str]) -> tuple[str, str]:
+        quoted = [safe_identifier(name) for name in primary_key_columns]
+        markers = ["%s" for _ in primary_key_columns]
+        if len(quoted) == 1:
+            return quoted[0], markers[0]
+        return "(" + ", ".join(quoted) + ")", "(" + ", ".join(markers) + ")"
+
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
         if self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
+        primary_key_columns = self._table_preview_primary_key_columns(schema, table)
         cursor = self._connection.cursor()
         try:
-            cursor.execute(f"SELECT * FROM {safe_identifier(schema)}.{safe_identifier(table)} LIMIT 1000")
+            cursor.execute(
+                f"SELECT * FROM {safe_identifier(schema)}.{safe_identifier(table)}"
+                f"{self._preview_order_clause(primary_key_columns)} LIMIT {RESULT_PAGE_ROWS + 1}"
+            )
             headers = [str(desc[0]) for desc in (cursor.description or [])]
-            raw_rows = [tuple(row) for row in cursor.fetchall()]
+            fetched_rows = [tuple(row) for row in cursor.fetchall()]
         finally:
             cursor.close()
 
+        server_has_more = len(fetched_rows) > RESULT_PAGE_ROWS
+        raw_rows = fetched_rows[:RESULT_PAGE_ROWS]
         rows = [[json_value(value) for value in row] for row in raw_rows]
         result_id = uuid.uuid4().hex
         statement = f"Preview {schema}.{table}"
         self._save_rows(result_id, headers, statement, rows)
-        table_edit = self._table_preview_edit_context(schema, table, headers, raw_rows)
+        table_edit = self._table_preview_edit_context(
+            schema, table, headers, raw_rows, primary_key_columns=primary_key_columns
+        )
+        stable_order = bool(primary_key_columns)
+        can_page = stable_order and server_has_more
+        primary_key_indices = [
+            headers.index(next(header for header in headers if header.casefold() == name.casefold()))
+            for name in primary_key_columns
+            if any(header.casefold() == name.casefold() for header in headers)
+        ]
+        last_primary_key = (
+            [raw_rows[-1][index] for index in primary_key_indices]
+            if raw_rows and len(primary_key_indices) == len(primary_key_columns)
+            else []
+        )
+        self._table_preview_states[result_id] = {
+            "schema": schema,
+            "table": table,
+            "session_token": self._session_token,
+            "primary_key_columns": list(primary_key_columns),
+            "stable_order": stable_order,
+            "loaded_count": len(rows),
+            "has_more": can_page,
+            "server_has_more": server_has_more,
+            "last_primary_key": last_primary_key,
+        }
+        if server_has_more and not stable_order:
+            table_edit = dict(table_edit)
+            table_edit["enabled"] = False
+            table_edit["reason"] = (
+                "This preview is read-only and capped at 1,000 rows because a stable primary-key "
+                "order could not be verified. Add a primary key or refresh after changing the table."
+            )
         return {"ok": True, "results": [{
-            "result_id": result_id, "headers": headers, "rows": rows, "row_count": len(rows),
-            "preview_truncated": False, "kind": "rows", "duration_ms": 0,
+            "result_id": result_id,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+            "preview_truncated": server_has_more,
+            "preview_has_more": can_page,
+            "preview_loaded_count": len(rows),
+            "preview_stable_order": stable_order,
+            "preview_limit_reason": (
+                "This preview is read-only and capped at 1,000 rows because a stable primary-key "
+                "order could not be verified."
+                if server_has_more and not stable_order else ""
+            ),
+            "table_preview": True,
+            "kind": "rows",
+            "duration_ms": 0,
             "table_edit": table_edit,
         }]}
 
+    def _fetch_table_preview_page(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Fetch one bounded Schema Explorer page and validate its source/session."""
+        result_id = str(payload.get("result_id", "") or "").strip()
+        direction = str(payload.get("direction", "next") or "next").casefold()
+        if direction not in {"next", "previous", "cached"}:
+            return {"ok": False, "error": "The table-preview page direction is invalid.", "result_id": result_id}
+        if not result_id or self._connection is None or self._spool is None:
+            return {"ok": False, "error": "The table-preview cache or connection is no longer available.", "result_id": result_id}
+        if result_id in self._invalid_table_previews:
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before paging.",
+                "result_id": result_id,
+            }
+        state = self._table_preview_states.get(result_id)
+        if state is None or state.get("session_token") != self._session_token:
+            return {
+                "ok": False,
+                "error": "This table preview belongs to an earlier connection session. Refresh the preview before paging.",
+                "result_id": result_id,
+            }
+        try:
+            offset = max(0, int(payload.get("offset", 0)))
+            limit = max(1, min(RESULT_PAGE_ROWS, int(payload.get("limit", RESULT_PAGE_ROWS))))
+        except (TypeError, ValueError, OverflowError):
+            return {"ok": False, "error": "The table-preview page offset or size is invalid.", "result_id": result_id}
+
+        schema = str(state["schema"])
+        table = str(state["table"])
+        loaded_count = int(state["loaded_count"])
+        primary_key_columns = list(state.get("primary_key_columns") or [])
+        if not state.get("stable_order") or not primary_key_columns:
+            return {
+                "ok": False,
+                "error": "This table preview has no verified primary-key order for safe MySQL paging. Refresh the preview; only its first 1,000 rows are available.",
+                "result_id": result_id,
+                "offset": offset,
+            }
+
+        if direction == "next":
+            if offset != loaded_count or not state.get("has_more"):
+                return {
+                    "ok": False,
+                    "error": "The table preview no longer has that next page. Refresh the preview if the table changed.",
+                    "result_id": result_id,
+                    "offset": offset,
+                }
+        else:
+            if offset >= loaded_count or offset + limit > loaded_count:
+                return {
+                    "ok": False,
+                    "error": "The requested cached preview page is outside the loaded source range.",
+                    "result_id": result_id,
+                    "offset": offset,
+                }
+
+        meta = self._spool.execute(
+            "SELECT headers, statement, row_count FROM result_meta WHERE result_id=?",
+            (result_id,),
+        ).fetchone()
+        if (
+            meta is None
+            or str(meta[1]) != f"Preview {schema}.{table}"
+            or int(meta[2] or 0) != loaded_count
+        ):
+            return {
+                "ok": False,
+                "error": "The cached table-preview rows changed. Refresh the preview before paging.",
+                "result_id": result_id,
+                "offset": offset,
+            }
+
+        current_primary_key = self._table_preview_primary_key_columns(schema, table)
+        if current_primary_key != primary_key_columns:
+            return {
+                "ok": False,
+                "error": "The table primary key changed since this preview was loaded. Refresh before paging.",
+                "result_id": result_id,
+                "offset": offset,
+            }
+
+        cursor = None
+        try:
+            cursor = self._connection.cursor()
+            order_clause = self._preview_order_clause(current_primary_key)
+            qualified_table = f"{safe_identifier(schema)}.{safe_identifier(table)}"
+            if direction == "next":
+                last_key = list(state.get("last_primary_key") or [])
+                if len(last_key) != len(current_primary_key):
+                    return {
+                        "ok": False,
+                        "error": "The saved primary-key paging boundary is unavailable. Refresh the preview.",
+                        "result_id": result_id,
+                        "offset": offset,
+                    }
+                key_expression, placeholders = self._preview_key_expression(current_primary_key)
+                cursor.execute(
+                    f"SELECT * FROM {qualified_table} WHERE {key_expression} > {placeholders}"
+                    f"{order_clause} LIMIT {limit + 1}",
+                    tuple(last_key),
+                )
+            else:
+                cursor.execute(
+                    f"SELECT * FROM {qualified_table}{order_clause} LIMIT {limit} OFFSET {offset}"
+                )
+            headers = [str(desc[0]) for desc in (cursor.description or [])]
+            fetched_rows = [tuple(row) for row in cursor.fetchall()]
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "result_id": result_id,
+                "offset": offset,
+            }
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+        cached_headers = json.loads(meta[0])
+        if [name.casefold() for name in headers] != [str(name).casefold() for name in cached_headers]:
+            return {
+                "ok": False,
+                "error": "The table columns changed while this preview was paging. Refresh the preview.",
+                "result_id": result_id,
+                "offset": offset,
+            }
+
+        has_more = bool(state.get("has_more"))
+        if direction == "next":
+            has_more = len(fetched_rows) > limit
+            raw_rows = fetched_rows[:limit]
+        else:
+            raw_rows = fetched_rows
+
+        rows = [[json_value(value) for value in row] for row in raw_rows]
+        if direction != "next":
+            cached_page = self._spool.execute(
+                "SELECT values_json FROM result_rows WHERE result_id=? "
+                "AND row_idx>=? AND row_idx<? ORDER BY row_idx",
+                (result_id, offset, offset + len(rows)),
+            ).fetchall()
+            cached_rows = [json.loads(value_json) for (value_json,) in cached_page]
+            if cached_rows != rows or len(cached_rows) != len(rows):
+                return {
+                    "ok": False,
+                    "error": "The source table changed since these rows were cached. Refresh the preview before continuing.",
+                    "result_id": result_id,
+                    "offset": offset,
+                }
+            page_edit = self._table_preview_edit_context(
+                schema, table, headers, raw_rows, primary_key_columns=current_primary_key
+            )
+            return {
+                "ok": True,
+                "result_id": result_id,
+                "offset": offset,
+                "rows": cached_rows,
+                "source_offsets": list(range(offset, offset + len(cached_rows))),
+                "row_count": loaded_count,
+                "loaded_count": loaded_count,
+                "has_more": bool(state.get("has_more")),
+                "preview_stable_order": True,
+                "table_edit": page_edit,
+            }
+
+        loaded_after = offset + len(rows)
+        page_edit = self._table_preview_edit_context(
+            schema, table, headers, raw_rows, primary_key_columns=current_primary_key
+        )
+        if self._spool is None:
+            return {"ok": False, "error": "The result cache is no longer available.", "result_id": result_id}
+        try:
+            self._spool.execute("BEGIN IMMEDIATE")
+            self._spool.executemany(
+                "INSERT INTO result_rows(result_id,row_idx,values_json) VALUES(?,?,?)",
+                [
+                    (result_id, offset + index, json.dumps(row, ensure_ascii=False))
+                    for index, row in enumerate(rows)
+                ],
+            )
+            self._spool.execute(
+                "UPDATE result_meta SET row_count=? WHERE result_id=?",
+                (loaded_after, result_id),
+            )
+            self._spool.commit()
+        except Exception as exc:
+            try:
+                self._spool.rollback()
+            except Exception:
+                pass
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "result_id": result_id,
+                "offset": offset,
+            }
+
+        if raw_rows:
+            key_indices = [
+                next(i for i, name in enumerate(headers) if name.casefold() == key.casefold())
+                for key in current_primary_key
+            ]
+            state["last_primary_key"] = [raw_rows[-1][index] for index in key_indices]
+        state["loaded_count"] = loaded_after
+        state["has_more"] = has_more
+        state["server_has_more"] = has_more
+        return {
+            "ok": True,
+            "result_id": result_id,
+            "offset": offset,
+            "rows": rows,
+            "source_offsets": list(range(offset, offset + len(rows))),
+            "row_count": loaded_after,
+            "loaded_count": loaded_after,
+            "has_more": has_more,
+            "preview_stable_order": True,
+            "table_edit": page_edit,
+        }
+
     def _table_preview_edit_context(
-        self, schema: str, table: str, headers: list[str], raw_rows: list[tuple[Any, ...]]
+        self,
+        schema: str,
+        table: str,
+        headers: list[str],
+        raw_rows: list[tuple[Any, ...]],
+        *,
+        primary_key_columns: list[str] | None = None,
     ) -> dict[str, Any]:
         """Describe only edits that can be safely targeted through a live primary key."""
         disabled = {
@@ -1812,13 +2138,16 @@ class DatabaseWorker(QThread):
                 disabled["reason"] = "The table columns changed while the preview loaded; refresh before editing."
                 return disabled
 
-            cursor.execute(
-                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
-                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
-                "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
-                (schema, table),
-            )
-            primary_key_columns = [str(row[0]) for row in cursor.fetchall()]
+            if primary_key_columns is None:
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                    "AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION",
+                    (schema, table),
+                )
+                primary_key_columns = [str(row[0]) for row in cursor.fetchall()]
+            else:
+                primary_key_columns = [str(name) for name in primary_key_columns]
             if not primary_key_columns:
                 disabled["reason"] = "The table has no primary key, so rows cannot be targeted safely for editing."
                 return disabled

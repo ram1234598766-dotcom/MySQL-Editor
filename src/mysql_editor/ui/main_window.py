@@ -1697,6 +1697,10 @@ class MainWindow(QMainWindow):
             total = max(end, int(item.get(total_key, end) or 0))
         except (TypeError, ValueError, OverflowError):
             total = end
+        # One sentinel slot lets the bounded model request another source page without
+        # claiming that rows not yet fetched already exist in the local SQLite cache.
+        if item.get("table_preview") and item.get("preview_has_more") and not item.get("view_id"):
+            total = max(total, end) + 1
         return start, end, total
 
     def _release_result_filter_views(self, items) -> None:
@@ -1704,6 +1708,23 @@ class MainWindow(QMainWindow):
         for item in list(items or []):
             if isinstance(item, dict) and item.get("view_id"):
                 self._restore_initial_result_window(item)
+
+    @staticmethod
+    def _copy_table_edit_context(context: dict | None) -> dict | None:
+        """Copy the bounded mutable arrays used to validate table-preview cell edits."""
+        if not isinstance(context, dict):
+            return None
+        copied = dict(context)
+        row_keys = context.get("row_keys")
+        if isinstance(row_keys, list):
+            copied["row_keys"] = [list(row) if isinstance(row, (list, tuple)) else row for row in row_keys]
+        original_values = context.get("original_values")
+        if isinstance(original_values, dict):
+            copied["original_values"] = {
+                str(key): list(values) if isinstance(values, list) else values
+                for key, values in original_values.items()
+            }
+        return copied
 
     def _restore_initial_result_window(self, item: dict | None) -> None:
         """Restore a result's original preview and release its temporary filtered view."""
@@ -1726,11 +1747,17 @@ class MainWindow(QMainWindow):
         initial = item.pop("initial_rows")
         item["rows"] = [list(row) for row in initial]
         item["window_start_offset"] = 0
+        if item.get("table_preview") and "initial_table_edit" in item:
+            item["table_edit"] = self._copy_table_edit_context(item.get("initial_table_edit"))
         try:
             total = max(len(item["rows"]), int(item.get("row_count", len(item["rows"])) or 0))
         except (TypeError, ValueError, OverflowError):
             total = len(item["rows"])
-        item["preview_truncated"] = len(item["rows"]) < total
+        item["preview_truncated"] = (
+            bool(item.get("preview_has_more"))
+            or bool(item.get("preview_limit_reason"))
+            or len(item["rows"]) < total
+        )
 
     def _set_result_controls(self):
         item = self._result_item_by_id(self._current_result_id)
@@ -1782,8 +1809,11 @@ class MainWindow(QMainWindow):
             self.fetch_more_button.setEnabled(False)
         elif pending:
             self.fetch_more_button.setText("Loading…")
+            pending_action = (self._result_page_load_pending or {}).get("action")
             self.fetch_more_button.setToolTip(
-                "Loading a page from the local result cache. SQL is not rerun."
+                "Loading another bounded page from the MySQL table preview."
+                if pending_action == "table_preview_page"
+                else "Loading a page from the local result cache. SQL is not rerun."
             )
             self.fetch_more_button.setEnabled(False)
         elif self._query_running and (has_more or has_previous):
@@ -1803,6 +1833,36 @@ class MainWindow(QMainWindow):
                 "too few rows to scroll the grid. The full result remains in the spool."
             )
             self.fetch_more_button.setEnabled(True)
+        elif (
+            item
+            and item.get("table_preview")
+            and not item.get("view_id")
+            and item.get("preview_stable_order")
+            and item.get("preview_has_more")
+            and (
+                end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+                or (self._connection_available and not self._disconnect_pending)
+            )
+        ):
+            loaded_count = int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+            is_source_page = end >= loaded_count
+            self.fetch_more_button.setText(
+                "Fetch Next Preview Page" if is_source_page else "Verify Cached Preview Rows"
+            )
+            self.fetch_more_button.setToolTip(
+                "Read up to 1,000 more rows from MySQL in primary-key order."
+                if is_source_page
+                else "Re-check the next cached page against MySQL before making its cell-edit metadata active."
+            )
+            self.fetch_more_button.setEnabled(
+                not self._query_running
+                and not self._disconnect_pending
+                and (self._connection_available or not is_source_page)
+            )
+            if not self._connection_available or self._disconnect_pending:
+                self.fetch_more_button.setToolTip(
+                    "Reconnect to MySQL to fetch additional table-preview rows. Already cached rows remain available locally."
+                )
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
@@ -1819,6 +1879,28 @@ class MainWindow(QMainWindow):
                 "Load earlier rows from the local SQLite result cache without rerunning SQL."
             )
             self.fetch_more_button.setEnabled(True)
+        elif (
+            item
+            and item.get("table_preview")
+            and item.get("preview_page_error")
+            and end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+        ):
+            self.fetch_more_button.setText("Preview Page Unavailable")
+            self.fetch_more_button.setToolTip(
+                "MySQL could not verify the next source page. Already cached rows remain available; "
+                "refresh the preview before trying again."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif (
+            item
+            and item.get("table_preview")
+            and item.get("preview_truncated")
+            and not item.get("preview_has_more")
+            and item.get("preview_limit_reason")
+        ):
+            self.fetch_more_button.setText("Preview Capped at 1,000")
+            self.fetch_more_button.setToolTip(str(item.get("preview_limit_reason")))
+            self.fetch_more_button.setEnabled(False)
         elif is_row_result and not item.get("page_load_unavailable"):
             self.fetch_more_button.setText("All Rows Loaded")
             self.fetch_more_button.setToolTip(
@@ -1850,7 +1932,7 @@ class MainWindow(QMainWindow):
         self.fetch_more_result_rows()
 
     def fetch_more_result_rows(self) -> None:
-        """Append the next spool page without re-executing the SQL statement."""
+        """Append a local result page or safely fetch another Schema Explorer source page."""
         if self._query_running:
             self.result_model.set_paging_state(pending=False)
             return
@@ -1864,7 +1946,7 @@ class MainWindow(QMainWindow):
             self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
             return
-        start, offset, total = self._result_window_bounds(item)
+        _start, offset, total = self._result_window_bounds(item)
         if offset >= total:
             self.result_model.set_paging_state(pending=False)
             self._set_result_controls()
@@ -1874,19 +1956,85 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
             return
 
-        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        payload = {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS}
-        context = {"result_id": result_id, "offset": offset, "direction": "next"}
-        if item.get("view_id"):
-            payload["view_id"] = str(item["view_id"])
-            context["view_id"] = str(item["view_id"])
-        job_id = self._dispatch("fetch_result_page", payload, context)
+        loaded_preview_count = max(
+            0, int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+        )
+        if (
+            item.get("table_preview")
+            and item.get("preview_has_more")
+            and offset >= loaded_preview_count
+            and (not self._connection_available or self._disconnect_pending)
+        ):
+            self.status.setText("Reconnect to MySQL to fetch another table-preview page.")
+            return
+
+        if "initial_rows" not in item:
+            item["initial_rows"] = [list(row) for row in item.get("rows", [])]
+            if item.get("table_preview"):
+                item["initial_table_edit"] = self._copy_table_edit_context(item.get("table_edit"))
+        loaded_count = max(0, int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0))
+        has_connected_preview = (
+            item.get("table_preview")
+            and item.get("preview_stable_order")
+            and not item.get("view_id")
+            and self._connection_available
+            and not self._disconnect_pending
+        )
+        if has_connected_preview:
+            direction = "next" if offset >= loaded_count else "cached"
+            page_limit = (
+                RESULT_PAGE_ROWS
+                if direction == "next"
+                else min(RESULT_PAGE_ROWS, max(1, loaded_count - offset))
+            )
+            action = "table_preview_page"
+            payload = {
+                "result_id": result_id,
+                "offset": offset,
+                "limit": page_limit,
+                "direction": direction,
+            }
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                # Model direction describes the active window; cached source re-reads
+                # still append rows when the user scrolls down within the loaded range.
+                "direction": "next",
+                "page_action": action,
+            }
+        else:
+            action = "fetch_result_page"
+            payload = {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS}
+            context = {"result_id": result_id, "offset": offset, "direction": "next"}
+            if item.get("view_id"):
+                payload["view_id"] = str(item["view_id"])
+                context["view_id"] = str(item["view_id"])
+            if (
+                item.get("table_preview")
+                and not has_connected_preview
+                and isinstance(item.get("table_edit"), dict)
+                and item["table_edit"].get("enabled")
+            ):
+                # Cached rows are still browseable offline, but the raw MySQL values
+                # needed for a guarded edit are not reconstructed from display JSON.
+                item["table_edit"]["enabled"] = False
+                item["table_edit"]["reason"] = (
+                    "This cached preview page was loaded without refreshing MySQL row metadata; "
+                    "refresh the table preview before editing."
+                )
+                item["table_edit"]["row_keys"] = []
+                item["table_edit"]["original_values"] = {}
+
+        job_id = self._dispatch(action, payload, context)
         if job_id:
-            self._result_page_load_pending = {
+            pending_page = {
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
             }
+            if action == "table_preview_page":
+                pending_page.update({"direction": "next", "action": action})
+            self._result_page_load_pending = pending_page
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
         else:
@@ -1895,7 +2043,7 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
 
     def fetch_previous_result_rows(self) -> None:
-        """Load an earlier result page from the local spool without contacting MySQL."""
+        """Load an earlier page from MySQL or the local spool without rerunning SQL."""
         if self._query_running or self._result_page_load_pending is not None:
             return
         result_id = self._current_result_id
@@ -1912,26 +2060,62 @@ class MainWindow(QMainWindow):
         limit = start - offset
         if limit <= 0:
             return
-        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        payload = {"result_id": result_id, "offset": offset, "limit": limit}
-        context = {
-            "result_id": result_id,
-            "offset": offset,
-            "direction": "previous",
-            "expected_end": start,
-        }
-        if item.get("view_id"):
-            payload["view_id"] = str(item["view_id"])
-            context["view_id"] = str(item["view_id"])
-        job_id = self._dispatch("fetch_result_page", payload, context)
+        if "initial_rows" not in item:
+            item["initial_rows"] = [list(row) for row in item.get("rows", [])]
+            if item.get("table_preview"):
+                item["initial_table_edit"] = self._copy_table_edit_context(item.get("table_edit"))
+        has_connected_preview = (
+            item.get("table_preview")
+            and item.get("preview_stable_order")
+            and not item.get("view_id")
+            and self._connection_available
+            and not self._disconnect_pending
+        )
+        if has_connected_preview:
+            action = "table_preview_page"
+            payload = {
+                "result_id": result_id,
+                "offset": offset,
+                "limit": limit,
+                "direction": "previous",
+            }
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                "direction": "previous",
+                "expected_end": start,
+                "page_action": action,
+            }
+        else:
+            action = "fetch_result_page"
+            payload = {"result_id": result_id, "offset": offset, "limit": limit}
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                "direction": "previous",
+                "expected_end": start,
+            }
+            if item.get("view_id"):
+                payload["view_id"] = str(item["view_id"])
+                context["view_id"] = str(item["view_id"])
+            if item.get("table_preview") and isinstance(item.get("table_edit"), dict):
+                item["table_edit"]["enabled"] = False
+                item["table_edit"]["reason"] = (
+                    "This cached preview page was reloaded while MySQL was disconnected; "
+                    "refresh the preview before editing."
+                )
+        job_id = self._dispatch(action, payload, context)
         if job_id:
-            self._result_page_load_pending = {
+            pending_page = {
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
                 "direction": "previous",
                 "expected_end": start,
             }
+            if action == "table_preview_page":
+                pending_page["action"] = action
+            self._result_page_load_pending = pending_page
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
         else:
@@ -3132,6 +3316,8 @@ class MainWindow(QMainWindow):
             )
         except (TypeError, ValueError, OverflowError):
             window_total = window_start + len(rows)
+        if item.get("table_preview") and item.get("preview_has_more") and not is_filtered_view:
+            window_total = max(window_total, source_total + 1)
         self._current_result_id = new_result_id
         self.result_model.update(
             headers,
@@ -3146,7 +3332,12 @@ class MainWindow(QMainWindow):
         if is_filtered_view:
             item["source_offsets"] = list(self.result_model._row_offsets)
         self._size_result_columns(headers, rows)
-        item["preview_truncated"] = window_start > 0 or window_start + len(rows) < window_total
+        item["preview_truncated"] = (
+            bool(item.get("preview_limit_reason"))
+            or bool(item.get("preview_has_more"))
+            or window_start > 0
+            or window_start + len(rows) < window_total
+        )
         self.result_model.set_paging_state(
             total_rows=window_total,
             pending=False,
@@ -3166,6 +3357,13 @@ class MainWindow(QMainWindow):
         elif str(item.get("kind", "")).casefold() == "rows" and window_start > 0:
             self._set_result_message(
                 result_window_message(item, window_start, len(rows), window_total)
+            )
+        elif item.get("table_preview") and item.get("preview_limit_reason"):
+            self._set_result_message(str(item["preview_limit_reason"]))
+        elif item.get("table_preview") and item.get("preview_has_more"):
+            self._set_result_message(
+                f"Table preview · {source_total:,} row(s) cached so far. "
+                "Fetch Next Preview Page to load another bounded set from MySQL."
             )
         else:
             self._set_result_message(result_summary_message(item, len(rows), source_total))
@@ -3304,10 +3502,17 @@ class MainWindow(QMainWindow):
             if action == "table_preview":
                 preview_item = self._result_item_by_id(self._current_result_id)
                 edit_context = preview_item.get("table_edit", {}) if preview_item else {}
+                preview_count = len(preview_item.get("rows", [])) if preview_item else 0
                 if edit_context.get("enabled"):
+                    suffix = (
+                        " More rows are available through Fetch Next Preview Page."
+                        if preview_item and preview_item.get("preview_has_more")
+                        else ""
+                    )
                     self.status.setText(
-                        "Table preview loaded · right-click a non-key cell to edit it. "
-                        "Any UPDATE remains under MySQL's Commit/Rollback transaction controls."
+                        f"Table preview loaded · {preview_count:,} row(s) shown.{suffix} "
+                        "Right-click a non-key cell to edit it. Any UPDATE remains under "
+                        "MySQL's Commit/Rollback transaction controls."
                     )
                 else:
                     reason = str(edit_context.get("reason") or "this preview is read-only.")
@@ -3322,7 +3527,7 @@ class MainWindow(QMainWindow):
             if action == "query":
                 self._flush_deferred_export_notifications()
             return
-        if action == "fetch_result_page":
+        if action in {"fetch_result_page", "table_preview_page"}:
             pending_page = self._result_page_load_pending
             if not pending_page or pending_page.get("job_id") != job_id:
                 return
@@ -3346,14 +3551,48 @@ class MainWindow(QMainWindow):
                 return
 
             if not result.get("ok"):
-                item["page_load_unavailable"] = True
-                self.result_model.set_paging_state(pending=False, available=False)
+                if action == "table_preview_page":
+                    # Stop repeat MySQL requests, but retain already fetched rows in the
+                    # SQLite spool. Those can still be browsed locally; editing is disabled
+                    # before the UI moves to a page without a fresh raw-value snapshot.
+                    item["preview_has_more"] = False
+                    item["preview_stable_order"] = False
+                    item["preview_page_error"] = True
+                    edit_context = item.get("table_edit")
+                    if isinstance(edit_context, dict):
+                        edit_context["enabled"] = False
+                        edit_context["reason"] = (
+                            "MySQL could not verify this preview page against the cached source rows. "
+                            "Refresh the table preview before editing again."
+                        )
+                    try:
+                        paging_total = max(
+                            0,
+                            int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0),
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        paging_total = len(item.get("rows", []))
+                    self.result_model.set_paging_state(
+                        total_rows=paging_total, pending=False, available=True
+                    )
+                else:
+                    item["page_load_unavailable"] = True
+                    self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     detail = sanitize_error_message(
                         result.get("error"),
-                        fallback="The local result cache could not supply more rows.",
+                        fallback=(
+                            "The MySQL table preview could not supply another page."
+                            if action == "table_preview_page"
+                            else "The local result cache could not supply more rows."
+                        ),
                     )
-                    self.status.setText("Could not fetch result rows · " + detail)
+                    prefix = (
+                        "Could not refresh MySQL table-preview rows; cached rows remain available · "
+                        if action == "table_preview_page"
+                        else "Could not fetch result rows · "
+                    )
+                    self.status.setText(prefix + detail)
                 self._set_result_controls()
                 return
 
@@ -3478,12 +3717,39 @@ class MainWindow(QMainWindow):
                     pass
             else:
                 item["row_count"] = total
+            if action == "table_preview_page":
+                try:
+                    item["preview_loaded_count"] = max(
+                        0, int(result.get("loaded_count", result.get("row_count", total)) or 0)
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    item["preview_loaded_count"] = max(0, int(result.get("row_count", total) or 0))
+                item["preview_has_more"] = bool(result.get("has_more"))
+                item["preview_stable_order"] = bool(result.get("preview_stable_order", True))
+                item["row_count"] = item["preview_loaded_count"]
+                self._merge_table_preview_edit_page(
+                    item,
+                    result.get("table_edit"),
+                    direction=direction,
+                    page_count=page_count,
+                    evicted=evicted,
+                )
             item["preview_truncated"] = (
                 item.get("window_start_offset", 0) > 0
                 or item.get("window_start_offset", 0) + len(loaded_rows) < total
+                or bool(item.get("table_preview") and item.get("preview_has_more"))
             )
+            paging_total = total
+            if item.get("table_preview") and item.get("preview_has_more") and not item.get("view_id"):
+                try:
+                    paging_total = max(
+                        paging_total,
+                        int(item.get("preview_loaded_count", item.get("row_count", total)) or 0) + 1,
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    paging_total = total + 1
             self.result_model.set_paging_state(
-                total_rows=total,
+                total_rows=paging_total,
                 pending=False,
                 available=not bool(item.get("page_load_unavailable")),
             )
@@ -3506,10 +3772,19 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
             if not self._query_running:
                 start, end, _ = self._result_window_bounds(item)
-                self.status.setText(
-                    f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
-                    f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
-                )
+                if action == "table_preview_page":
+                    preview_loaded = int(item.get("preview_loaded_count", item.get("row_count", total)) or 0)
+                    self.query_meta.setText(f"{preview_loaded:,} table-preview row(s) cached")
+                    more_notice = " More rows remain in MySQL." if item.get("preview_has_more") else " End of table reached."
+                    self.status.setText(
+                        f"Loaded {page_count:,} table-preview row(s) from MySQL · "
+                        f"{preview_loaded:,} row(s) cached.{more_notice}"
+                    )
+                else:
+                    self.status.setText(
+                        f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
+                        f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
+                    )
             return
         if action == "update_table_cell":
             self._cell_edit_pending = False
@@ -3537,16 +3812,22 @@ class MainWindow(QMainWindow):
             item = self._result_item_by_id(result_id)
             try:
                 row_index = int(context.get("row_index", result.get("row_index", -1)))
+                local_row_index = int(
+                    context.get(
+                        "local_row_index",
+                        row_index - int((item or {}).get("window_start_offset", 0) or 0),
+                    )
+                )
                 column_index = int(context.get("column_index", result.get("column_index", -1)))
             except (TypeError, ValueError, OverflowError):
-                row_index = column_index = -1
+                row_index = local_row_index = column_index = -1
             display_row = result.get("display_row")
             raw_row = result.get("raw_row")
             if (
                 item is None
                 or not isinstance(display_row, list)
                 or not isinstance(raw_row, list)
-                or not 0 <= row_index < len(item.get("rows", []))
+                or not 0 <= local_row_index < len(item.get("rows", []))
                 or len(display_row) != len(item.get("headers", []))
                 or len(raw_row) != len(display_row)
                 or not 0 <= column_index < len(display_row)
@@ -3559,25 +3840,41 @@ class MainWindow(QMainWindow):
 
             edit_context = item.get("table_edit") or {}
             original_values = edit_context.get("original_values") or {}
+            # The worker/spool row index is absolute; UI snapshots are relative to the
+            # current bounded window. Rollback uses the former to find the correct row.
             undo_key = (result_id, row_index)
             if self._transaction_open and not result.get("no_change"):
                 if undo_key not in self._pending_table_preview_undo:
                     self._pending_table_preview_undo[undo_key] = {
-                        "display_row": list(item["rows"][row_index]),
+                        "display_row": list(item["rows"][local_row_index]),
                         "original_values": {
-                            str(index): values[row_index]
+                            str(index): values[local_row_index]
                             for index, values in original_values.items()
-                            if isinstance(values, list) and row_index < len(values)
+                            if isinstance(values, list) and local_row_index < len(values)
                         },
                     }
-            item["rows"][row_index] = list(display_row)
+            item["rows"][local_row_index] = list(display_row)
             for index, raw_value in enumerate(raw_row):
                 values_for_column = original_values.get(str(index))
-                if isinstance(values_for_column, list) and row_index < len(values_for_column):
-                    values_for_column[row_index] = raw_value
+                if isinstance(values_for_column, list) and local_row_index < len(values_for_column):
+                    values_for_column[local_row_index] = raw_value
+
+            # If this row belongs to the preserved initial table-preview snapshot, keep
+            # that snapshot consistent for result switching and later rollback.
+            if item.get("table_preview") and row_index >= 0:
+                initial_rows = item.get("initial_rows")
+                if isinstance(initial_rows, list) and row_index < len(initial_rows):
+                    initial_rows[row_index] = list(display_row)
+                initial_edit = item.get("initial_table_edit")
+                if isinstance(initial_edit, dict) and initial_edit.get("enabled"):
+                    initial_originals = initial_edit.get("original_values") or {}
+                    for index, raw_value in enumerate(raw_row):
+                        initial_values = initial_originals.get(str(index))
+                        if isinstance(initial_values, list) and row_index < len(initial_values):
+                            initial_values[row_index] = raw_value
 
             if self._current_result_id == result_id:
-                self.result_model.update_cell_row(row_index, display_row)
+                self.result_model.update_cell_row(local_row_index, display_row)
                 filter_text = self.result_filter.text().strip()
                 if filter_text:
                     self._filter_results(filter_text)
@@ -4068,7 +4365,7 @@ class MainWindow(QMainWindow):
     def _restore_table_preview_rows(
         self, rows: list[dict[str, Any]], *, disable_editing: bool = False
     ) -> None:
-        """Restore visible rows and raw cell metadata after MySQL rolls back edits."""
+        """Restore spool row snapshots and only patch cells present in the visible window."""
         current_result_changed = False
         for entry in rows:
             if not isinstance(entry, dict):
@@ -4083,40 +4380,82 @@ class MainWindow(QMainWindow):
             item = self._result_item_by_id(result_id)
             undo = self._pending_table_preview_undo.pop((result_id, row_index), None)
             baseline = undo.get("display_row") if isinstance(undo, dict) else entry.get("display_row")
-            if item is None or not isinstance(baseline, list):
-                continue
-            if row_index >= len(item.get("rows", [])) or len(baseline) != len(item.get("headers", [])):
+            if item is None:
                 continue
 
-            restored_row = list(baseline)
-            item["rows"][row_index] = restored_row
+            try:
+                window_start = max(0, int(item.get("window_start_offset", 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                window_start = 0
+            local_row_index = row_index - window_start
             edit_context = item.get("table_edit")
             if disable_editing:
                 item["export_unavailable"] = True
-            if isinstance(edit_context, dict):
-                if disable_editing:
+                for edit_snapshot in (
+                    edit_context,
+                    item.get("initial_table_edit"),
+                ):
+                    if isinstance(edit_snapshot, dict):
+                        edit_snapshot["enabled"] = False
+                        edit_snapshot["reason"] = (
+                            "The preview cache could not be restored reliably; refresh before editing or exporting."
+                        )
+
+            if not isinstance(baseline, list) or len(baseline) != len(item.get("headers", [])):
+                if isinstance(edit_context, dict):
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
-                        "The preview cache could not be restored reliably; refresh before editing."
+                        "This preview was restored after rollback; refresh it before editing again."
                     )
+                continue
+
+            # A row may have been evicted from the visible window. Restore its preserved
+            # initial snapshot too; the worker already restored the authoritative SQLite row.
+            initial_rows = item.get("initial_rows")
+            if isinstance(initial_rows, list) and row_index < len(initial_rows):
+                initial_rows[row_index] = list(baseline)
+            if isinstance(undo, dict) and not disable_editing:
+                initial_edit = item.get("initial_table_edit")
+                if isinstance(initial_edit, dict):
+                    initial_originals = initial_edit.get("original_values") or {}
+                    for column_key, raw_value in (undo.get("original_values") or {}).items():
+                        initial_values = initial_originals.get(str(column_key))
+                        if isinstance(initial_values, list) and row_index < len(initial_values):
+                            initial_values[row_index] = raw_value
+
+            # Do not index an absolute spool row as a UI row if it was evicted.
+            if not 0 <= local_row_index < len(item.get("rows", [])):
+                continue
+                if isinstance(edit_context, dict):
+                    edit_context["enabled"] = False
+                    edit_context["reason"] = (
+                        "This preview was restored after rollback; refresh it before editing again."
+                    )
+                continue
+
+            restored_row = list(baseline)
+            item["rows"][local_row_index] = restored_row
+            if isinstance(edit_context, dict):
+                if disable_editing:
+                    pass
                 elif isinstance(undo, dict):
                     raw_baselines = undo.get("original_values") or {}
                     current_originals = edit_context.get("original_values") or {}
                     for column_key, raw_value in raw_baselines.items():
                         per_column = current_originals.get(str(column_key))
-                        if isinstance(per_column, list) and row_index < len(per_column):
-                            per_column[row_index] = raw_value
+                        if isinstance(per_column, list) and local_row_index < len(per_column):
+                            per_column[local_row_index] = raw_value
                 else:
                     # A worker-reported rollback without a matching live UI snapshot
-                    # cannot safely restore raw Python values such as datetimes.
-                    # Show the confirmed display row but require a fresh preview to edit.
+                    # cannot safely restore Python values such as datetimes. Display
+                    # the confirmed row but require a fresh preview before editing.
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
                         "This preview was restored after rollback; refresh it before editing again."
                     )
 
             if self._current_result_id == result_id:
-                self.result_model.update_cell_row(row_index, restored_row)
+                self.result_model.update_cell_row(local_row_index, restored_row)
                 current_result_changed = True
 
         if current_result_changed:
@@ -4133,6 +4472,111 @@ class MainWindow(QMainWindow):
                     )
         self._set_result_controls()
 
+    def _merge_table_preview_edit_page(
+        self,
+        item: dict,
+        page_edit: dict | None,
+        *,
+        direction: str,
+        page_count: int,
+        evicted: int,
+    ) -> None:
+        """Keep raw key/value snapshots aligned with the bounded source-row window."""
+        if not item.get("table_preview"):
+            return
+        current = item.get("table_edit")
+        if not isinstance(current, dict):
+            item["table_edit"] = {
+                "enabled": False,
+                "reason": "Refresh this table preview before editing.",
+            }
+            return
+
+        def disable(reason: str) -> None:
+            current["enabled"] = False
+            current["reason"] = reason
+            current["row_keys"] = []
+            current["original_values"] = {}
+
+        if not current.get("enabled"):
+            return
+        if not isinstance(page_edit, dict) or not page_edit.get("enabled"):
+            disable(
+                str((page_edit or {}).get("reason")
+                    or "The source metadata could not be verified for this page. Refresh before editing.")
+            )
+            return
+
+        identity_keys = (
+            "schema", "table", "session_token", "primary_key_columns",
+            "primary_key_indices", "editable_column_indices",
+        )
+        if any(current.get(key) != page_edit.get(key) for key in identity_keys):
+            disable("The table metadata changed while paging. Refresh before editing.")
+            return
+
+        displayed_rows = item.get("rows") or []
+        page_count = max(0, int(page_count))
+        evicted = max(0, int(evicted))
+        old_count = len(displayed_rows) - page_count + evicted
+        if old_count < 0:
+            disable("The preview row window changed while paging. Refresh before editing.")
+            return
+
+        old_keys = current.get("row_keys")
+        new_keys = page_edit.get("row_keys")
+        if (
+            not isinstance(old_keys, list)
+            or not isinstance(new_keys, list)
+            or len(old_keys) != old_count
+            or len(new_keys) != page_count
+        ):
+            disable("The primary-key snapshot does not match the visible preview rows. Refresh before editing.")
+            return
+
+        old_originals = current.get("original_values")
+        new_originals = page_edit.get("original_values")
+        if not isinstance(old_originals, dict) or not isinstance(new_originals, dict):
+            disable("The cell-value snapshot is unavailable. Refresh before editing.")
+            return
+
+        merged_originals: dict[str, list[Any]] = {}
+        editable_indices = [int(value) for value in current.get("editable_column_indices", [])]
+        for column_index in editable_indices:
+            key = str(column_index)
+            old_values = old_originals.get(key)
+            page_values = new_originals.get(key)
+            if (
+                not isinstance(old_values, list)
+                or len(old_values) != old_count
+                or not isinstance(page_values, list)
+                or len(page_values) != page_count
+            ):
+                disable("The raw cell-value snapshot does not match the visible preview rows. Refresh before editing.")
+                return
+            if direction == "previous":
+                kept_old = old_values[:max(0, old_count - evicted)]
+                merged = list(page_values) + list(kept_old)
+            else:
+                merged = list(old_values[evicted:]) + list(page_values)
+            merged_originals[key] = merged
+
+        if direction == "previous":
+            kept_old_keys = old_keys[:max(0, old_count - evicted)]
+            merged_keys = list(new_keys) + list(kept_old_keys)
+        else:
+            merged_keys = list(old_keys[evicted:]) + list(new_keys)
+
+        expected_count = len(displayed_rows)
+        if len(merged_keys) != expected_count or any(
+            len(values) != expected_count for values in merged_originals.values()
+        ):
+            disable("The edit snapshot no longer matches the bounded result window. Refresh before editing.")
+            return
+        current["row_keys"] = merged_keys
+        current["original_values"] = merged_originals
+        current["reason"] = ""
+
     def _table_cell_edit_entry(self, index):
         """Return a verified local preview target for a single-cell edit action."""
         if not index.isValid() or not self._current_result_id or self._cell_edit_pending:
@@ -4144,7 +4588,14 @@ class MainWindow(QMainWindow):
         table_edit = item.get("table_edit")
         if not isinstance(table_edit, dict) or not table_edit.get("enabled"):
             return None
-        row_index, column_index = source_index.row(), source_index.column()
+        if item.get("view_id"):
+            # Filtering/sorting creates a different row order. Keep table editing disabled
+            # on any materialized view until a primary-key-aligned view is implemented.
+            return None
+        local_row_index, column_index = source_index.row(), source_index.column()
+        absolute_row_index = self.result_model.absolute_row_index(local_row_index)
+        if absolute_row_index is None:
+            return None
         editable_columns = table_edit.get("editable_column_indices") or []
         if column_index not in editable_columns:
             return None
@@ -4153,10 +4604,10 @@ class MainWindow(QMainWindow):
         old_values = original_values.get(str(column_index))
         primary_key_columns = table_edit.get("primary_key_columns") or []
         if (
-            not 0 <= row_index < len(row_keys)
+            not 0 <= local_row_index < len(row_keys)
             or not isinstance(old_values, list)
-            or not 0 <= row_index < len(old_values)
-            or len(row_keys[row_index]) != len(primary_key_columns)
+            or not 0 <= local_row_index < len(old_values)
+            or len(row_keys[local_row_index]) != len(primary_key_columns)
         ):
             return None
         headers = item.get("headers") or []
@@ -4165,11 +4616,12 @@ class MainWindow(QMainWindow):
         return {
             "item": item,
             "table_edit": table_edit,
-            "row_index": row_index,
+            "row_index": absolute_row_index,
+            "local_row_index": local_row_index,
             "column_index": column_index,
             "column_name": str(headers[column_index]),
-            "old_value": old_values[row_index],
-            "primary_key_values": list(row_keys[row_index]),
+            "old_value": old_values[local_row_index],
+            "primary_key_values": list(row_keys[local_row_index]),
             "primary_key_columns": list(primary_key_columns),
         }
 
@@ -4221,6 +4673,7 @@ class MainWindow(QMainWindow):
         context = {
             "result_id": result_id,
             "row_index": entry["row_index"],
+            "local_row_index": entry["local_row_index"],
             "column_index": entry["column_index"],
             "schema": str(table_edit.get("schema") or ""),
             "table": str(table_edit.get("table") or ""),

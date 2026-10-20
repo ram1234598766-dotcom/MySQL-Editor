@@ -571,3 +571,322 @@ def test_close_defers_without_blocking_ui_until_update_thread_finishes(tmp_path,
         repository.close()
         _APP.processEvents()
 
+
+def test_table_preview_edit_metadata_stays_aligned_when_window_evicts_rows(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-page-edit-metadata.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-window", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        headers = ["id", "label", "quantity"]
+        old_rows = [[index, f"row-{index}", index % 9] for index in range(1000, 6000)]
+        edit = {
+            "enabled": True,
+            "schema": "analytics",
+            "table": "items",
+            "session_token": "session-a",
+            "primary_key_columns": ["id"],
+            "primary_key_indices": [0],
+            "row_keys": [[index] for index in range(1000, 6000)],
+            "editable_column_indices": [1, 2],
+            "original_values": {
+                "1": [f"row-{index}" for index in range(1000, 6000)],
+                "2": [index % 9 for index in range(1000, 6000)],
+            },
+            "reason": "",
+        }
+        item = {
+            "result_id": "preview-window",
+            "table_preview": True,
+            "headers": headers,
+            "rows": old_rows,
+            "row_count": 6000,
+            "window_start_offset": 1000,
+            "preview_loaded_count": 6000,
+            "preview_has_more": True,
+            "preview_stable_order": True,
+            "table_edit": edit,
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-window"
+        window.result_model.update(headers, old_rows, base_offset=1000, total_rows=6001)
+        item["rows"] = window.result_model.rows
+        item["initial_rows"] = [list(row) for row in old_rows[:1000]]
+        initial_edit = window._copy_table_edit_context(edit)
+        initial_edit["row_keys"] = list(initial_edit["row_keys"][:1000])
+        initial_edit["original_values"] = {
+            key: list(values[:1000])
+            for key, values in initial_edit["original_values"].items()
+        }
+        item["initial_table_edit"] = initial_edit
+
+        next_rows = [[index, f"row-{index}", index % 9] for index in range(6000, 7000)]
+        page_edit = {
+            "enabled": True,
+            "schema": "analytics",
+            "table": "items",
+            "session_token": "session-a",
+            "primary_key_columns": ["id"],
+            "primary_key_indices": [0],
+            "row_keys": [[index] for index in range(6000, 7000)],
+            "editable_column_indices": [1, 2],
+            "original_values": {
+                "1": [f"row-{index}" for index in range(6000, 7000)],
+                "2": [index % 9 for index in range(6000, 7000)],
+            },
+            "reason": "",
+        }
+
+        evicted = window.result_model.append_rows(next_rows)
+        item["rows"] = window.result_model.rows
+        item["window_start_offset"] = window.result_model.base_offset
+        window._merge_table_preview_edit_page(
+            item, page_edit, direction="next", page_count=len(next_rows), evicted=evicted
+        )
+
+        assert evicted == 1000
+        assert item["window_start_offset"] == 2000
+        assert len(item["rows"]) == 5000
+        assert len(item["table_edit"]["row_keys"]) == 5000
+        assert item["table_edit"]["row_keys"][0] == [2000]
+        assert item["table_edit"]["row_keys"][-1] == [6999]
+        assert item["table_edit"]["original_values"]["1"][0] == "row-2000"
+        assert item["table_edit"]["original_values"]["1"][-1] == "row-6999"
+
+        window._restore_initial_result_window(item)
+        assert item["window_start_offset"] == 0
+        assert item["rows"] == old_rows[:1000]
+        assert len(item["table_edit"]["row_keys"]) == 1000
+        assert item["table_edit"]["row_keys"][0] == [1000]
+        assert item["table_edit"]["row_keys"][-1] == [1999]
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_table_preview_cell_edit_uses_absolute_spool_row_and_local_window_row(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-absolute-row.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-absolute", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        rows = [[1000, "row-1000", 1], [1001, "row-1001", 2], [1002, "row-1002", 3]]
+        item = {
+            "result_id": "preview-absolute",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": ["id", "label", "quantity"],
+            "rows": rows,
+            "row_count": 2000,
+            "window_start_offset": 1000,
+            "table_edit": {
+                "enabled": True,
+                "schema": "analytics",
+                "table": "items",
+                "session_token": "session-a",
+                "primary_key_columns": ["id"],
+                "primary_key_indices": [0],
+                "editable_column_indices": [1, 2],
+                "row_keys": [[1000], [1001], [1002]],
+                "original_values": {
+                    "1": ["row-1000", "row-1001", "row-1002"],
+                    "2": [1, 2, 3],
+                },
+            },
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-absolute"
+        window.result_model.update(item["headers"], rows, base_offset=1000, total_rows=2000)
+        index = window.result_proxy.index(1, 1)
+
+        entry = window._table_cell_edit_entry(index)
+
+        assert entry is not None
+        assert entry["local_row_index"] == 1
+        assert entry["row_index"] == 1001
+        assert entry["primary_key_values"] == [1001]
+        assert entry["old_value"] == "row-1001"
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_table_preview_rollback_restores_visible_local_row_using_absolute_spool_index(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-rollback-index.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-rollback", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        headers = ["id", "label", "quantity"]
+        rows = [[1000, "row-1000", 1], [1001, "edited", 2], [1002, "row-1002", 3]]
+        item = {
+            "result_id": "preview-rollback",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": headers,
+            "rows": rows,
+            "row_count": 2000,
+            "window_start_offset": 1000,
+            "table_edit": {
+                "enabled": True,
+                "schema": "analytics",
+                "table": "items",
+                "session_token": "session-a",
+                "primary_key_columns": ["id"],
+                "primary_key_indices": [0],
+                "editable_column_indices": [1, 2],
+                "row_keys": [[1000], [1001], [1002]],
+                "original_values": {
+                    "1": ["row-1000", "edited", "row-1002"],
+                    "2": [1, 2, 3],
+                },
+            },
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-rollback"
+        window.result_model.update(headers, rows, base_offset=1000, total_rows=2000)
+        window._pending_table_preview_undo[("preview-rollback", 1001)] = {
+            "display_row": [1001, "row-1001", 2],
+            "original_values": {"1": "row-1001", "2": 2},
+        }
+
+        window._restore_table_preview_rows([{
+            "result_id": "preview-rollback",
+            "row_index": 1001,
+            "display_row": [1001, "row-1001", 2],
+        }])
+
+        assert item["rows"][1] == [1001, "row-1001", 2]
+        assert item["table_edit"]["original_values"]["1"][1] == "row-1001"
+        assert item["table_edit"]["original_values"]["2"][1] == 2
+        assert window.result_model.rows[1] == [1001, "row-1001", 2]
+        assert ("preview-rollback", 1001) not in window._pending_table_preview_undo
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_table_preview_paging_control_distinguishes_source_and_cached_pages(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-page-controls.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-controls", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        rows = [[index, f"row-{index}", index % 9] for index in range(1000)]
+        item = {
+            "result_id": "preview-controls",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": ["id", "label", "quantity"],
+            "rows": rows,
+            "row_count": 6000,
+            "window_start_offset": 0,
+            "preview_loaded_count": 6000,
+            "preview_has_more": True,
+            "preview_stable_order": True,
+            "table_edit": {"enabled": True},
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-controls"
+        window.result_model.update(item["headers"], rows, base_offset=0, total_rows=6001)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Verify Cached Preview Rows"
+        assert "Re-check the next cached page" in window.fetch_more_button.toolTip()
+
+        item["preview_loaded_count"] = 1000
+        item["row_count"] = 1000
+        window.result_model.set_paging_state(total_rows=1001, pending=False)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Fetch Next Preview Page"
+        assert "from MySQL in primary-key order" in window.fetch_more_button.toolTip()
+
+        window._connection_available = False
+        window._set_result_controls()
+        assert window.fetch_more_button.isEnabled() is False
+        assert "Reconnect to MySQL" in window.fetch_more_button.toolTip()
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_table_preview_page_error_stops_source_requests_but_reports_cached_rows(tmp_path, monkeypatch):
+    settings = SettingsStub()
+    monkeypatch.setattr("mysql_editor.ui.main_window.QSettings", lambda: settings)
+    repository = LocalRepository(tmp_path / "preview-page-error.sqlite3")
+    worker = StubWorker()
+    window = MainWindow(
+        worker,
+        repository,
+        object(),
+        {"id": "profile-preview-page-error", "name": "Preview", "host": "localhost", "port": 3306, "username": "reader"},
+        {"host": "localhost", "port": 3306, "username": "reader", "default_schema": "analytics", "tls_mode": "Automatic TLS"},
+        {"database": "analytics"},
+    )
+    try:
+        rows = [[index, f"row-{index}", index % 9] for index in range(1000)]
+        item = {
+            "result_id": "preview-page-error",
+            "table_preview": True,
+            "kind": "rows",
+            "headers": ["id", "label", "quantity"],
+            "rows": rows,
+            "row_count": 1000,
+            "window_start_offset": 0,
+            "preview_loaded_count": 1000,
+            "preview_has_more": False,
+            "preview_stable_order": False,
+            "preview_page_error": True,
+            "preview_truncated": True,
+            "table_edit": {"enabled": False, "reason": "refresh required"},
+        }
+        window._query_results = [item]
+        window._current_result_id = "preview-page-error"
+        window.result_model.update(item["headers"], rows, base_offset=0, total_rows=1000)
+        window._set_result_controls()
+
+        assert window.fetch_more_button.text() == "Preview Page Unavailable"
+        assert not window.fetch_more_button.isEnabled()
+        assert "Already cached rows remain available" in window.fetch_more_button.toolTip()
+    finally:
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
