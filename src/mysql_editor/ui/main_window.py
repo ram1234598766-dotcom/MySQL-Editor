@@ -2779,7 +2779,7 @@ class MainWindow(QMainWindow):
                 row_count = 0
             path = str(result.get("path") or "the chosen destination")
             if export_format == "csv":
-                detail = RESULT_EXPORT_SEMANTICS + " " + CSV_EXPORT_NULL_SEMANTICS
+                detail = CSV_EXPORT_SEMANTICS
             elif export_format == "json":
                 detail = (
                     RESULT_EXPORT_SEMANTICS + " Each JSON object represents one row; "
