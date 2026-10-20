@@ -1719,7 +1719,7 @@ class MainWindow(QMainWindow):
             )
             self.fetch_more_button.setEnabled(True)
         elif is_row_result and not item.get("page_load_unavailable"):
-            self.fetch_more_button.setText("All Rows Fetched")
+            self.fetch_more_button.setText("All Rows Loaded")
             self.fetch_more_button.setToolTip(
                 "The full result is already available in the local SQLite spool. "
                 "Only the current row window is retained in grid memory; exports include every row."
@@ -1784,7 +1784,6 @@ class MainWindow(QMainWindow):
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
-                "direction": "next",
             }
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
