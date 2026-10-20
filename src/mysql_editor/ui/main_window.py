@@ -671,7 +671,7 @@ class MainWindow(QMainWindow):
         self.result_filter = QLineEdit()
         self.result_filter.setObjectName("resultQuickFilter")
         self.result_filter.setPlaceholderText("Filter fetched rows…")
-        self.result_filter.setAccessibleName("Filter fetched result rows")
+        self.result_filter.setAccessibleName("Filter result rows")
         self.result_filter.setAccessibleDescription(
             "Searches all fetched rows for large query results using the local SQLite result cache. "
             "The grid stays memory-bounded and exports keep the full original result."
