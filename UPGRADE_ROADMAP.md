@@ -864,10 +864,11 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 
 - [x] The active Qt grid model now uses a 5,000-row bounded window over the existing SQLite result spool. Later and earlier 1,000-row pages evict the opposite edge while retaining absolute spool offsets and absolute vertical row labels. One first-page restore snapshot may remain in memory while that result is actively paged; switching to another result restores the inactive entry to its first page.
 - Schema Explorer table preview remains capped at 1,000 rows. Removing that cap safely requires a separately tested preview paging/data-consistency path that preserves guarded cell-edit semantics and does not fetch an unexpectedly large table into memory.
-- [x] Full-result quick filtering for ordinary query results scans the local SQLite spool in the worker, stores matching source offsets in a disk-backed view index, and pages through a bounded match window with original source-row labels. Exports remain tied to the original result ID, source values, and MySQL fetch order. Sorting still operates on the active in-memory window; editable table previews still filter only their loaded window.
+- [x] Full-result quick filtering for ordinary query results scans the local SQLite spool in the worker, stores matching source offsets in a disk-backed view index, and pages through a bounded match window with original source-row labels. Exports remain tied to the original result ID, source values, and MySQL fetch order. Editable table previews still filter only their loaded window.
+- Full-spool sorting is implemented in branch `feat/spool-backed-result-sort` and is pending CI validation. It uses a disk-backed sort-key table, batch processing, numeric-aware comparison, `NULL`-last ordering, original source-row labels, and filter/sort composition. Do not mark this task complete until the Python matrices, MySQL integration, security audit, and full Windows packaging workflow pass.
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
-The bounded active-grid window and spool-backed full-result quick-filter portions of the results workstream are implemented on this branch. Remaining work: full-spool sorting, Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
+The bounded active-grid window and spool-backed full-result quick-filter portions of the results workstream are implemented on main. Full-spool sorting is under validation in `feat/spool-backed-result-sort`; once the exact branch passes CI and is merged, the remaining tasks are Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
@@ -879,7 +880,7 @@ The bounded active-grid window and spool-backed full-result quick-filter portion
 - UI feedback is persistent, non-modal, format-specific, and redacts credential-like error fragments; tests cover format selection, null/empty/Unicode/duplicate headers, fetch-order semantics, success feedback, failure cleanup, and preservation of pre-existing files.
 - README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
 
-**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Full-spool sorting and the Schema Explorer preview cap remain unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by this change.
+**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Full-spool sorting remains subject to CI on the focused implementation branch; the Schema Explorer preview cap remains unresolved. Aggregate memory for multiple simultaneously cached results, million-row responsiveness, and physical-Windows QA have not been measured by this change.
 
 ### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
 
