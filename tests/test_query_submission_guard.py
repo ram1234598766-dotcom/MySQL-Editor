@@ -827,3 +827,38 @@ def test_sorting_an_existing_filtered_view_sorts_that_view_not_the_source_query(
         repository.close()
         _APP.processEvents()
 
+def test_reapplying_same_filter_text_does_not_invalidate_queued_spool_sort_or_filter(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "queued-filter-result",
+        "kind": "rows",
+        "headers": ["name", "score"],
+        "rows": [["Alpha preview", 1], ["Bravo preview", 2]],
+        "row_count": 8,
+        "preview_truncated": True,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=8)
+    try:
+        window.result_filter.setText("alpha")
+        window._filter_debounce_timer.stop()
+        pending_before = dict(window._pending_spool_filter)
+        generation_before = window._filter_generation
+
+        # The paging-completion path reapplies the unchanged filter text. That must
+        # not make an already queued full-spool filter/sort request stale.
+        window._filter_results("alpha")
+
+        assert window._filter_generation == generation_before
+        assert window._pending_spool_filter == pending_before
+        assert window._pending_spool_filter["query"] == "alpha"
+        assert window._pending_spool_filter["result_id"] == item["result_id"]
+        assert window._filter_debounce_timer.isActive()
+        assert not worker.submissions
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
