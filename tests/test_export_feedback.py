@@ -60,11 +60,13 @@ def test_csv_export_failure_is_visible_and_redacts_secrets():
 
     window.show_export({
         "ok": False,
-        "error": "Could not write password=supersecret to the selected file.",
+        "error": "Could not write CREATE USER 'app'@'%' IDENTIFIED BY 'sql-export-secret'; password=supersecret to the selected file.",
     })
 
     assert window.export_feedback.isVisible()
     assert window.export_feedback.objectName() == "statusDanger"
     assert "CSV export failed" in window.export_feedback.text()
     assert "supersecret" not in window.export_feedback.text()
+    assert "sql-export-secret" not in window.export_feedback.text()
+    assert "sql-export-secret" not in window.export_feedback.toolTip()
     assert window.status.text() == "CSV export failed · see details in Results."
