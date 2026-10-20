@@ -159,29 +159,28 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
 
 def test_stable_tag_build_is_separate_from_release_publication():
     workflow = _read_workflow(".github/workflows/windows-release.yml")
-    dispatch = workflow.split("  workflow_dispatch:\\n", 1)[1].split("\\n\\npermissions:", 1)[0]
-    publish_job = workflow.split("  publish:\\n", 1)[1]
+    dispatch = workflow.split("  workflow_dispatch:\n", 1)[1].split("\n\npermissions:", 1)[0]
+    publish_job = workflow.split("  publish:\n", 1)[1]
+    build_job = workflow.split("  build:\n", 1)[1].split("  publish:\n", 1)[0]
 
-    # A tag push builds and signs stable candidates, but does not publish one by itself.
+    # A stable tag push builds and signs candidate files; it never publishes automatically.
     assert "publish_release:" in dispatch
     assert "default: false" in dispatch
     assert "type: boolean" in dispatch
     assert "$signingRequired = $isTag -and -not $isPreviewTag" in workflow
     assert "Stable tag pushes build signed candidates for review but do not publish a" in workflow
+    assert "preview_tag=$($isPreviewTag.ToString().ToLowerInvariant())" in workflow
+    assert "preview_tag:" in build_job
+    assert "steps.signing-config.outputs.preview_tag" in build_job
 
-    publish_if = publish_job.split("    if: >-\\n", 1)[1].split("\\n    runs-on:", 1)[0]
+    publish_if = publish_job.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0]
     assert "github.event_name == 'push'" in publish_if
     assert "github.event_name == 'workflow_dispatch'" in publish_if
+    assert "needs.build.outputs.preview_tag == 'true'" in publish_if
     assert "inputs.publish_release == true" in publish_if
-    assert "contains(github.ref_name, '-alpha')" in publish_if
-    assert "contains(github.ref_name, '-beta')" in publish_if
-    assert "contains(github.ref_name, '-rc')" in publish_if
-    assert "contains(github.ref_name, '-preview')" in publish_if
     assert "Validate explicit stable release publication request" in publish_job
     assert "A manual stable release publication request must target an existing v-prefixed version tag." in publish_job
 
-    # Keep write access limited to the isolated publish job.
-    build_job = workflow.split("  build:\\n", 1)[1].split("  publish:\\n", 1)[0]
+    # The build has no write permission; only the explicitly gated publish job can create releases.
     assert "contents: write" not in build_job
-    assert "permissions:\\n      contents: write" in workflow
-
+    assert "permissions:\n      contents: write" in workflow
