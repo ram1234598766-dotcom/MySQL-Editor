@@ -1872,6 +1872,18 @@ class MainWindow(QMainWindow):
         elif (
             item
             and item.get("table_preview")
+            and item.get("preview_page_error")
+            and end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+        ):
+            self.fetch_more_button.setText("Preview Page Unavailable")
+            self.fetch_more_button.setToolTip(
+                "MySQL could not verify the next source page. Already cached rows remain available; "
+                "refresh the preview before trying again."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif (
+            item
+            and item.get("table_preview")
             and item.get("preview_truncated")
             and not item.get("preview_has_more")
             and item.get("preview_limit_reason")
