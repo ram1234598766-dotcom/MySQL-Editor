@@ -837,3 +837,12 @@ The required workflows passed on both pull-request heads:
 The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all post-merge workflows on `main`: [desktop CI #413](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39264933212) — PASS; [dependency security #482](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39264933266) — PASS; [Windows packages #294](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39264933203) — PASS, including both EXE builds, temporary-certificate signing smoke test, installer compile, install/uninstall, packaged application launch, expected output verification, SBOM/provenance, SHA-256 checksums, and artifact upload. Actual preview artifact signing was skipped as intended by policy; the PFX was not used to sign distributed preview binaries.
 
 **Behavior/security boundary:** the checker requests public GitHub release metadata only when automatic checking is enabled or a user explicitly requests a manual check. It sends no SQL, MySQL connection details, database credentials, query results, device identifier, or usage history. It never downloads or installs an update. Preview Windows artifacts remain unsigned by policy.
+
+
+### SQL workstream increment — parser-backed mutation risk advisory — 20 October 2026
+
+**Scope:** Use SQLGlot's MySQL AST as the first path for parseable UPDATE and DELETE risk advisories. The advisory checks only the mutation node's own top-level WHERE; a predicate inside a CTE, join condition, or nested subquery cannot make an unbounded outer mutation look bounded. Unsupported syntax and SQLGlot parse errors retain the existing scanner fallback. MySQL/MariaDB executable-comment bodies continue to be inspected separately.
+
+**Regression coverage:** MySQL joined UPDATE, an outer CTE containing an unbounded UPDATE, a CTE-wrapped DELETE with a real outer predicate, a predicate containing a nested subquery, and fallback behavior when SQLGlot is unavailable. The result remains advisory; server-side MySQL privileges remain the actual authorization boundary.
+
+**Not completed by this increment:** full AST-based statement splitting, schema-aware completion, inline diagnostics, a full MySQL grammar, semantic validation, and physical-Windows acceptance. Merge only after the exact PR head passes the full CI and Windows packaging workflow.
