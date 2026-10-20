@@ -361,7 +361,7 @@ def test_xlsx_export_streams_rows_and_keeps_untrusted_text_literal(tmp_path):
             assert not cells.get("B2") or cells["B2"].find("x:v", ns) is None
             assert not cells.get("C2") or cells["C2"].find("x:v", ns) is None
             assert inline_text("D2") == rows[0][3]
-            assert "x:f" not in {element.tag.split("}")[-1] for element in cells["D2"].iter()}
+            assert "f" not in {element.tag.split("}")[-1] for element in cells["D2"].iter()}
             assert inline_text("E2") == "https://example.org/path"
             assert not sheet_xml.findall(".//x:hyperlinks/x:hyperlink", ns)
             assert cells["F2"].get("t") == "b"
