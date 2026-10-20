@@ -277,6 +277,10 @@ def test_result_model_scroll_request_dispatches_a_spool_page(tmp_path, monkeypat
         assert scrollbar.maximum() > 0
         # Reaching the end of the visible grid asynchronously asks the worker for
         # the next spool page. It does not rerun the MySQL query on the UI thread.
+        # Force an actual value transition to the bottom even if the offscreen
+        # platform initialized the scrollbar at its maximum during layout.
+        scrollbar.setValue(max(0, scrollbar.maximum() - 1))
+        _APP.processEvents()
         scrollbar.setValue(scrollbar.maximum())
         _APP.processEvents()
 
