@@ -1404,14 +1404,16 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
             elif query.startswith("SELECT COUNT(*) FROM "):
                 self.description = [("COUNT(*)",)]
                 self.rows = [(len(state["rows"]),)]
-            elif query.startswith("SELECT * FROM ") and "ORDER BY" in upper_query and "LIMIT %S" in upper_query and " WHERE " not in upper_query:
+            elif query.startswith("SELECT * FROM ") and "LIMIT %S" in upper_query and " WHERE " not in upper_query:
                 self.description = [(name,) for name in headers]
                 self.with_rows = True
-                keys = list(state["primary_key"]) or ["id"]
-                ordered_rows = sorted(
-                    state["rows"],
-                    key=lambda row: tuple(row[name] for name in keys),
-                )
+                ordered_rows = list(state["rows"])
+                if "ORDER BY" in upper_query:
+                    keys = list(state["primary_key"]) or ["id"]
+                    ordered_rows = sorted(
+                        ordered_rows,
+                        key=lambda row: tuple(row[name] for name in keys),
+                    )
                 try:
                     limit_value = int(params[-1])
                 except (TypeError, ValueError, IndexError):
