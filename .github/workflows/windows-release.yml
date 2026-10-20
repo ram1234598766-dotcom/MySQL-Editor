@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, desktop-rebuild]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a GitHub Release for this version tag after candidate validation. Leave false to build/sign and inspect the CI artifact only."
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -100,6 +106,8 @@ jobs:
   build:
     needs: [release-tests, mysql-integration]
     runs-on: windows-latest
+    outputs:
+      preview_tag: ${{ steps.signing-config.outputs.preview_tag }}
     permissions:
       contents: read
     steps:
@@ -136,18 +144,20 @@ jobs:
             throw "WINDOWS_SIGNING_CERTIFICATE_TYPE must be 'self-signed' or 'trusted'."
           }
 
-          $isTag = $env:SIGNING_REF.StartsWith("refs/tags/")
+          $isTag = $env:SIGNING_REF.StartsWith("refs/tags/v")
           $isPreviewTag = $env:SIGNING_REF_NAME -match '(?i)-(alpha|beta|rc|preview)([.-]|$)'
           $signingRequired = $isTag -and -not $isPreviewTag
           if ($signingRequired -and -not $hasCertificate) {
-            throw "Stable version tags require an Authenticode PFX certificate and password; refusing an unsigned stable release."
+            throw "Stable version tags require an Authenticode PFX certificate and password; refusing an unsigned stable release candidate."
           }
 
-          # Previews are intentionally unsigned even if release-signing secrets exist.
+          # Stable tag pushes build signed candidates for review but do not publish a
+          # GitHub Release automatically. Preview builds remain unsigned by policy.
           $enabled = $signingRequired -and $hasCertificate -and $hasPassword
           "configured_certificate=$($hasCertificate.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "certificate_type=$certificateType" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "preview_tag=$($isPreviewTag.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($enabled) {
             if ($certificateType -eq "self-signed") {
               Write-Host "Stable release signing is enabled with a self-signed certificate. Recipient PCs may show unknown-publisher or SmartScreen warnings."
@@ -366,13 +376,28 @@ jobs:
             dist/THIRD_PARTY_LICENSES.md
           if-no-files-found: error
   publish:
-    name: Publish Windows preview or release
+    name: Publish Windows preview or manually approved stable release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-windows-preview]'))
+    if: >-
+      (github.event_name == 'push' &&
+        ((github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-windows-preview]')) ||
+         (startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.preview_tag == 'true'))) ||
+      (github.event_name == 'workflow_dispatch' &&
+       startsWith(github.ref, 'refs/tags/v') &&
+       inputs.publish_release == true)
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Validate explicit stable release publication request
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+        shell: pwsh
+        env:
+          SIGNING_REF: ${{ github.ref }}
+        run: |
+          if (-not $env:SIGNING_REF.StartsWith("refs/tags/v")) {
+            throw "A manual stable release publication request must target an existing v-prefixed version tag."
+          }
       - name: Download validated Windows packages
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -408,7 +433,10 @@ jobs:
           )
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             releaseArgs+=(--target "$GITHUB_SHA" --prerelease)
-          elif [[ "$releaseTag" =~ -(alpha|beta|rc|preview) ]]; then
-            releaseArgs+=(--prerelease)
+          else
+            lowerReleaseTag="${releaseTag,,}"
+            if [[ "$lowerReleaseTag" =~ -(alpha|beta|rc|preview)([.-]|$) ]]; then
+              releaseArgs+=(--prerelease)
+            fi
           fi
           gh "${releaseArgs[@]}"
