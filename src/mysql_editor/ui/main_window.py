@@ -1966,11 +1966,18 @@ class MainWindow(QMainWindow):
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
-            self.fetch_more_button.setToolTip(
-                f"Load rows {end + 1:,}–{min(total, end + next_count):,} from the local SQLite result cache. "
-                "Scroll to the grid's bottom for the next page or to the top for earlier rows. "
-                "The active grid window is capped at 5,000 rows; one initial-page recovery snapshot may be retained while paging. Exports use the full result spool."
-            )
+            if isinstance(item.get("table_preview_paging"), dict) and not item.get("table_preview_complete", False):
+                self.fetch_more_button.setToolTip(
+                    f"Fetch table rows {end + 1:,}–{min(total, end + next_count):,} from MySQL using "
+                    "the verified primary-key cursor. The grid remains capped at 5,000 rows; whole-table "
+                    "filter, sort, and export become available only after all pages are cached."
+                )
+            else:
+                self.fetch_more_button.setToolTip(
+                    f"Load rows {end + 1:,}–{min(total, end + next_count):,} from the local SQLite result cache. "
+                    "Scroll to the grid's bottom for the next page or to the top for earlier rows. "
+                    "The active grid window is capped at 5,000 rows; one initial-page recovery snapshot may be retained while paging. Exports use the full result spool."
+                )
             self.fetch_more_button.setEnabled(True)
         elif has_previous:
             earlier_count = min(RESULT_PAGE_ROWS, start)
@@ -3728,12 +3735,31 @@ class MainWindow(QMainWindow):
                 )
             self._sync_result_view_interactions(item)
             self._set_result_controls()
+            if isinstance(item.get("table_preview_paging"), dict):
+                cached = int(item["table_preview_paging"].get("cached_rows", 0) or 0)
+                if item.get("table_preview_complete"):
+                    self.query_meta.setText(f"{cached:,} table row(s) cached")
+                else:
+                    self.query_meta.setText(f"{cached:,} of {total:,} table row(s) cached")
             if not self._query_running:
                 start, end, _ = self._result_window_bounds(item)
-                self.status.setText(
-                    f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
-                    f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
-                )
+                if isinstance(item.get("table_preview_paging"), dict):
+                    cached = int(item["table_preview_paging"].get("cached_rows", 0) or 0)
+                    if item.get("table_preview_complete"):
+                        self.status.setText(
+                            f"Table preview complete · {total:,} rows cached in SQLite. "
+                            f"The active grid shows rows {start + 1:,}–{end:,}; full-result export is enabled."
+                        )
+                    else:
+                        self.status.setText(
+                            f"Loaded {page_count:,} primary-key page row(s) from MySQL · "
+                            f"{cached:,} of {total:,} rows cached; grid window {start + 1:,}–{end:,}."
+                        )
+                else:
+                    self.status.setText(
+                        f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
+                        f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
+                    )
             return
         if action == "update_table_cell":
             self._cell_edit_pending = False
