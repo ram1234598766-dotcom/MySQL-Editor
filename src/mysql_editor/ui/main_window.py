@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source, format_sql,
-    redact_secrets, redact_sql_secrets, split_sql_statements,
+    redact_sql_secrets, sanitize_error_message, split_sql_statements,
 )
 from mysql_editor.database import DatabaseWorker, RESULT_PAGE_ROWS
 from mysql_editor.storage import ConnectionProfile, CredentialStore, LocalRepository, app_data_dir
@@ -1697,7 +1697,7 @@ class MainWindow(QMainWindow):
         try:
             formatted = format_sql(source)
         except Exception as exc:
-            QMessageBox.warning(self, "SQL formatting", redact_secrets(str(exc)))
+            QMessageBox.warning(self, "SQL formatting", sanitize_error_message(exc))
             return
         if selected:
             cursor.insertText(formatted)
@@ -1846,9 +1846,9 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, data)
             retry = QTreeWidgetItem(["Could not load metadata · collapse and expand to retry"])
             retry.setData(0, Qt.ItemDataRole.UserRole, {"kind": "schema_placeholder"})
-            retry.setToolTip(0, redact_secrets(str(result.get("error", "") or "")))
+            retry.setToolTip(0, sanitize_error_message(result.get("error"), fallback=""))
             item.addChild(retry)
-            detail = redact_secrets(str(result.get("error", "") or "")).strip()
+            detail = sanitize_error_message(result.get("error"), fallback="")
             self.status.setText(f"Could not load schema {schema}." + (f" {detail}" if detail else ""))
             return
 
@@ -2120,7 +2120,7 @@ class MainWindow(QMainWindow):
             self._pending_table_preview_undo.clear()
         if preview_restore_errors:
             detail = "\n".join(
-                redact_secrets(str(error)).strip()
+                sanitize_error_message(error, fallback="")
                 for error in preview_restore_errors
                 if str(error).strip()
             )
@@ -2158,7 +2158,7 @@ class MainWindow(QMainWindow):
         if action in {"query", "table_preview"}:
             if not result.get("ok"):
                 self.query_meta.setText("Query failed")
-                self._set_result_message(result.get("error", "Query failed."))
+                self._set_result_message(sanitize_error_message(result.get("error"), fallback="Query failed."))
             if result.get("results"):
                 self._query_results = list(result["results"])
                 self.result_picker.blockSignals(True)
@@ -2186,11 +2186,11 @@ class MainWindow(QMainWindow):
                     self.query_meta.setText("No result set")
                     self._set_result_message("Statement completed. No result set was returned.")
                 else:
-                    self._set_result_message(result.get("error", "Query failed."))
+                    self._set_result_message(sanitize_error_message(result.get("error"), fallback="Query failed."))
             if action == "query":
                 self._apply_query_outcome(outcome, result)
             else:
-                self.status.setText(result.get("error") or "Table preview complete.")
+                self.status.setText(sanitize_error_message(result.get("error"), fallback="Table preview complete."))
             if context.get("sql"):
                 self.repository.add_history(
                     context.get("profile_name", "Connection"), redact_sql_secrets(context["sql"]),
@@ -2229,7 +2229,7 @@ class MainWindow(QMainWindow):
                 if item is not None:
                     item["page_load_unavailable"] = True
                 if not self._query_running:
-                    detail = str(result.get("error") or "The local result cache could not supply more rows.")
+                    detail = sanitize_error_message(result.get("error"), fallback="The local result cache could not supply more rows.")
                     self.status.setText("Could not fetch more rows · " + detail)
                 self._set_result_controls()
                 return
@@ -2288,7 +2288,7 @@ class MainWindow(QMainWindow):
                 self._transaction_open = bool(result.get("transaction_open"))
             self._sync_connection_controls()
             if not result.get("ok"):
-                detail = redact_secrets(str(result.get("error") or "The cell could not be updated.")).strip()
+                detail = sanitize_error_message(result.get("error"), fallback="The cell could not be updated.")
                 if result.get("update_applied"):
                     self.status.setText(
                         "MySQL applied the cell UPDATE, but the preview could not be refreshed. "
@@ -2375,7 +2375,7 @@ class MainWindow(QMainWindow):
             table = str(context.get("table") or result.get("table") or "")
             qualified = qualified_identifier(schema, table) if schema and table else "the selected object"
             if not result.get("ok"):
-                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                detail = sanitize_error_message(result.get("error"), fallback="")
                 message = detail or "MySQL could not return metadata for this object."
                 self.status.setText(f"Object inspection failed · {message}")
                 QMessageBox.warning(self, "Object Inspector", message)
@@ -2404,7 +2404,7 @@ class MainWindow(QMainWindow):
             if result.get("ok"):
                 self._fill_schema_tree(result)
             else:
-                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                detail = sanitize_error_message(result.get("error"), fallback="")
                 self.schema_state_label.setText(
                     "Schema metadata could not be loaded."
                     + (f"\n{detail}" if detail else " Check the connection and try again.")
@@ -2414,7 +2414,7 @@ class MainWindow(QMainWindow):
         if action == "use_schema":
             schema = str(context.get("schema") or result.get("schema") or "")
             if not result.get("ok") or not schema.strip():
-                detail = redact_secrets(str(result.get("error", "") or "")).strip()
+                detail = sanitize_error_message(result.get("error"), fallback="")
                 current_schema = str(
                     self.connect_result.get("database")
                     or self.config.get("default_schema", "")
@@ -2452,7 +2452,7 @@ class MainWindow(QMainWindow):
                     if saved_profile is not None:
                         self.repository.save_profile(ConnectionProfile(**self.profile))
                 except Exception as exc:
-                    persistence_error = redact_secrets(str(exc)).strip()
+                    persistence_error = sanitize_error_message(exc, fallback="The operation failed.")
 
             self._update_connection_status()
             active_context = self._current_connection_context()
@@ -2520,7 +2520,7 @@ class MainWindow(QMainWindow):
                     "Query tabs and fetched results were kept."
                 )
             else:
-                detail = redact_secrets(str(result.get("error") or "Disconnect failed.")).strip()
+                detail = sanitize_error_message(result.get("error"), fallback="Disconnect failed.")
                 self.status.setText(
                     "Could not disconnect from MySQL. " + (detail or "The session may still be active.")
                 )
@@ -2535,9 +2535,14 @@ class MainWindow(QMainWindow):
                     # Returned rows have already been restored above. Any remaining
                     # entries can no longer be rolled back in this transaction.
                     self._pending_table_preview_undo.clear()
-            self.status.setText(result.get("message", result.get("error", action.title())))
-            if not result.get("ok"):
-                QMessageBox.warning(self, action.title(), result.get("error", "Transaction operation failed."))
+            if result.get("ok"):
+                self.status.setText(str(result.get("message") or action.title()))
+            else:
+                detail = sanitize_error_message(
+                    result.get("error"), fallback=f"{action.title()} failed."
+                )
+                self.status.setText(detail)
+                QMessageBox.warning(self, action.title(), detail)
             return
         if action == "export_csv":
             if self._query_running:
@@ -2546,7 +2551,7 @@ class MainWindow(QMainWindow):
                     "ok": bool(result.get("ok")),
                     "row_count": result.get("row_count", 0),
                     "path": str(result.get("path") or ""),
-                    "error": str(result.get("error") or "Export failed."),
+                    "error": sanitize_error_message(result.get("error"), fallback="Export failed."),
                 })
                 return
             query_submitted_after_export = (
@@ -2560,9 +2565,9 @@ class MainWindow(QMainWindow):
         """Show a structured JSON plan without loading optimizer data into the result grid."""
         explained_sql = str(context.get("explained_sql") or "").strip()
         if not result.get("ok"):
-            detail = redact_secrets(
-                str(result.get("error") or "MySQL could not produce a JSON execution plan.")
-            ).strip()
+            detail = sanitize_error_message(
+                result.get("error"), fallback="MySQL could not produce a JSON execution plan."
+            )
             self.query_meta.setText("Execution plan unavailable")
             self._set_result_message(
                 "The execution plan could not be produced. The original SELECT was not executed."
@@ -2580,7 +2585,7 @@ class MainWindow(QMainWindow):
         try:
             plan = extract_explain_json(result)
         except ExplainPlanError as exc:
-            detail = redact_secrets(str(exc)).strip()
+            detail = sanitize_error_message(exc, fallback="The operation failed.")
             self.query_meta.setText("Execution plan unavailable")
             self._set_result_message(
                 "MySQL returned a response that could not be shown as a JSON plan."
@@ -2606,7 +2611,7 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_query_outcome(self, outcome: str | None, result: dict):
-        error = str(result.get("error") or "Query failed.")
+        error = sanitize_error_message(result.get("error"), fallback="Query failed.")
         results = list(result.get("results") or [])
         completed_results = sum(item.get("kind") != "error" for item in results)
         duration = int(result.get("duration_ms", 0) or 0)
@@ -2669,7 +2674,7 @@ class MainWindow(QMainWindow):
                     f"CSV exported · {row_count:,} row(s); saved path shown in Results."
                 )
         else:
-            error = redact_secrets(str(result.get("error") or "Export failed.")).strip()
+            error = sanitize_error_message(result.get("error"), fallback="Export failed.")
             if not error:
                 error = "Export failed."
             self.export_feedback.setObjectName("statusDanger")
@@ -3134,7 +3139,7 @@ class MainWindow(QMainWindow):
             paths = sorted(self._saved_root().glob("*.sql"), key=lambda p: p.name.casefold())
         except OSError as exc:
             self.saved_list.addItem("Saved queries are unavailable.")
-            self.saved_list.setToolTip(redact_secrets(str(exc)))
+            self.saved_list.setToolTip(sanitize_error_message(exc))
             return
         for path in paths:
             item = QListWidgetItem(path.name)
@@ -3151,7 +3156,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Open SQL file",
                 f"Could not open {source_path.name}. The file may be missing, locked, or not valid text.\n\n"
-                + redact_secrets(str(exc)),
+                + sanitize_error_message(exc),
             )
             self.status.setText("Could not open SQL file.")
             return False
@@ -3252,7 +3257,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Save SQL file",
                 f"Could not save {destination.name}. Your query remains open and unchanged.\n\n"
-                + redact_secrets(str(exc)),
+                + sanitize_error_message(exc),
             )
             self.status.setText("Save failed; your query remains open.")
             return False
@@ -3346,7 +3351,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(
                 self, "Save SQL snippet",
-                "The saved-queries folder could not be created.\n\n" + redact_secrets(str(exc)),
+                "The saved-queries folder could not be created.\n\n" + sanitize_error_message(exc),
             )
             return
         path = root / (safe_name if safe_name.lower().endswith(".sql") else safe_name + ".sql")
@@ -3594,7 +3599,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Profile not saved",
                 "Connected successfully, but the profile/password was not saved securely. "
-                "The password was not written to a file.\n\n" + redact_secrets(str(exc)),
+                "The password was not written to a file.\n\n" + sanitize_error_message(exc),
             )
 
     def _set_connection_badge_state(self, state: str) -> None:
@@ -3663,7 +3668,7 @@ class MainWindow(QMainWindow):
         profile_name = str(self.profile.get("name", "Connection") or "Connection")
         schema = self.connect_result.get("database") or self.config.get("default_schema") or "(no default schema)"
         hint = "MySQL session lost. Reconnect before running more SQL."
-        detail = redact_secrets(str(error_message or "")).strip()
+        detail = sanitize_error_message(error_message, fallback="")
         details = f"{hint}" + (f" Details: {detail}" if detail else "")
         self.connection_badge.setText(f"●  {profile_name} · {host} · Connection lost")
         self.connection_badge.setToolTip(details)

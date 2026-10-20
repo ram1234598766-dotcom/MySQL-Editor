@@ -480,6 +480,33 @@ def redact_sql_secrets(sql: str) -> str:
     return redact_secrets(redacted)
 
 
+def sanitize_error_message(
+    value: object,
+    *,
+    fallback: str = "The operation failed. Check the connection and try again.",
+    limit: int = 1600,
+) -> str:
+    """Redact secret-bearing SQL and key/value fragments at a user-visible error boundary.
+
+    Error text may originate from a driver, filesystem, worker result, or another
+    subsystem. Always return bounded text, remove NUL/control characters that can
+    make UI feedback confusing, and never rely on a particular producer having
+    sanitized its exception already.
+    """
+    message = "" if value is None else redact_sql_secrets(str(value))
+    message = message.replace("\x00", "")
+    message = re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", message).strip()
+    if not message:
+        return fallback
+    try:
+        max_length = max(1, min(int(limit), 10000))
+    except (TypeError, ValueError, OverflowError):
+        max_length = 1600
+    if len(message) > max_length:
+        return message[:max_length] + "…"
+    return message
+
+
 def safe_identifier(name: str) -> str:
     tick = chr(96)
     return tick + name.replace(tick, tick + tick) + tick

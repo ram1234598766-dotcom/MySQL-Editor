@@ -2,7 +2,7 @@ import pytest
 
 from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source,
-    iter_statement_spans, redact_secrets, split_sql_statements,
+    iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -294,3 +294,37 @@ def test_definer_routine_without_delimiter_fails_closed_even_without_spaces():
         split_sql_statements(source)
 
     assert caught.value.line == 1
+
+def test_sanitize_error_message_redacts_mysql_account_sql_and_key_value_secrets():
+    message = (
+        "Server error: CREATE USER 'app'@'%' IDENTIFIED BY 'account-secret'; "
+        "SET PASSWORD FOR 'app'@'%' = 'password-secret'; "
+        "password=kv-secret token: token-secret api_key=api-secret"
+    )
+
+    safe = sanitize_error_message(message)
+
+    for secret in (
+        "account-secret",
+        "password-secret",
+        "kv-secret",
+        "token-secret",
+        "api-secret",
+    ):
+        assert secret not in safe
+    assert safe.count("[REDACTED]") >= 5
+    assert "CREATE USER" in safe
+    assert "IDENTIFIED BY" in safe
+
+
+def test_sanitize_error_message_bounds_controls_empty_values_and_fallbacks():
+    safe = sanitize_error_message(" driver error\x00\x01 password=hidden " + "x" * 100, limit=32)
+
+    assert "hidden" not in safe
+    assert "\x00" not in safe
+    assert "\x01" not in safe
+    assert len(safe) <= 33
+    assert safe.endswith("…")
+    assert sanitize_error_message(None, fallback="") == ""
+    assert sanitize_error_message("  \x00  ", fallback="Safe fallback") == "Safe fallback"
+
