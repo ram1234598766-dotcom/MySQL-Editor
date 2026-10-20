@@ -871,7 +871,7 @@ Next: continue with the bounded result-window and spool-backed sort/filter work 
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
-**Status: PR #80 open; CI validation in progress.** The export dialog can select CSV, JSON array, or newline-delimited JSON without adding a runtime dependency.
+**Status: merged to `main` in PR #80 (commit `c9ab16e6bb6c8a4edfacdfe3aab12740cbd614c1`).** The export dialog can select CSV, JSON array, or newline-delimited JSON without adding a runtime dependency.
 
 - JSON/NDJSON writers stream ordered rows directly from the SQLite result spool on the database worker; they do not rely on the grid's loaded rows, sort order, or quick filter.
 - JSON is a conventional array of row objects; NDJSON is one row object per line. SQL NULL maps to JSON `null`; empty text remains an empty string. Duplicate or blank column labels receive stable unique names so duplicate-column values are not overwritten by object-key collisions.
