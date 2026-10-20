@@ -867,3 +867,15 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
 The exact branch/PR checks must pass before merge. Afterward, continue with the bounded result-window and spool-backed sort/filter work before marking the large-results exit gate closed.
+
+### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
+
+**Status: implementation branch ready for CI; not yet merged.** The export dialog can select CSV, JSON array, or newline-delimited JSON without adding a runtime dependency.
+
+- JSON/NDJSON writers stream ordered rows directly from the SQLite result spool on the database worker; they do not rely on the grid's loaded rows, sort order, or quick filter.
+- JSON is a conventional array of row objects; NDJSON is one row object per line. SQL NULL maps to JSON `null`; empty text remains an empty string. Duplicate or blank column labels receive stable unique names so duplicate-column values are not overwritten by object-key collisions.
+- Both formats use a same-directory temporary file, flush/fsync, and replace the destination only after a successful full export. A malformed spool row or serialization failure leaves an existing destination intact and removes the temporary file.
+- UI feedback is persistent, non-modal, format-specific, and redacts credential-like error fragments; tests cover format selection, null/empty/Unicode/duplicate headers, fetch-order semantics, success feedback, failure cleanup, and preservation of pre-existing files.
+- README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
+
+**Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Bounded model-row retention, spool-backed filtering/sorting, and the Schema Explorer preview cap are still unresolved. Large-result performance and physical-Windows QA have not been measured by this change.
