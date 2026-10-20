@@ -180,6 +180,8 @@ def test_stable_tag_build_is_separate_from_release_publication():
     assert "inputs.publish_release == true" in publish_if
     assert "Validate explicit stable release publication request" in publish_job
     assert "A manual stable release publication request must target an existing v-prefixed version tag." in publish_job
+    assert 'lowerReleaseTag="${releaseTag,,}"' in workflow
+    assert '[[ "$lowerReleaseTag" =~ -(alpha|beta|rc|preview)([.-]|$) ]]' in workflow
 
     # The build has no write permission; only the explicitly gated publish job can create releases.
     assert "contents: write" not in build_job
