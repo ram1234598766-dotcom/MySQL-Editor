@@ -4326,9 +4326,17 @@ class MainWindow(QMainWindow):
         if item is None or str(item.get("kind", "")).casefold() != "rows":
             return None
         table_edit = item.get("table_edit")
-        if not isinstance(table_edit, dict) or not table_edit.get("enabled"):
+        if (
+            not isinstance(table_edit, dict)
+            or not table_edit.get("enabled")
+            or item.get("view_id")
+        ):
             return None
-        row_index, column_index = source_index.row(), source_index.column()
+        display_row_index, column_index = source_index.row(), source_index.column()
+        absolute_row_index = self.result_model.absolute_row_index(display_row_index)
+        if absolute_row_index is None:
+            return None
+        row_index = absolute_row_index
         editable_columns = table_edit.get("editable_column_indices") or []
         if column_index not in editable_columns:
             return None
@@ -4346,14 +4354,17 @@ class MainWindow(QMainWindow):
         headers = item.get("headers") or []
         if not 0 <= column_index < len(headers):
             return None
+        if not 0 <= display_row_index < len(old_values):
+            return None
         return {
             "item": item,
             "table_edit": table_edit,
             "row_index": row_index,
+            "display_row_index": display_row_index,
             "column_index": column_index,
             "column_name": str(headers[column_index]),
-            "old_value": old_values[row_index],
-            "primary_key_values": list(row_keys[row_index]),
+            "old_value": old_values[display_row_index],
+            "primary_key_values": list(row_keys[display_row_index]),
             "primary_key_columns": list(primary_key_columns),
         }
 
@@ -4405,6 +4416,7 @@ class MainWindow(QMainWindow):
         context = {
             "result_id": result_id,
             "row_index": entry["row_index"],
+            "display_row_index": entry["display_row_index"],
             "column_index": entry["column_index"],
             "schema": str(table_edit.get("schema") or ""),
             "table": str(table_edit.get("table") or ""),
