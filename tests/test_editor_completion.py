@@ -1065,3 +1065,31 @@ def test_sql_editor_keyboard_help_documents_comment_toggle():
         editor.deleteLater()
         _APP.processEvents()
 
+def test_ctrl_slash_preserves_reverse_selection_direction():
+    editor = SqlEditor()
+    source = "SELECT x\\nFROM t"
+    expected_commented = "-- SELECT x\\n-- FROM t"
+    try:
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(len(source))
+        cursor.setPosition(0, QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == expected_commented
+        assert editor.textCursor().hasSelection()
+        assert editor.textCursor().anchor() == len(expected_commented)
+        assert editor.textCursor().position() == 0
+
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == source
+        assert editor.textCursor().hasSelection()
+        assert editor.textCursor().anchor() == len(source)
+        assert editor.textCursor().position() == 0
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()
+
