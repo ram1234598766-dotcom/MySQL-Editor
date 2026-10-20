@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Qt, QTimer, QUrl
+from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Signal, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
@@ -64,10 +64,15 @@ CSV_EXPORT_SEMANTICS = (
 
 
 class ResultsModel(QAbstractTableModel):
+    more_rows_requested = Signal()
+
     def __init__(self, headers=None, rows=None, parent=None, theme: object = "dark"):
         super().__init__(parent)
         self.headers = list(headers or [])
         self.rows = list(rows or [])
+        self.total_rows = len(self.rows)
+        self._page_load_pending = False
+        self._page_load_available = True
         self._null_foreground = QColor(color_for_theme("text_muted", theme))
 
     def set_theme(self, theme: object) -> None:
@@ -86,8 +91,46 @@ class ResultsModel(QAbstractTableModel):
     def update(self, headers, rows):
         self.beginResetModel()
         self.headers = list(headers)
-        self.rows = list(rows)
+        self.rows = [list(row) for row in rows]
+        self.total_rows = len(self.rows)
+        self._page_load_pending = False
+        self._page_load_available = True
         self.endResetModel()
+
+    def set_paging_state(
+        self,
+        *,
+        total_rows: int | None = None,
+        pending: bool | None = None,
+        available: bool | None = None,
+    ) -> None:
+        """Update asynchronous spool paging state without resetting visible rows."""
+        if total_rows is not None:
+            try:
+                parsed_total = max(0, int(total_rows))
+            except (TypeError, ValueError, OverflowError):
+                parsed_total = len(self.rows)
+            self.total_rows = max(len(self.rows), parsed_total)
+        if pending is not None:
+            self._page_load_pending = bool(pending)
+        if available is not None:
+            self._page_load_available = bool(available)
+
+    def canFetchMore(self, parent=QModelIndex()) -> bool:
+        if parent.isValid():
+            return False
+        return (
+            self._page_load_available
+            and not self._page_load_pending
+            and len(self.rows) < self.total_rows
+        )
+
+    def fetchMore(self, parent=QModelIndex()) -> None:
+        """Request another spool page; the worker result arrives asynchronously."""
+        if not self.canFetchMore(parent):
+            return
+        self._page_load_pending = True
+        self.more_rows_requested.emit()
 
     def update_cell_row(self, row_index: int, values) -> bool:
         """Replace a single preview row after MySQL confirms a cell update."""
@@ -116,6 +159,7 @@ class ResultsModel(QAbstractTableModel):
         last = first + len(additions) - 1
         self.beginInsertRows(QModelIndex(), first, last)
         self.rows.extend(additions)
+        self.total_rows = max(self.total_rows, len(self.rows))
         self.endInsertRows()
 
     def rowCount(self, parent=QModelIndex()):
@@ -508,8 +552,9 @@ class MainWindow(QMainWindow):
         self.fetch_more_button.setObjectName("fetchMoreRowsButton")
         self.fetch_more_button.setAccessibleName("Fetch more result rows from the local result cache")
         self.fetch_more_button.setToolTip(
-            "Append up to 1,000 more already-fetched rows from the local result cache. "
-            "This does not rerun or modify SQL. CSV export still includes every fetched row."
+            "Scroll to the end of the visible rows to load the next page automatically, "
+            "or use this button to append up to 1,000 already-fetched rows. SQL is not rerun; "
+            "CSV export still includes every fetched row."
         )
         self.fetch_more_button.setEnabled(False)
         self.fetch_more_button.clicked.connect(self.fetch_more_result_rows)
@@ -530,6 +575,7 @@ class MainWindow(QMainWindow):
         self.result_model = ResultsModel(
             theme=resolve_theme(self._settings.value("ui/theme", "dark", type=str))
         )
+        self.result_model.more_rows_requested.connect(self.fetch_more_result_rows)
         self.result_grid = QTableView()
         self.result_grid.setObjectName("resultsGrid")
         self.result_grid.setAccessibleName("SQL query results table")
@@ -1502,8 +1548,9 @@ class MainWindow(QMainWindow):
             next_count = min(RESULT_PAGE_ROWS, total - loaded)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
             self.fetch_more_button.setToolTip(
-                f"Append the next {next_count:,} row(s) from the local result cache. "
-                "This does not rerun or modify SQL. CSV export still includes every fetched row."
+                f"Append the next {next_count:,} row(s) from the local result cache, "
+                "or scroll to the end to load a page automatically. "
+                "This does not rerun SQL; CSV export still includes every fetched row."
             )
             self.fetch_more_button.setEnabled(True)
         elif item and str(item.get("kind", "")).casefold() == "rows" and not item.get("page_load_unavailable"):
@@ -1528,10 +1575,13 @@ class MainWindow(QMainWindow):
     def fetch_more_result_rows(self) -> None:
         """Append the next spool page without re-executing the SQL statement."""
         if self._query_running or self._result_page_load_pending is not None:
+            if self._result_page_load_pending is None:
+                self.result_model.set_paging_state(pending=False)
             return
         result_id = self._current_result_id
         item = self._result_item_by_id(result_id)
         if not item or str(item.get("kind", "")).casefold() != "rows":
+            self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
             return
         rows = item.get("rows", [])
@@ -1541,6 +1591,7 @@ class MainWindow(QMainWindow):
             total = len(rows)
         offset = len(rows)
         if offset >= total or item.get("page_load_unavailable"):
+            self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
             return
         job_id = self._dispatch(
@@ -1554,6 +1605,11 @@ class MainWindow(QMainWindow):
                 "result_id": result_id,
                 "offset": offset,
             }
+            self.result_model.set_paging_state(pending=True)
+            self._set_result_controls()
+        else:
+            item["page_load_unavailable"] = True
+            self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
 
     def _query_for_run(self, selection_only=False, whole_script=False):
@@ -2056,6 +2112,7 @@ class MainWindow(QMainWindow):
         if index < 0 or index >= len(self._query_results):
             self._current_result_id = None
             self._result_fetched_row_count = 0
+            self.result_model.update([], [])
             self._set_result_controls()
             return
         item = self._query_results[index]
@@ -2063,13 +2120,18 @@ class MainWindow(QMainWindow):
         self._set_result_completion_words(item.get("headers", []))
         headers = item.get("headers", [])
         rows = item.get("rows", [])
+        self._current_result_id = item.get("result_id")
         self.result_model.update(headers, rows)
         self._size_result_columns(headers, rows)
-        self._current_result_id = item.get("result_id")
         try:
             total = max(len(rows), int(item.get("row_count", len(rows)) or 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             total = len(rows)
+        self.result_model.set_paging_state(
+            total_rows=total,
+            pending=False,
+            available=not bool(item.get("page_load_unavailable")),
+        )
         self._result_fetched_row_count = total
         duration = item.get("duration_ms", 0)
         self._last_duration = duration
@@ -2228,12 +2290,16 @@ class MainWindow(QMainWindow):
             if not result.get("ok"):
                 if item is not None:
                     item["page_load_unavailable"] = True
+                if self._current_result_id == result_id:
+                    self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     detail = sanitize_error_message(result.get("error"), fallback="The local result cache could not supply more rows.")
                     self.status.setText("Could not fetch more rows · " + detail)
                 self._set_result_controls()
                 return
             if item is None:
+                if self._current_result_id == result_id:
+                    self.result_model.set_paging_state(pending=False, available=False)
                 self._set_result_controls()
                 return
             loaded_rows = item.setdefault("rows", [])
@@ -2242,6 +2308,9 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError, OverflowError):
                 expected_offset = -1
             if expected_offset != len(loaded_rows):
+                item["page_load_unavailable"] = True
+                if self._current_result_id == result_id:
+                    self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     self.status.setText(
                         "Additional rows were not added because this result changed while paging. "
@@ -2256,6 +2325,8 @@ class MainWindow(QMainWindow):
                 total = max(len(loaded_rows), int(item.get("row_count", len(loaded_rows)) or 0))
             if not page_rows and expected_offset < total:
                 item["page_load_unavailable"] = True
+                if self._current_result_id == result_id:
+                    self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     self.status.setText(
                         "No additional rows were returned by the local result cache. Run the query again."
@@ -2267,6 +2338,11 @@ class MainWindow(QMainWindow):
             item["preview_truncated"] = len(loaded_rows) < total
             if self._current_result_id == result_id:
                 self.result_model.append_rows(page_rows)
+                self.result_model.set_paging_state(
+                    total_rows=total,
+                    pending=False,
+                    available=not bool(item.get("page_load_unavailable")),
+                )
                 self._result_fetched_row_count = total
                 if self.result_filter.text().strip():
                     self._filter_results(self.result_filter.text())
