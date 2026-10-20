@@ -673,33 +673,18 @@ class SqlEditor(QPlainTextEdit):
         return tuple(sorted(self._all_completion_words(), key=str.casefold))
 
     def _table_for_qualifier(self, qualifier: str) -> tuple[str, str] | None:
-        """Resolve a table name or alias to its schema/table in the current statement."""
+        """Resolve a table or alias in the local query scope, then correlated outer scopes."""
         key = qualifier.strip("`").replace("``", "`").casefold()
         sql = self.toPlainText()
         cursor_position = min(
             _python_index_from_utf16(sql, self.textCursor().position()), len(sql)
         )
-        code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
-        code_sql = "".join(
-            char if code_mask[position] else " "
-            for position, char in enumerate(sql)
-        )
-
-        start = 0
-        for position in range(cursor_position):
-            if sql[position] == ";" and code_mask[position]:
-                start = position + 1
-        end = len(sql)
-        for position in range(cursor_position, len(sql)):
-            if sql[position] == ";" and code_mask[position]:
-                end = position
-                break
-        statement = code_sql[start:end]
 
         reserved = {
-            "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "STRAIGHT_JOIN",
+            "AS", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "STRAIGHT_JOIN",
             "WHERE", "ON", "USING", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
-            "UNION", "EXCEPT", "INTERSECT", "SET", "VALUES", "FOR", "LOCK",
+            "UNION", "EXCEPT", "INTERSECT", "SET", "VALUES", "FOR", "LOCK", "SELECT",
+            "WITH", "LATERAL",
         }
         table_pattern = re.compile(
             r"\b(?:FROM|JOIN)\s+"
@@ -708,31 +693,35 @@ class SqlEditor(QPlainTextEdit):
             r"(?:\s+(?:AS\s+)?`?([A-Za-z_$][A-Za-z0-9_$]*)`?)?",
             re.IGNORECASE,
         )
-        resolved: set[tuple[str, str]] = set()
-        for match in table_pattern.finditer(statement):
-            table_ref = re.sub(r"\s", "", match.group(1))
-            parts = table_ref.split(".")
-            schema = (
-                parts[-2].strip("`")
-                if len(parts) > 1
-                else self._completion_active_schema
-            )
-            table = parts[-1].strip("`")
-            if not self._schema_table_available(schema, table):
-                continue
 
-            alias = match.group(2)
-            if alias and alias.upper() not in reserved:
-                if alias.casefold() == key:
+        # Resolve the innermost query first. A duplicate alias inside that same
+        # scope is ambiguous; a same-named alias in an outer scope must not make
+        # that local ambiguity look resolvable.
+        for statement in _completion_query_scope_texts(sql, cursor_position):
+            resolved: set[tuple[str, str]] = set()
+            for match in table_pattern.finditer(statement):
+                table_ref = re.sub(r"\s", "", match.group(1))
+                parts = table_ref.split(".")
+                schema = (
+                    parts[-2].strip("`")
+                    if len(parts) > 1
+                    else self._completion_active_schema
+                )
+                table = parts[-1].strip("`")
+                if not self._schema_table_available(schema, table):
+                    continue
+
+                alias = match.group(2)
+                if alias and alias.upper() not in reserved:
+                    if alias.casefold() == key:
+                        resolved.add((schema, table))
+                elif table.casefold() == key:
                     resolved.add((schema, table))
-            elif table.casefold() == key:
-                resolved.add((schema, table))
 
-        if len(resolved) == 1:
-            return next(iter(resolved))
-        if len(resolved) > 1:
-            # Duplicate aliases across joined sources are ambiguous; never guess.
-            return None
+            if len(resolved) == 1:
+                return next(iter(resolved))
+            if len(resolved) > 1:
+                return None
 
         active_schema = self._completion_active_schema
         if self._schema_table_available(active_schema, qualifier):
@@ -740,36 +729,24 @@ class SqlEditor(QPlainTextEdit):
         return None
 
     def _referenced_tables_in_current_statement(self) -> set[str]:
-        """Return known table names referenced by the statement around the cursor.
+        """Return known tables in visible query scopes, excluding sibling subqueries.
 
-        This intentionally handles common FROM/JOIN/UPDATE/INTO contexts rather than
-        attempting to parse the full MySQL grammar. Strings and comments are masked
-        before scanning so their contents cannot introduce false table references.
+        The innermost query scope is included first, followed by its enclosing
+        scopes so correlated references remain eligible. Nested child queries are
+        masked when their parent scope is scanned. This avoids leaking columns from
+        a sibling subquery while keeping the completion logic deliberately lighter
+        than a full MySQL semantic engine.
         """
         sql = self.toPlainText()
-        cursor_position = _python_index_from_utf16(sql, self.textCursor().position())
-        code_mask = _sql_code_mask(sql, preserve_backtick_identifiers=True)
-        code_sql = "".join(
-            char if code_mask[position] else " "
-            for position, char in enumerate(sql)
+        cursor_position = min(
+            _python_index_from_utf16(sql, self.textCursor().position()), len(sql)
         )
-
-        start = 0
-        for position in range(min(cursor_position, len(sql))):
-            if sql[position] == ";" and code_mask[position]:
-                start = position + 1
-        end = len(sql)
-        for position in range(min(cursor_position, len(sql)), len(sql)):
-            if sql[position] == ";" and code_mask[position]:
-                end = position
-                break
-        statement = code_sql[start:end]
 
         reserved_aliases = {
             "ALL", "AND", "AS", "BY", "CROSS", "EXCEPT", "FOR", "GROUP",
             "HAVING", "INNER", "INTERSECT", "JOIN", "LEFT", "LIMIT", "LOCK",
             "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SET", "UNION",
-            "USE", "USING", "WHERE", "WINDOW",
+            "USE", "USING", "WHERE", "WINDOW", "WITH", "SELECT", "LATERAL",
         }
         table_pattern = re.compile(
             r"\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|TABLE)\s+"
@@ -782,13 +759,15 @@ class SqlEditor(QPlainTextEdit):
             name.casefold(): name for name in self._completion_columns_by_table
         }
         referenced: set[str] = set()
-        for match in table_pattern.finditer(statement):
-            name = known_tables.get(match.group(2).casefold())
-            if name is not None:
+        for statement in _completion_query_scope_texts(sql, cursor_position):
+            for match in table_pattern.finditer(statement):
+                name = known_tables.get(match.group(2).casefold())
+                if name is None:
+                    continue
                 referenced.add(name.casefold())
-            alias = match.group(3)
-            if alias and alias.upper() not in reserved_aliases and name is not None:
-                referenced.add(name.casefold())
+                alias = match.group(3)
+                if alias and alias.upper() not in reserved_aliases:
+                    referenced.add(name.casefold())
         return referenced
 
     def _context_completion_words(self) -> tuple[str, ...]:
