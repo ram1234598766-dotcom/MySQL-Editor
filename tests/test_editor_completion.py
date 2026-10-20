@@ -1067,8 +1067,8 @@ def test_sql_editor_keyboard_help_documents_comment_toggle():
 
 def test_ctrl_slash_preserves_reverse_selection_direction():
     editor = SqlEditor()
-    source = "SELECT x\\nFROM t"
-    expected_commented = "-- SELECT x\\n-- FROM t"
+    source = "SELECT x\nFROM t"
+    expected_commented = "-- SELECT x\n-- FROM t"
     try:
         editor.setPlainText(source)
         cursor = editor.textCursor()
