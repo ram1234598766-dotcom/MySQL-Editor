@@ -1689,15 +1689,28 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError, OverflowError):
             start = 0
         end = start + len(rows)
+        total_key = "view_row_count" if item.get("view_id") else "row_count"
         try:
-            total = max(end, int(item.get("row_count", end) or 0))
+            total = max(end, int(item.get(total_key, end) or 0))
         except (TypeError, ValueError, OverflowError):
             total = end
         return start, end, total
 
     def _restore_initial_result_window(self, item: dict | None) -> None:
-        """Drop an inactive result's window back to its first page to bound aggregate UI memory."""
-        if not isinstance(item, dict) or "initial_rows" not in item:
+        """Restore a result's original preview and release its temporary filtered view."""
+        if not isinstance(item, dict):
+            return
+        view_id = item.pop("view_id", None)
+        item.pop("view_query", None)
+        item.pop("view_row_count", None)
+        item.pop("source_offsets", None)
+        if view_id:
+            self._dispatch(
+                "drop_result_filter",
+                {"view_id": str(view_id)},
+                {"result_id": item.get("result_id"), "view_id": str(view_id)},
+            )
+        if "initial_rows" not in item:
             return
         initial = item.pop("initial_rows")
         item["rows"] = [list(row) for row in initial]
@@ -1725,8 +1738,18 @@ class MainWindow(QMainWindow):
             and start > 0
             and not item.get("page_load_unavailable")
         )
-        pending = self._result_page_load_pending is not None
-        if pending:
+        filter_pending = (
+            self._pending_spool_filter is not None
+            or self._spool_filter_request is not None
+        )
+        pending = self._result_page_load_pending is not None or filter_pending
+        if filter_pending:
+            self.fetch_more_button.setText("Filtering…")
+            self.fetch_more_button.setToolTip(
+                "Searching the full result in the local SQLite cache. The active grid remains bounded."
+            )
+            self.fetch_more_button.setEnabled(False)
+        elif pending:
             self.fetch_more_button.setText("Loading…")
             self.fetch_more_button.setToolTip(
                 "Loading a page from the local result cache. SQL is not rerun."
