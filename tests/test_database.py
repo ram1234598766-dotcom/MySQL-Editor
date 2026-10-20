@@ -1974,3 +1974,137 @@ def test_rollback_to_savepoint_invalidates_preview_until_refreshed(tmp_path):
         worker._spool = None
         worker._spool_dir.rmdir()
 
+class _FilterSpoolWorker:
+    def __init__(self, spool):
+        self._spool = spool
+        self._invalid_table_previews = set()
+        self.activities = []
+
+    def _report_activity(self, message):
+        self.activities.append(str(message))
+
+
+def _make_filter_spool(rows):
+    import sqlite3
+
+    spool = sqlite3.connect(":memory:")
+    spool.executescript(
+        """
+        CREATE TABLE result_meta (
+            result_id TEXT PRIMARY KEY, headers TEXT NOT NULL,
+            statement TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE result_rows (
+            result_id TEXT NOT NULL, row_idx INTEGER NOT NULL, values_json TEXT NOT NULL,
+            PRIMARY KEY(result_id,row_idx)
+        );
+        CREATE TABLE result_filter_views (
+            view_id TEXT PRIMARY KEY, result_id TEXT NOT NULL,
+            query TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX result_filter_views_result_id ON result_filter_views(result_id);
+        CREATE TABLE result_filter_view_rows (
+            view_id TEXT NOT NULL, view_idx INTEGER NOT NULL, source_idx INTEGER NOT NULL,
+            PRIMARY KEY(view_id,view_idx)
+        );
+        """
+    )
+    result_id = "large-filter-fixture"
+    spool.execute(
+        "INSERT INTO result_meta(result_id,headers,statement,row_count) VALUES(?,?,?,?)",
+        (result_id, json.dumps(["name", "rank"]), "SELECT name, rank", len(rows)),
+    )
+    spool.executemany(
+        "INSERT INTO result_rows(result_id,row_idx,values_json) VALUES(?,?,?)",
+        [(result_id, index, json.dumps(row)) for index, row in enumerate(rows)],
+    )
+    spool.commit()
+    return spool, result_id
+
+
+def test_prepare_result_filter_indexes_all_rows_and_pages_by_filtered_position():
+    rows = [
+        ["zeta", 0],
+        ["Alpha", 1],
+        ["beta", 2],
+        [None, 3],
+        ["alphabet", 4],
+        ["ALPHA tail", 5],
+        ["", 6],
+    ]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        result = DatabaseWorker._prepare_result_filter(
+            worker, result_id, "aLpHa", limit=2
+        )
+
+        assert result["ok"] is True
+        assert result["row_count"] == 3
+        assert result["source_row_count"] == len(rows)
+        assert result["rows"] == [["Alpha", 1], ["alphabet", 4]]
+        assert result["source_offsets"] == [1, 4]
+        assert result["has_more"] is True
+
+        second_page = DatabaseWorker._fetch_result_page(
+            worker, result_id, offset=2, limit=2, view_id=result["view_id"]
+        )
+        assert second_page["ok"] is True
+        assert second_page["rows"] == [["ALPHA tail", 5]]
+        assert second_page["source_offsets"] == [5]
+        assert second_page["offset"] == 2
+        assert second_page["row_count"] == 3
+        assert second_page["source_row_count"] == len(rows)
+        assert second_page["has_more"] is False
+    finally:
+        spool.close()
+
+
+def test_prepare_result_filter_uses_displayed_null_marker_and_rejects_bad_requests():
+    rows = [["value", 1], [None, 2], ["", 3]]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        null_result = DatabaseWorker._prepare_result_filter(worker, result_id, "(NULL)", limit=10)
+        assert null_result["ok"] is True
+        assert null_result["row_count"] == 1
+        assert null_result["rows"] == [[None, 2]]
+        assert null_result["source_offsets"] == [1]
+
+        too_long = DatabaseWorker._prepare_result_filter(worker, result_id, "x" * 257)
+        assert too_long["ok"] is False
+        assert "256-character limit" in too_long["error"]
+
+        missing = DatabaseWorker._prepare_result_filter(worker, "expired-result", "value")
+        assert missing["ok"] is False
+        assert "expired" in missing["error"].casefold()
+
+        dropped = DatabaseWorker._drop_result_filter(worker, null_result["view_id"])
+        assert dropped["ok"] is True
+        expired_page = DatabaseWorker._fetch_result_page(
+            worker, result_id, offset=0, limit=10, view_id=null_result["view_id"]
+        )
+        assert expired_page["ok"] is False
+        assert "expired" in expired_page["error"].casefold()
+    finally:
+        spool.close()
+
+
+def test_prepare_result_filter_streams_large_spool_and_reports_progress():
+    rows = [
+        [f"match-row-{index}" if index in {4999, 9999} else f"row-{index}", index]
+        for index in range(10050)
+    ]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        result = DatabaseWorker._prepare_result_filter(worker, result_id, "match-row", limit=1)
+
+        assert result["ok"] is True
+        assert result["row_count"] == 2
+        assert result["rows"] == [["match-row-4999", 4999]]
+        assert result["source_offsets"] == [4999]
+        assert any("scanned 5,000" in message for message in worker.activities)
+        assert any("scanned 10,000" in message for message in worker.activities)
+    finally:
+        spool.close()

@@ -71,6 +71,7 @@ def test_fetch_more_rows_uses_local_cache_and_preserves_active_filter(tmp_path):
         "rows": [["Alpha"], ["Bravo"]],
         "row_count": 4,
         "preview_truncated": True,
+        "table_edit": {"enabled": False, "reason": "read-only table preview"},
         "duration_ms": 7,
     }
     window._query_results = [item]
@@ -435,4 +436,186 @@ def test_late_export_progress_and_completion_cannot_overwrite_newer_query_status
         window._query_running = False
         window.close()
         repository.close()
+
+def test_large_result_filter_scans_spool_pages_matches_and_preserves_export_total(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "full-filter-result",
+        "kind": "rows",
+        "headers": ["name", "rank"],
+        "rows": [["Alpha preview", 1], ["Bravo preview", 2]],
+        "row_count": 8,
+        "preview_truncated": True,
+        "duration_ms": 7,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=8)
+    window._result_fetched_row_count = 8
+    window.result_proxy.setFilterFixedString("")
+    try:
+        window.result_filter.setText("alpha")
+        window._filter_debounce_timer.stop()
+        pending = dict(window._pending_spool_filter)
+        assert pending["query"] == "alpha"
+        assert pending["result_id"] == item["result_id"]
+
+        window._dispatch_spool_filter()
+        action, payload, job_id = worker.submissions[-1]
+        assert action == "filter_result_spool"
+        assert payload == {
+            "result_id": item["result_id"],
+            "query": "alpha",
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+        assert window._spool_filter_request["job_id"] == job_id
+
+        window._on_worker_completed(
+            job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "view-alpha",
+                "query": "alpha",
+                "offset": 0,
+                "rows": [["Alpha row", 10], ["alphabet row", 20]],
+                "source_offsets": [1, 4],
+                "row_count": 4,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": True,
+            },
+        )
+
+        assert item["view_id"] == "view-alpha"
+        assert item["view_query"] == "alpha"
+        assert item["view_row_count"] == 4
+        assert item["row_count"] == 8
+        assert window.result_model.rows == [["Alpha row", 10], ["alphabet row", 20]]
+        assert window.result_model.absolute_row_index(0) == 1
+        assert window.result_model.absolute_row_index(1) == 4
+        assert window.result_model.total_rows == 4
+        assert "4 of 8 fetched row(s) match" in window.result_message.text()
+        assert "exports still include all 8" in window.result_message.text()
+
+        window.fetch_more_result_rows()
+        action, payload, page_job_id = worker.submissions[-1]
+        assert action == "fetch_result_page"
+        assert payload["view_id"] == "view-alpha"
+        assert payload["offset"] == 2
+
+        window._on_worker_completed(
+            page_job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "view-alpha",
+                "offset": 2,
+                "rows": [["ALPHA next", 30], ["Alpha last", 40]],
+                "source_offsets": [6, 7],
+                "row_count": 4,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": False,
+            },
+        )
+
+        assert window.result_model.rows[-2:] == [["ALPHA next", 30], ["Alpha last", 40]]
+        assert window.result_model.absolute_row_index(2) == 6
+        assert window.result_model.absolute_row_index(3) == 7
+        assert window._result_fetched_row_count == 8
+        assert item["row_count"] == 8
+
+        window.result_filter.clear()
+        assert "view_id" not in item
+        assert item["rows"] == [["Alpha preview", 1], ["Bravo preview", 2]]
+        assert window.result_model.rows == item["rows"]
+        assert window.result_model.total_rows == 8
+        assert window._result_fetched_row_count == 8
+        assert worker.submissions[-1][0] == "drop_result_filter"
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+def test_replacing_query_results_releases_the_previous_disk_filter_view(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    old_item = {
+        "result_id": "old-filtered-result",
+        "kind": "rows",
+        "headers": ["name"],
+        "rows": [["Alpha match"]],
+        "initial_rows": [["Alpha"], ["Bravo"]],
+        "row_count": 10,
+        "window_start_offset": 0,
+        "view_id": "old-filter-view",
+        "view_query": "alpha",
+        "view_row_count": 1,
+        "source_offsets": [4],
+    }
+    window._query_results = [old_item]
+    window._current_result_id = old_item["result_id"]
+    try:
+        job_id = window._dispatch("query", {"sql": "SELECT id FROM next_result;"})
+        window._on_worker_completed(
+            job_id,
+            "query",
+            {
+                "ok": True,
+                "results": [{
+                    "result_id": "new-result",
+                    "kind": "rows",
+                    "headers": ["id"],
+                    "rows": [[7]],
+                    "row_count": 1,
+                    "duration_ms": 2,
+                }],
+                "duration_ms": 2,
+            },
+        )
+
+        assert window._current_result_id == "new-result"
+        assert "view_id" not in old_item
+        assert old_item["rows"] == [["Alpha"], ["Bravo"]]
+        cleanup_requests = [
+            payload
+            for action, payload, _task_id in worker.submissions
+            if action == "drop_result_filter"
+        ]
+        assert cleanup_requests == [{"view_id": "old-filter-view"}]
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_programmatic_long_filter_is_clamped_to_the_visible_256_character_limit(tmp_path):
+    window, repository, _worker = _make_window(tmp_path)
+    item = {
+        "result_id": "long-filter-result",
+        "kind": "rows",
+        "headers": ["name"],
+        "rows": [["sample"]],
+        "row_count": 10,
+        "preview_truncated": True,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=10)
+    try:
+        window._filter_results("x" * 300)
+
+        assert len(window.result_filter.text()) == 256
+        assert window._pending_spool_filter is not None
+        assert window._pending_spool_filter["query"] == window.result_filter.text()
+        assert len(window._pending_spool_filter["query"]) == 256
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
 
