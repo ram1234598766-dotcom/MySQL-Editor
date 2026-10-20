@@ -280,6 +280,11 @@ class ResultsModel(QAbstractTableModel):
     def sort(self, column, order=Qt.SortOrder.AscendingOrder):
         if not 0 <= column < len(self.headers):
             return
+        # The live table view sorts through ResultsFilterProxyModel. Sorting the
+        # source model itself would destroy spool order, making the next/previous
+        # page boundary ambiguous for a bounded window.
+        if self.base_offset > 0 or len(self.rows) < self.total_rows:
+            return
         self.layoutAboutToBeChanged.emit()
 
         def sort_key(row):
@@ -315,6 +320,20 @@ class ResultsFilterProxyModel(QSortFilterProxyModel):
             return (0, 0, Decimal(str(value)))
         except (InvalidOperation, ValueError):
             return (0, 1, str(value).casefold())
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Vertical:
+            source = self.sourceModel()
+            if source is not None and source.columnCount() > 0:
+                proxy_index = self.index(section, 0)
+                if proxy_index.isValid():
+                    source_index = self.mapToSource(proxy_index)
+                    absolute_row = getattr(source, "absolute_row_index", None)
+                    if callable(absolute_row):
+                        offset = absolute_row(source_index.row())
+                        if offset is not None:
+                            return str(offset + 1)
+        return super().headerData(section, orientation, role)
 
     def lessThan(self, left, right):
         left_value = left.data(Qt.ItemDataRole.UserRole)
