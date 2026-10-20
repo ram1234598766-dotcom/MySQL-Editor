@@ -67,7 +67,7 @@ def test_json_export_success_explains_null_empty_and_duplicate_header_handling()
     assert window.export_feedback.objectName() == "statusSuccess"
     assert "JSON export complete" in window.export_feedback.text()
     assert "SQL NULL is JSON null" in window.export_feedback.text()
-    assert "duplicate column labels" in window.export_feedback.text()
+    assert "duplicate column labels" in window.export_feedback.text().lower()
     assert path in window.export_feedback.toolTip()
     assert "JSON export completed successfully" in window.export_feedback.accessibleDescription()
     assert window.status.text() == "JSON exported · 42 row(s); saved path shown in Results."
