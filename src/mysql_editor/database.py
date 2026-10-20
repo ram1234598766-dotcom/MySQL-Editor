@@ -164,6 +164,8 @@ class DatabaseWorker(QThread):
         self._table_preview_undo: dict[tuple[str, int], list[Any]] = {}
         # Rollback-to-savepoint can invalidate a cached preview without ending the transaction.
         self._invalid_table_previews: set[str] = set()
+        # Keep bounded paging state separate from the UI and bind it to the MySQL session.
+        self._table_preview_states: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -228,6 +230,7 @@ class DatabaseWorker(QThread):
     def _cleanup_resources(self) -> None:
         """Release connections and remove the temporary result cache after any exit path."""
         self._close_connection()
+        self._table_preview_states.clear()
         if self._spool is not None:
             spool, self._spool = self._spool, None
             try:
@@ -455,6 +458,7 @@ class DatabaseWorker(QThread):
             self._connection_id = None
             self._connection_config = None
             self._session_token = uuid.uuid4().hex
+        self._table_preview_states.clear()
         if connection is not None:
             try:
                 connection.close()
@@ -497,6 +501,7 @@ class DatabaseWorker(QThread):
                 self._connection_id = int(getattr(candidate, "connection_id", 0) or 0)
                 self._connection_config = options
                 self._session_token = uuid.uuid4().hex
+            self._table_preview_states.clear()
             preview_restore = {"preview_rollback_rows": [], "preview_restore_errors": []}
             if previous is not None and previous is not candidate:
                 # Replacing the session implicitly rolls back a pending transaction on
@@ -562,8 +567,8 @@ class DatabaseWorker(QThread):
         if action == "drop_result_filter":
             return self._drop_result_filter(str(payload.get("view_id", "") or ""))
         if action in {
-            "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
-            "update_table_cell", "use_schema", "commit", "rollback",
+            "query", "schema", "schema_objects", "table_preview", "table_preview_page",
+            "inspect_schema_object", "update_table_cell", "use_schema", "commit", "rollback",
         } and self._connection is None:
             return {"ok": False, "error": "Not connected to a MySQL server."}
         if action == "query":
@@ -593,6 +598,8 @@ class DatabaseWorker(QThread):
             return self._read_schema_objects(str(payload.get("schema", "")))
         if action == "table_preview":
             return self._preview_table(str(payload.get("schema", "")), str(payload.get("table", "")))
+        if action == "table_preview_page":
+            return self._fetch_table_preview_page(dict(payload))
         if action == "update_table_cell":
             result = self._update_table_cell(dict(payload))
             result.setdefault(
