@@ -107,7 +107,7 @@ def test_xlsx_export_feedback_explains_streaming_and_blank_cell_semantics():
     assert window.export_feedback.isVisible()
     assert window.export_feedback.objectName() == "statusSuccess"
     assert "XLSX export complete" in window.export_feedback.text()
-    assert "1200 row(s)" in window.export_feedback.text()
+    assert "1,200 row(s)" in window.export_feedback.text()
     assert "SQL NULL and empty text both appear as blank cells" in window.export_feedback.text()
     assert "JSON/NDJSON" in window.export_feedback.text()
     assert "written literally" in window.export_feedback.text()
