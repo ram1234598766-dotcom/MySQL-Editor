@@ -101,21 +101,43 @@ class ResultsModel(QAbstractTableModel):
                 [Qt.ItemDataRole.ForegroundRole],
             )
 
-    def update(self, headers, rows, *, base_offset: int = 0):
-        """Replace the current row window and its absolute source-row mapping."""
+    def update(
+        self,
+        headers,
+        rows,
+        *,
+        base_offset: int = 0,
+        source_offsets=None,
+        total_rows: int | None = None,
+    ):
+        """Replace the row window; base_offset is view position, offsets address source rows."""
         try:
             parsed_offset = max(0, int(base_offset))
         except (TypeError, ValueError, OverflowError):
             parsed_offset = 0
         new_rows = [list(row) for row in (rows or [])]
+        new_offsets = list(source_offsets) if source_offsets is not None else []
         if len(new_rows) > self.MAX_RETAINED_ROWS:
             new_rows = new_rows[: self.MAX_RETAINED_ROWS]
+            if new_offsets:
+                new_offsets = new_offsets[: self.MAX_RETAINED_ROWS]
+        if len(new_offsets) != len(new_rows):
+            new_offsets = list(range(parsed_offset, parsed_offset + len(new_rows)))
+        else:
+            try:
+                new_offsets = [max(0, int(offset)) for offset in new_offsets]
+            except (TypeError, ValueError, OverflowError):
+                new_offsets = list(range(parsed_offset, parsed_offset + len(new_rows)))
+        try:
+            parsed_total = max(0, int(total_rows)) if total_rows is not None else parsed_offset + len(new_rows)
+        except (TypeError, ValueError, OverflowError):
+            parsed_total = parsed_offset + len(new_rows)
         self.beginResetModel()
         self.headers = list(headers or [])
         self.rows = new_rows
         self.base_offset = parsed_offset
-        self._row_offsets = list(range(parsed_offset, parsed_offset + len(new_rows)))
-        self.total_rows = parsed_offset + len(new_rows)
+        self._row_offsets = new_offsets
+        self.total_rows = max(parsed_offset + len(new_rows), parsed_total)
         self._page_load_pending = False
         self._page_load_available = True
         self.endResetModel()
@@ -194,17 +216,23 @@ class ResultsModel(QAbstractTableModel):
             )
         return True
 
-    def append_rows(self, rows) -> int:
+    def append_rows(self, rows, *, source_offsets=None) -> int:
         """Append rows and evict the oldest window prefix once the cache bound is reached."""
         additions = [list(row) for row in rows]
         if not additions:
             return 0
         next_offset = self.base_offset + len(self.rows)
+        try:
+            offsets = [max(0, int(offset)) for offset in source_offsets] if source_offsets is not None else []
+        except (TypeError, ValueError, OverflowError):
+            offsets = []
+        if len(offsets) != len(additions):
+            offsets = list(range(next_offset, next_offset + len(additions)))
         first = len(self.rows)
         last = first + len(additions) - 1
         self.beginInsertRows(QModelIndex(), first, last)
         self.rows.extend(additions)
-        self._row_offsets.extend(range(next_offset, next_offset + len(additions)))
+        self._row_offsets.extend(offsets)
         self.total_rows = max(self.total_rows, self.base_offset + len(self.rows))
         self.endInsertRows()
 
@@ -217,7 +245,7 @@ class ResultsModel(QAbstractTableModel):
             self.endRemoveRows()
         return evicted
 
-    def prepend_rows(self, rows, *, start_offset: int) -> int:
+    def prepend_rows(self, rows, *, start_offset: int, source_offsets=None) -> int:
         """Prepend a contiguous earlier page and evict the newest tail if necessary."""
         additions = [list(row) for row in rows]
         if not additions:
@@ -228,10 +256,16 @@ class ResultsModel(QAbstractTableModel):
             return 0
         if offset + len(additions) != self.base_offset:
             return 0
+        try:
+            offsets = [max(0, int(value)) for value in source_offsets] if source_offsets is not None else []
+        except (TypeError, ValueError, OverflowError):
+            offsets = []
+        if len(offsets) != len(additions):
+            offsets = list(range(offset, offset + len(additions)))
         last = len(additions) - 1
         self.beginInsertRows(QModelIndex(), 0, last)
         self.rows[0:0] = additions
-        self._row_offsets[0:0] = list(range(offset, offset + len(additions)))
+        self._row_offsets[0:0] = offsets
         self.base_offset = offset
         self.total_rows = max(self.total_rows, self.base_offset + len(self.rows))
         self.endInsertRows()
