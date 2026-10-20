@@ -1808,7 +1808,7 @@ class DatabaseWorker(QThread):
                         )
                     record = dict(zip(column_names, values, strict=True))
                     if export_format == "json":
-                        handle.write("\\n" if count == 0 else ",\\n")
+                        handle.write("\n" if count == 0 else ",\n")
                         json.dump(
                             record,
                             handle,
@@ -1823,15 +1823,15 @@ class DatabaseWorker(QThread):
                             allow_nan=False,
                             separators=(",", ":"),
                         ))
-                        handle.write("\\n")
+                        handle.write("\n")
                     count += 1
                     if count >= next_progress_row:
                         report_activity(f"Exported {count:,} {label} row(s)…")
                         next_progress_row = ((count // 5000) + 1) * 5000
                 if export_format == "json":
                     if count:
-                        handle.write("\\n")
-                    handle.write("]\\n")
+                        handle.write("\n")
+                    handle.write("]\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, destination)
