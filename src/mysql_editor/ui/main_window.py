@@ -2286,6 +2286,47 @@ class MainWindow(QMainWindow):
         self._result_completion_words = {str(header) for header in headers}
         self._update_all_editor_completions()
 
+    def _schedule_spool_view_request(self, request: dict) -> None:
+        """Queue one generation-checked filter/sort request behind active spool work."""
+        pending = dict(request)
+        self._pending_spool_filter = pending
+        self.result_proxy.setFilterFixedString("")
+        self.result_model.set_paging_state(pending=True)
+        item = self._result_item_by_id(pending.get("result_id"))
+        source_total = max(
+            0, int((item or {}).get("row_count", len((item or {}).get("rows", []))) or 0)
+        )
+        query = str(pending.get("query") or "")
+        if pending.get("operation") == "sort":
+            column = max(0, int(pending.get("sort_column", 0) or 0))
+            direction = "descending" if pending.get("sort_descending") else "ascending"
+            self.query_meta.setText(f"Sorting {source_total:,} fetched row(s)…")
+            self._set_result_message(
+                f"Sorting the full local result by column {column + 1} ({direction}). "
+                f"Exports retain all {source_total:,} original fetched row(s) in MySQL fetch order."
+            )
+            self.status.setText("Sorting the full result · preparing the disk-backed row order…")
+        else:
+            self.query_meta.setText(f"Searching {source_total:,} fetched row(s)…")
+            if pending.get("sort_column") is not None:
+                self._set_result_message(
+                    f"Filtering the full local result for {query!r} and preserving the selected full-result sort. "
+                    f"All {source_total:,} fetched row(s) remain in the export set."
+                )
+                self.status.setText(
+                    f"Filtering and sorting the full result · scanning {source_total:,} cached row(s)…"
+                )
+            else:
+                self._set_result_message(
+                    f"Searching the full local result for {query!r}. "
+                    f"All {source_total:,} fetched row(s) remain in the export set."
+                )
+                self.status.setText(
+                    f"Filtering the full result · scanning {source_total:,} cached row(s)…"
+                )
+        self._set_result_controls()
+        self._filter_debounce_timer.start(0)
+
     def _filter_results(self, value: str) -> None:
         query = str(value or "").strip()
         self._filter_generation += 1
@@ -2301,7 +2342,22 @@ class MainWindow(QMainWindow):
         if not query:
             self._pending_spool_filter = None
             self.result_proxy.setFilterFixedString("")
-            if item.get("view_id"):
+            view_query = str(item.get("view_query") or "")
+            sort_column = item.get("sort_column")
+            if view_query and sort_column is not None:
+                # Clearing a filter should restore the full result in its selected global
+                # sort order, rather than discard the sort or expose a window-only order.
+                self._schedule_spool_view_request({
+                    "generation": generation,
+                    "result_id": str(item.get("result_id") or ""),
+                    "query": "",
+                    "operation": "sort",
+                    "sort_column": int(sort_column),
+                    "sort_descending": bool(item.get("sort_descending", False)),
+                    "base_view_id": None,
+                })
+                return
+            if item.get("view_id") and view_query:
                 self._restore_initial_result_window(item)
                 headers = item.get("headers", [])
                 rows = item.get("rows", [])
@@ -2328,6 +2384,34 @@ class MainWindow(QMainWindow):
                 self.query_meta.setText(f"{source_total:,} row(s) fetched")
                 self._set_result_message(result_summary_message(item, len(rows), source_total))
                 self._size_result_columns(headers, rows)
+                self._set_result_controls()
+            elif item.get("sort_column") is not None and not item.get("view_id"):
+                # A sort may be queued while an earlier filter request is in flight.
+                # Clearing that filter invalidates its result and keeps the chosen sort.
+                self._schedule_spool_view_request({
+                    "generation": generation,
+                    "result_id": str(item.get("result_id") or ""),
+                    "query": "",
+                    "operation": "sort",
+                    "sort_column": int(item["sort_column"]),
+                    "sort_descending": bool(item.get("sort_descending", False)),
+                    "base_view_id": None,
+                })
+                return
+            elif item.get("view_id") and not view_query:
+                # This is already a sorted whole-result view. Clearing an empty filter
+                # must not discard its materialized sort index.
+                self.result_model.set_paging_state(
+                    pending=self._result_page_load_pending is not None
+                )
+                total = max(0, int(item.get("view_row_count", item.get("row_count", 0)) or 0))
+                start = max(0, int(item.get("window_start_offset", 0) or 0))
+                self.query_meta.setText(
+                    f"{total:,} row(s) sorted by column {int(item.get('sort_column', 0)) + 1}"
+                )
+                self._set_result_message(
+                    result_window_message(item, start, len(item.get("rows", [])), total)
+                )
                 self._set_result_controls()
             else:
                 self.result_model.set_paging_state(
@@ -2380,23 +2464,16 @@ class MainWindow(QMainWindow):
         # Preserve one original preview for clearing the filter, and keep only a
         # bounded number of rows in the grid while the worker indexes all matches.
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        self.result_proxy.setFilterFixedString("")
-        self._pending_spool_filter = {
+        request = {
             "generation": generation,
             "result_id": str(item.get("result_id") or ""),
             "query": query,
+            "operation": "filter",
         }
-        self.result_model.set_paging_state(pending=True)
-        self.query_meta.setText(f"Searching {source_total:,} fetched row(s)…")
-        self._set_result_message(
-            f"Searching the full local result for {query!r}. "
-            f"All {source_total:,} fetched row(s) remain in the export set."
-        )
-        self.status.setText(
-            f"Filtering the full result · scanning {source_total:,} cached row(s)…"
-        )
-        self._set_result_controls()
-        self._filter_debounce_timer.start()
+        if item.get("sort_column") is not None:
+            request["sort_column"] = int(item["sort_column"])
+            request["sort_descending"] = bool(item.get("sort_descending", False))
+        self._schedule_spool_view_request(request)
 
     def _dispatch_spool_filter(self) -> None:
         """Dispatch one debounced full-spool scan at a time."""
