@@ -2495,85 +2495,165 @@ class MainWindow(QMainWindow):
             return
         if action == "fetch_result_page":
             pending_page = self._result_page_load_pending
-            if pending_page and pending_page.get("job_id") == job_id:
-                self._result_page_load_pending = None
+            if not pending_page or pending_page.get("job_id") != job_id:
+                return
+            self._result_page_load_pending = None
             result_id = str(context.get("result_id") or "")
             item = self._result_item_by_id(result_id)
-            if pending_page and pending_page.get("job_id") == job_id and result_id != self._current_result_id:
-                current_item = self._result_item_by_id(self._current_result_id)
+            current_item = self._result_item_by_id(self._current_result_id)
+
+            if pending_page.get("discard_on_completion") or result_id != self._current_result_id:
                 if current_item is not None:
                     self.result_model.set_paging_state(
                         pending=False,
                         available=not bool(current_item.get("page_load_unavailable")),
                     )
-            if not result.get("ok"):
-                if item is not None:
-                    item["page_load_unavailable"] = True
-                if self._current_result_id == result_id:
-                    self.result_model.set_paging_state(pending=False, available=False)
-                if not self._query_running:
-                    detail = sanitize_error_message(result.get("error"), fallback="The local result cache could not supply more rows.")
-                    self.status.setText("Could not fetch more rows · " + detail)
                 self._set_result_controls()
                 return
+
             if item is None:
-                if self._current_result_id == result_id:
-                    self.result_model.set_paging_state(pending=False, available=False)
+                self.result_model.set_paging_state(pending=False, available=False)
                 self._set_result_controls()
                 return
-            loaded_rows = item.setdefault("rows", [])
+
+            if not result.get("ok"):
+                item["page_load_unavailable"] = True
+                self.result_model.set_paging_state(pending=False, available=False)
+                if not self._query_running:
+                    detail = sanitize_error_message(
+                        result.get("error"),
+                        fallback="The local result cache could not supply more rows.",
+                    )
+                    self.status.setText("Could not fetch result rows · " + detail)
+                self._set_result_controls()
+                return
+
+            page_rows = [list(row) for row in (result.get("rows") or [])]
             try:
                 expected_offset = max(0, int(context.get("offset", 0) or 0))
             except (TypeError, ValueError, OverflowError):
                 expected_offset = -1
-            if expected_offset != len(loaded_rows):
-                item["page_load_unavailable"] = True
-                if self._current_result_id == result_id:
-                    self.result_model.set_paging_state(pending=False, available=False)
-                if not self._query_running:
-                    self.status.setText(
-                        "Additional rows were not added because this result changed while paging. "
-                        "Run the query again if more rows are needed."
-                    )
-                self._set_result_controls()
-                return
-            page_rows = [list(row) for row in (result.get("rows") or [])]
+
+            direction = str(pending_page.get("direction", context.get("direction", "next")))
+            window_start, window_end, old_total = self._result_window_bounds(item)
             try:
-                total = max(0, int(result.get("row_count", item.get("row_count", len(loaded_rows))) or 0))
+                total = max(
+                    window_end,
+                    int(result.get("row_count", item.get("row_count", old_total)) or 0),
+                )
             except (TypeError, ValueError, OverflowError):
-                total = max(len(loaded_rows), int(item.get("row_count", len(loaded_rows)) or 0))
-            if not page_rows and expected_offset < total:
+                total = old_total
+
+            if direction == "previous":
+                try:
+                    expected_end = max(0, int(pending_page.get("expected_end", window_start)))
+                except (TypeError, ValueError, OverflowError):
+                    expected_end = -1
+                page_range_valid = (
+                    expected_end == window_start
+                    and expected_offset + len(page_rows) == expected_end
+                    and self.result_model.base_offset == window_start
+                )
+            else:
+                page_range_valid = (
+                    expected_offset == window_end
+                    and self.result_model.base_offset == window_start
+                )
+
+            page_required = (
+                (direction == "next" and expected_offset < total)
+                or (direction == "previous" and expected_offset < window_start)
+            )
+            if not page_range_valid or (not page_rows and page_required):
                 item["page_load_unavailable"] = True
-                if self._current_result_id == result_id:
-                    self.result_model.set_paging_state(pending=False, available=False)
+                self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     self.status.setText(
-                        "No additional rows were returned by the local result cache. Run the query again."
+                        "Rows were not added because this result window changed while paging. "
+                        "Run the query again if the result cache is inconsistent."
                     )
                 self._set_result_controls()
                 return
-            loaded_rows.extend(page_rows)
-            item["row_count"] = total
-            item["preview_truncated"] = len(loaded_rows) < total
-            if self._current_result_id == result_id:
-                self.result_model.append_rows(page_rows)
-                self.result_model.set_paging_state(
-                    total_rows=total,
-                    pending=False,
-                    available=not bool(item.get("page_load_unavailable")),
+
+            item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+            loaded_rows = item.setdefault("rows", [])
+            scrollbar = self.result_grid.verticalScrollBar()
+            scroll_before = scrollbar.value()
+            page_count = len(page_rows)
+
+            if direction == "previous":
+                loaded_rows[0:0] = page_rows
+                item["window_start_offset"] = expected_offset
+                excess = max(0, len(loaded_rows) - self.result_model.MAX_RETAINED_ROWS)
+                if excess:
+                    del loaded_rows[-excess:]
+                evicted = self.result_model.prepend_rows(
+                    page_rows,
+                    start_offset=expected_offset,
                 )
-                self._result_fetched_row_count = total
-                if self.result_filter.text().strip():
-                    self._filter_results(self.result_filter.text())
-                else:
-                    self._set_result_message(
-                        result_summary_message(item, len(loaded_rows), total)
+                if evicted != excess:
+                    item["page_load_unavailable"] = True
+                    self.result_model.set_paging_state(pending=False, available=False)
+                    self._set_result_controls()
+                    return
+                if not self.result_filter.text().strip() and self.result_proxy.sortColumn() < 0:
+                    QTimer.singleShot(
+                        0,
+                        lambda value=scroll_before + page_count: scrollbar.setValue(
+                            min(scrollbar.maximum(), value)
+                        ),
                     )
+                page_description = "earlier"
+            else:
+                loaded_rows.extend(page_rows)
+                excess = max(0, len(loaded_rows) - self.result_model.MAX_RETAINED_ROWS)
+                if excess:
+                    del loaded_rows[:excess]
+                    item["window_start_offset"] = window_start + excess
+                else:
+                    item["window_start_offset"] = window_start
+                evicted = self.result_model.append_rows(page_rows)
+                if evicted != excess:
+                    item["page_load_unavailable"] = True
+                    self.result_model.set_paging_state(pending=False, available=False)
+                    self._set_result_controls()
+                    return
+                if excess:
+                    QTimer.singleShot(
+                        0,
+                        lambda value=max(0, scroll_before - excess): scrollbar.setValue(value),
+                    )
+                page_description = "additional"
+
+            item["row_count"] = total
+            item["preview_truncated"] = (
+                item.get("window_start_offset", 0) > 0
+                or item.get("window_start_offset", 0) + len(loaded_rows) < total
+            )
+            self.result_model.set_paging_state(
+                total_rows=total,
+                pending=False,
+                available=not bool(item.get("page_load_unavailable")),
+            )
+            self._result_fetched_row_count = total
+
+            if self.result_filter.text().strip():
+                self._filter_results(self.result_filter.text())
+            else:
+                self._set_result_message(
+                    result_window_message(
+                        item,
+                        int(item.get("window_start_offset", 0) or 0),
+                        len(loaded_rows),
+                        total,
+                    )
+                )
             self._set_result_controls()
-            if not self._query_running and self._current_result_id == result_id:
+            if not self._query_running:
+                start, end, _ = self._result_window_bounds(item)
                 self.status.setText(
-                    f"Loaded {len(page_rows):,} additional row(s) from the local result cache · "
-                    f"{len(loaded_rows):,} of {total:,} shown. SQL was not rerun."
+                    f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
+                    f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
                 )
             return
         if action == "update_table_cell":
