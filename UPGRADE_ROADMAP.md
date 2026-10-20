@@ -329,7 +329,7 @@ Tasks:
 - [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and result export of invalidated previews until re-preview.
 - Ensure result sorting does not reorder the underlying result spool. CSV, JSON, and NDJSON exports preserve server-fetch order rather than the current sorted-grid order, and quick filtering never reduces the exported row set.
 - [x] Add JSON-array and NDJSON export alongside CSV without adding a runtime dependency; tests cover type preservation, duplicate column labels, fetch order, and atomic-failure cleanup.
-- Keep XLSX export deferred until a streaming writer is evaluated for Python/Qt/PyInstaller compatibility, dependency size, licence, and large-file behavior.
+- [x] Implement XLSX export using XlsxWriter `constant_memory` mode and sequential row writes. XlsxWriter is declared in `requirements.txt` and `pyproject.toml`; export disables string-to-formula, string-to-URL, and string-to-number conversion, writes text explicitly as literal strings, preserves existing destinations through same-directory temporary files and atomic replacement, and rolls over to numbered worksheets at the Excel row limit. The dependency uses BSD-2-Clause. Regression coverage verifies spool/fetch order, formula and hyperlink safety, NULL/empty limitations, long-cell rejection, numbered-sheet rollover, malformed-spool failures, and preservation of existing workbooks.
 - [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
 - Continue atomic file replacement and temp-file cleanup. For long exports, show true progress or an honest indeterminate state and keep the window responsive.
 
@@ -338,6 +338,7 @@ Exit gate:
 - Large results do not cause UI freezes or unbounded memory use.
 - Failures preserve previously saved export files.
 - Row counts and completion states agree with the worker's result data.
+- [x] XLSX export has explicit row, column, worksheet-count, and cell-text limits; a rejected value or malformed row does not replace an existing workbook.
 - [x] Table-edit tests cover eligibility, non-transactional engine rejection, parameterized update and no implicit commit, stale same-cell and other-column conflict detection, session invalidation, full rollback restoration, savepoint rollback invalidation, and UI consistency.
 - [x] Explain-plan tests cover JSON row extraction, malformed/empty/error responses, nested plan rendering, raw JSON copy, asynchronous request dispatch, and graceful unsupported-server failures.
 - [x] Bound remote EXPLAIN JSON to 2 MiB, reject malformed/excessively nested JSON, limit the visual tree to 3,000 nodes and 32 levels, and cap the summary traversal; the raw JSON remains available when visual details are truncated.
