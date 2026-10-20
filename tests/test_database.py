@@ -2232,3 +2232,22 @@ def test_prepare_result_sort_rejects_invalid_column_and_expired_base_view():
     finally:
         spool.close()
 
+def test_prepare_result_sort_processes_large_results_in_batches_and_reports_progress():
+    rows = [[f"row-{index}", index] for index in range(10050)]
+    spool, result_id = _make_filter_spool(rows)
+    worker = _FilterSpoolWorker(spool)
+    try:
+        result = DatabaseWorker._prepare_result_sort(
+            worker, result_id, 1, True, limit=2
+        )
+
+        assert result["ok"] is True
+        assert result["row_count"] == len(rows)
+        assert result["source_row_count"] == len(rows)
+        assert result["rows"] == [["row-10049", 10049], ["row-10048", 10048]]
+        assert result["source_offsets"] == [10049, 10048]
+        assert any("indexed 5,000 of 10,050" in message for message in worker.activities)
+        assert any("indexed 10,000 of 10,050" in message for message in worker.activities)
+    finally:
+        spool.close()
+
