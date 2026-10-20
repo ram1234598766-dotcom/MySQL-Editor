@@ -923,6 +923,257 @@ class DatabaseWorker(QThread):
                 "query": needle,
             }
 
+    def _sort_result_view_rows(
+        self,
+        view_id: str,
+        column: int,
+        *,
+        descending: bool = False,
+    ) -> None:
+        """Sort a disk-backed view without materializing all row values in Python memory.
+
+        Keys are computed in bounded batches and stored in SQLite. Numeric values use a
+        DECIMAL collation so integers, decimal strings, and large numeric values keep the
+        same numeric-aware semantics as ResultsFilterProxyModel without float precision
+        loss. NULLs stay at the bottom in either direction, and equal keys retain the
+        incoming view order.
+        """
+        if self._spool is None:
+            raise RuntimeError("The local result cache is no longer available.")
+        self._spool.create_collation("DECIMAL", _decimal_sort_collation)
+        meta = self._spool.execute(
+            "SELECT result_id, row_count FROM result_filter_views WHERE view_id=?",
+            (view_id,),
+        ).fetchone()
+        if meta is None:
+            raise ValueError("This result view has expired. Apply the view again.")
+        result_id = str(meta[0])
+        expected_rows = max(0, int(meta[1] or 0))
+        column_index = int(column)
+        self._spool.execute(
+            "DELETE FROM result_view_sort_keys WHERE view_id=?",
+            (view_id,),
+        )
+        cursor = self._spool.execute(
+            "SELECT v.view_idx, v.source_idx, r.values_json "
+            "FROM result_filter_view_rows AS v "
+            "JOIN result_rows AS r ON r.result_id=? AND r.row_idx=v.source_idx "
+            "WHERE v.view_id=? ORDER BY v.view_idx",
+            (result_id, view_id),
+        )
+        scanned = 0
+        while True:
+            batch = cursor.fetchmany(RESULT_PAGE_ROWS)
+            if not batch:
+                break
+            keys = []
+            for ordinal, source_idx, values_json in batch:
+                values = json.loads(values_json)
+                if not isinstance(values, list):
+                    raise ValueError("A cached result row is not a JSON array.")
+                value = values[column_index] if column_index < len(values) else None
+                if value is None:
+                    null_rank, type_rank, numeric_key, text_key = 1, 0, "", ""
+                else:
+                    number = None
+                    try:
+                        candidate = Decimal(str(value))
+                        if candidate.is_finite():
+                            number = candidate
+                    except (InvalidOperation, TypeError, ValueError):
+                        number = None
+                    if number is not None:
+                        null_rank, type_rank = 0, 0
+                        numeric_key, text_key = str(number), ""
+                    else:
+                        null_rank, type_rank = 0, 1
+                        numeric_key, text_key = "", str(value).casefold()
+                keys.append((
+                    view_id, int(ordinal), int(source_idx), null_rank,
+                    type_rank, numeric_key, text_key,
+                ))
+            if keys:
+                self._spool.executemany(
+                    "INSERT INTO result_view_sort_keys"
+                    "(view_id,ordinal,source_idx,null_rank,type_rank,numeric_key,text_key) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    keys,
+                )
+            scanned += len(batch)
+            if scanned and scanned % 5000 < len(batch):
+                self._report_activity(
+                    f"Preparing full-result sort · indexed {scanned:,} of {expected_rows:,} row(s)…"
+                )
+
+        if scanned != expected_rows:
+            raise ValueError(
+                "The result view changed while it was being sorted. Please sort it again."
+            )
+
+        self._spool.execute(
+            "DELETE FROM result_filter_view_rows WHERE view_id=?",
+            (view_id,),
+        )
+        direction = "DESC" if descending else "ASC"
+        ordered = self._spool.execute(
+            "SELECT source_idx FROM result_view_sort_keys WHERE view_id=? "
+            "ORDER BY null_rank ASC, type_rank " + direction
+            + ", numeric_key COLLATE DECIMAL " + direction
+            + ", text_key COLLATE BINARY " + direction
+            + ", ordinal ASC",
+            (view_id,),
+        )
+        next_index = 0
+        while True:
+            batch = ordered.fetchmany(RESULT_PAGE_ROWS)
+            if not batch:
+                break
+            mappings = [
+                (view_id, next_index + index, int(row[0]))
+                for index, row in enumerate(batch)
+            ]
+            self._spool.executemany(
+                "INSERT INTO result_filter_view_rows(view_id,view_idx,source_idx) VALUES(?,?,?)",
+                mappings,
+            )
+            next_index += len(mappings)
+        self._spool.execute(
+            "DELETE FROM result_view_sort_keys WHERE view_id=?",
+            (view_id,),
+        )
+
+    def _prepare_result_sort(
+        self,
+        result_id: str,
+        column: Any,
+        descending: bool = False,
+        limit: Any = RESULT_PAGE_ROWS,
+        *,
+        base_view_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a globally sorted disk-backed view of a result or an existing view."""
+        if self._spool is None:
+            return {"ok": False, "error": "The local result cache is no longer available."}
+        chosen_result_id = str(result_id or "").strip()
+        if not chosen_result_id:
+            return {"ok": False, "error": "A result identifier is required for sorting."}
+        try:
+            column_index = int(column)
+        except (TypeError, ValueError, OverflowError):
+            column_index = -1
+        try:
+            page_limit = int(limit or RESULT_PAGE_ROWS)
+        except (TypeError, ValueError, OverflowError):
+            page_limit = RESULT_PAGE_ROWS
+        page_limit = max(1, min(RESULT_PAGE_ROWS, page_limit))
+        if chosen_result_id in getattr(self, "_invalid_table_previews", set()):
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh it before sorting.",
+                "result_id": chosen_result_id,
+            }
+
+        view_id = uuid.uuid4().hex
+        try:
+            result_meta = self._spool.execute(
+                "SELECT headers, row_count FROM result_meta WHERE result_id=?",
+                (chosen_result_id,),
+            ).fetchone()
+            if result_meta is None:
+                return {
+                    "ok": False,
+                    "error": "This query result has expired. Run the query again.",
+                    "result_id": chosen_result_id,
+                }
+            try:
+                headers = json.loads(result_meta[0])
+            except (TypeError, json.JSONDecodeError):
+                headers = []
+            if not 0 <= column_index < len(headers):
+                return {
+                    "ok": False,
+                    "error": "The requested sort column is invalid for this result.",
+                    "result_id": chosen_result_id,
+                }
+            source_row_count = max(0, int(result_meta[1] or 0))
+            query = ""
+            if base_view_id:
+                base_meta = self._spool.execute(
+                    "SELECT result_id, query, row_count FROM result_filter_views WHERE view_id=?",
+                    (str(base_view_id),),
+                ).fetchone()
+                if base_meta is None or str(base_meta[0]) != chosen_result_id:
+                    return {
+                        "ok": False,
+                        "error": "The current result view has expired. Apply the filter or sort again.",
+                        "result_id": chosen_result_id,
+                        "view_id": base_view_id,
+                    }
+                query = str(base_meta[1] or "")
+                view_row_count = max(0, int(base_meta[2] or 0))
+            else:
+                view_row_count = source_row_count
+
+            self._spool.commit()
+            self._spool.execute("BEGIN")
+            self._spool.execute(
+                "INSERT INTO result_filter_views(view_id,result_id,query,row_count) VALUES(?,?,?,?)",
+                (view_id, chosen_result_id, query, view_row_count),
+            )
+            if base_view_id:
+                self._spool.execute(
+                    "INSERT INTO result_filter_view_rows(view_id,view_idx,source_idx) "
+                    "SELECT ?, view_idx, source_idx FROM result_filter_view_rows "
+                    "WHERE view_id=? ORDER BY view_idx",
+                    (view_id, str(base_view_id)),
+                )
+            else:
+                self._spool.execute(
+                    "INSERT INTO result_filter_view_rows(view_id,view_idx,source_idx) "
+                    "SELECT ?, row_idx, row_idx FROM result_rows WHERE result_id=? ORDER BY row_idx",
+                    (view_id, chosen_result_id),
+                )
+            self._sort_result_view_rows(
+                view_id, column_index, descending=bool(descending)
+            )
+            self._spool.commit()
+            first_page = self._spool.execute(
+                "SELECT r.values_json, v.source_idx "
+                "FROM result_filter_view_rows AS v "
+                "JOIN result_rows AS r ON r.result_id=? AND r.row_idx=v.source_idx "
+                "WHERE v.view_id=? ORDER BY v.view_idx LIMIT ? OFFSET 0",
+                (chosen_result_id, view_id, page_limit),
+            ).fetchall()
+            return {
+                "ok": True,
+                "result_id": chosen_result_id,
+                "view_id": view_id,
+                "query": query,
+                "offset": 0,
+                "rows": [json.loads(value_json) for value_json, _source_idx in first_page],
+                "source_offsets": [int(source_idx) for _value_json, source_idx in first_page],
+                "row_count": view_row_count,
+                "source_row_count": source_row_count,
+                "page_size": page_limit,
+                "has_more": len(first_page) < view_row_count,
+                "sort_column": column_index,
+                "sort_descending": bool(descending),
+            }
+        except Exception as exc:
+            try:
+                self._spool.rollback()
+                self._spool.execute("DELETE FROM result_view_sort_keys WHERE view_id=?", (view_id,))
+                self._spool.execute("DELETE FROM result_filter_view_rows WHERE view_id=?", (view_id,))
+                self._spool.execute("DELETE FROM result_filter_views WHERE view_id=?", (view_id,))
+                self._spool.commit()
+            except Exception:
+                pass
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "result_id": chosen_result_id,
+            }
+
     def _drop_result_filter(self, view_id: str) -> dict[str, Any]:
         """Remove one temporary disk-backed filter view from the session spool."""
         if self._spool is None:
