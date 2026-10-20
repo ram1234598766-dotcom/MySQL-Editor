@@ -1132,7 +1132,7 @@ class SqlEditor(QPlainTextEdit):
                 changed_line = line[:offset] + "-- " + body
                 # A cursor at the first SQL character follows that character after insertion.
                 threshold = marker_position
-            edits.append((line_block, line, changed_line))
+            edits.append((line_block, changed_line))
             position_changes.append((threshold, delta))
 
         def map_position(original_position: int) -> int:
@@ -1140,16 +1140,14 @@ class SqlEditor(QPlainTextEdit):
             for threshold, change in position_changes:
                 if original_position >= threshold:
                     mapped += change
-            return max(0, min(mapped, document.characterCount() - 1 + sum(
-                change for _threshold, change in position_changes
-            )))
+            return max(0, min(mapped, document.characterCount() - 1))
 
         anchor = cursor.anchor()
         position = cursor.position()
         edit_cursor = QTextCursor(document)
         edit_cursor.beginEditBlock()
         try:
-            for line_block, original_line, changed_line in reversed(edits):
+            for line_block, changed_line in reversed(edits):
                 edit_cursor.setPosition(line_block.position())
                 edit_cursor.setPosition(
                     line_block.position() + line_block.length() - 1,
