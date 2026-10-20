@@ -1946,6 +1946,21 @@ class MainWindow(QMainWindow):
             if item.get("view_id"):
                 payload["view_id"] = str(item["view_id"])
                 context["view_id"] = str(item["view_id"])
+            if (
+                item.get("table_preview")
+                and not has_connected_preview
+                and isinstance(item.get("table_edit"), dict)
+                and item["table_edit"].get("enabled")
+            ):
+                # Cached rows are still browseable offline, but the raw MySQL values
+                # needed for a guarded edit are not reconstructed from display JSON.
+                item["table_edit"]["enabled"] = False
+                item["table_edit"]["reason"] = (
+                    "This cached preview page was loaded without refreshing MySQL row metadata; "
+                    "refresh the table preview before editing."
+                )
+                item["table_edit"]["row_keys"] = []
+                item["table_edit"]["original_values"] = {}
 
         job_id = self._dispatch(action, payload, context)
         if job_id:
@@ -3455,8 +3470,26 @@ class MainWindow(QMainWindow):
                 return
 
             if not result.get("ok"):
-                item["page_load_unavailable"] = True
-                self.result_model.set_paging_state(pending=False, available=False)
+                if action == "table_preview_page":
+                    # Stop repeat MySQL requests, but retain already fetched rows in the
+                    # SQLite spool. Those can still be browsed locally; editing is disabled
+                    # before the UI moves to a page without a fresh raw-value snapshot.
+                    item["preview_has_more"] = False
+                    item["preview_stable_order"] = False
+                    item["preview_page_error"] = True
+                    try:
+                        paging_total = max(
+                            0,
+                            int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0),
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        paging_total = len(item.get("rows", []))
+                    self.result_model.set_paging_state(
+                        total_rows=paging_total, pending=False, available=True
+                    )
+                else:
+                    item["page_load_unavailable"] = True
+                    self.result_model.set_paging_state(pending=False, available=False)
                 if not self._query_running:
                     detail = sanitize_error_message(
                         result.get("error"),
@@ -3467,7 +3500,7 @@ class MainWindow(QMainWindow):
                         ),
                     )
                     prefix = (
-                        "Could not fetch table-preview rows · "
+                        "Could not refresh MySQL table-preview rows; cached rows remain available · "
                         if action == "table_preview_page"
                         else "Could not fetch result rows · "
                     )
