@@ -61,7 +61,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 
 - SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
 - The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
-- Query results initially load up to 2,000 rows; additional pages are read from the local result spool on demand. Table preview remains capped at 1,000 rows, and CSV export reads the full fetched result spool in server-fetch order.
+- Query results initially load up to 2,000 rows; additional pages are read from the local result spool on demand. Table preview remains capped at 1,000 rows. CSV, JSON, and NDJSON export read the full fetched result spool in server-fetch order; the visible grid sort/filter does not reduce exported rows.
 - Query cancellation is best-effort and depends on server permissions/state.
 - Some MySQL DDL implicitly commits.
 - Risk detection and history redaction are heuristic; neither is a complete parser or security boundary.
@@ -321,14 +321,15 @@ Tasks:
 - Refine query lifecycle: queued, running, fetching rows, complete, cancelled, partial failure, export in progress, and failed.
 - Disable only actions that conflict with the actual current operation; preserve navigation and SQL editing when safe.
 - Improve result metadata: row count, visible preview count, elapsed duration, affected rows, warnings, and which script statement produced each result.
-- Keep the quick filter case-insensitive and document that it filters the visible preview while CSV exports the fetched result set.
+- [x] Keep the quick filter case-insensitive and document that it filters the visible preview while CSV, JSON, and NDJSON exports include the full fetched result set.
 - Add clear “no rows”, “no result set”, “filter has no matches”, “query failed”, and “connection lost” states.
 - Add column-width behavior that balances readable values and speed; do not auto-size thousands of cells on every load.
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
 - [x] Add guarded single-cell editing for verified Schema Explorer base-table previews: exclude primary keys/generated and unsupported types; require a transactional engine; parameterize writes; re-read and lock the row to reject stale changes; do not auto-commit; restore edited rows in the local cache after full rollback.
 - [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and CSV export of invalidated previews until re-preview.
 - Ensure result sorting does not reorder the underlying result spool or corrupt CSV order unexpectedly. Define whether export preserves server fetch order or current sorted-grid order and communicate that clearly.
-- Add export options deliberately (CSV first; JSON or XLSX only after dependency/licence/large-file/performance review).
+- [x] Add JSON-array and NDJSON export alongside CSV without adding a runtime dependency; tests cover type preservation, duplicate column labels, fetch order, and atomic-failure cleanup.
+- Keep XLSX export deferred until a streaming writer is evaluated for Python/Qt/PyInstaller compatibility, dependency size, licence, and large-file behavior.
 - [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
 - Continue atomic file replacement and temp-file cleanup. For long exports, show true progress or an honest indeterminate state and keep the window responsive.
 
