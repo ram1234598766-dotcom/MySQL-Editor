@@ -377,7 +377,7 @@ Tasks:
 - Continue exercising remaining SQL literal/comment edge cases, CTE-wrapped DML, nested WHERE clauses, multi-statement risk review, and history redaction. Keep heuristic caveats in UI/docs.
 - Test result spool cleanup on normal shutdown and exceptional shutdown; keep fetched rows and CSV files treated as sensitive.
 - [x] Implemented the opt-in stable-release update checker in PR #61 and its non-blocking shutdown follow-up in PR #62. Startup checks remain disabled by default; one-time manual checks do not enable the startup preference.
-- [x] Centralize user-visible error sanitization across the database worker and UI error surfaces. Redact MySQL `IDENTIFIED BY`/`SET PASSWORD` echoes and key/value secrets, remove control characters, bound displayed text, and use safe fallbacks for missing errors; regressions cover query-failure status/results and CSV export feedback.
+- [x] Centralize user-visible error sanitization across the database worker and UI error surfaces. Redact MySQL `IDENTIFIED BY`/`SET PASSWORD` echoes and key/value secrets, remove control characters, bound displayed text, and use safe fallbacks for missing errors; regressions cover query-failure status/message and CSV export feedback.
 - Run \`pip-audit\`, review dependency licence inventory, keep a deliberate version support matrix and update dependencies in small, tested batches.
 - Avoid broad “upgrade everything to latest” changes without checking Python/Qt/connector/PyInstaller/Inno Setup compatibility.
 - Add time-bounded test scenarios for startup, typing latency, schema fetch, query display and export using representative data.
