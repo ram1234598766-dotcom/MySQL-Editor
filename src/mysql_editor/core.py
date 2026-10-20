@@ -5,9 +5,15 @@ from dataclasses import dataclass
 from collections.abc import Iterator
 
 try:
+    from sqlglot import exp as sqlglot_exp
     from sqlglot import format as format_sqlglot
+    from sqlglot import parse_one as _sqlglot_parse_one
+    from sqlglot.errors import SqlglotError
 except ImportError:  # pragma: no cover
+    sqlglot_exp = None
     format_sqlglot = None
+    _sqlglot_parse_one = None
+    SqlglotError = None
 
 @dataclass(frozen=True, slots=True)
 class StatementSpan:
@@ -403,8 +409,8 @@ def _executable_sql_comment_bodies(source: str) -> list[str]:
     return bodies
 
 
-def _classify_statement_core(sql: str) -> tuple[str, str]:
-    """Classify the visible outer statement without recursively inspecting comments."""
+def _classify_statement_core_heuristic(sql: str) -> tuple[str, str]:
+    """Classify a statement using the legacy scanner when SQLGlot cannot parse it."""
     masked = _mask_sql_literals_and_comments(sql)
     command, command_start = _main_statement_command(masked)
     body = masked[command_start:].lstrip().upper()
@@ -425,6 +431,45 @@ def _classify_statement_core(sql: str) -> tuple[str, str]:
     }:
         return "medium", f"{command} may change data or database objects."
     return "low", "No high-impact pattern was detected by the local advisory check."
+
+
+def _classify_parsed_mutation(sql: str) -> tuple[str, str] | None:
+    """Use the MySQL AST for top-level UPDATE/DELETE WHERE checks when parseable.
+
+    Only the parsed mutation node's own WHERE clause bounds the advisory. WHERE clauses
+    inside CTEs, joins, or nested subqueries are not used to downgrade an unbounded
+    outer mutation. SQLGlot parse errors and unsupported statement types intentionally
+    fall back to the legacy scanner; executable comments are handled separately below.
+    """
+    if _sqlglot_parse_one is None or sqlglot_exp is None:
+        return None
+
+    try:
+        statement = _sqlglot_parse_one(sql, read="mysql")
+    except SqlglotError:
+        return None
+
+    if isinstance(statement, sqlglot_exp.Update):
+        command = "UPDATE"
+    elif isinstance(statement, sqlglot_exp.Delete):
+        command = "DELETE"
+    else:
+        return None
+
+    if statement.args.get("where") is None:
+        return (
+            "high",
+            f"{command} has no top-level WHERE clause and may affect every row.",
+        )
+    return "medium", f"{command} may change data or database objects."
+
+
+def _classify_statement_core(sql: str) -> tuple[str, str]:
+    """Classify a statement with SQLGlot first and retain a conservative fallback."""
+    parsed_mutation = _classify_parsed_mutation(sql)
+    if parsed_mutation is not None:
+        return parsed_mutation
+    return _classify_statement_core_heuristic(sql)
 
 
 def classify_statement(sql: str) -> tuple[str, str]:
