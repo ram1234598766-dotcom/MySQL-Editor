@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
         self.export_feedback.setObjectName("statusSuccess")
         self.export_feedback.setAccessibleName("Result export status")
         self.export_feedback.setAccessibleDescription(
-            "Persistent feedback for the most recent CSV export; errors remain visible until replaced."
+            "Persistent feedback for the most recent result export; errors remain visible until replaced."
         )
         self.export_feedback.setWordWrap(True)
         self.export_feedback.setTextInteractionFlags(
@@ -1565,13 +1565,13 @@ class MainWindow(QMainWindow):
             self.fetch_more_button.setToolTip(
                 f"Append the next {next_count:,} row(s) from the local result cache, "
                 "or scroll to the end to load a page automatically. "
-                "This does not rerun SQL; CSV export still includes every fetched row."
+                "This does not rerun SQL; CSV, JSON, and NDJSON exports include every fetched row."
             )
             self.fetch_more_button.setEnabled(True)
         elif item and str(item.get("kind", "")).casefold() == "rows" and not item.get("page_load_unavailable"):
             self.fetch_more_button.setText("All Rows Loaded")
             self.fetch_more_button.setToolTip(
-                "All fetched rows are already loaded in the grid. CSV export keeps server-fetch order."
+                "All fetched rows are already loaded in the grid. Exports keep server-fetch order."
             )
             self.fetch_more_button.setEnabled(False)
         elif item and item.get("page_load_unavailable"):
@@ -2898,7 +2898,7 @@ class MainWindow(QMainWindow):
             self.export_feedback.hide()
             self.export_feedback.setToolTip("")
             self.export_feedback.setAccessibleDescription(
-                "Result export status. Results will appear here when the export finishes."
+                "Result export status. CSV, JSON, and NDJSON export results will appear here."
             )
             action = f"export_{export_format}"
             self._dispatch(action, {"result_id": result_id, "path": path})
