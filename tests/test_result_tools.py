@@ -78,6 +78,9 @@ def test_filter_clear_restores_the_underlying_result_message():
     class Model:
         rows = [["Alice"], ["Bob"]]
 
+        def set_paging_state(self, **_kwargs):
+            pass
+
     class Proxy:
         def __init__(self):
             self.query = ""
@@ -88,12 +91,47 @@ def test_filter_clear_restores_the_underlying_result_message():
         def rowCount(self):
             return sum(self.query.casefold() in str(row[0]).casefold() for row in Model.rows)
 
+    class Filter:
+        def text(self):
+            return ""
+
+    class Timer:
+        def stop(self):
+            pass
+
+        def start(self, *_args):
+            pass
+
     class Window:
-        result_proxy = Proxy()
-        result_model = Model()
-        result_message = Label()
-        _result_fetched_row_count = 80
-        _result_base_message = "Query complete · 80 row(s) · 25 ms."
+        def __init__(self):
+            self.result_proxy = Proxy()
+            self.result_model = Model()
+            self.result_message = Label()
+            self.result_filter = Filter()
+            self._result_fetched_row_count = 80
+            self._result_base_message = "Query complete · 80 row(s) · 25 ms."
+            self._filter_generation = 0
+            self._filter_debounce_timer = Timer()
+            self._pending_spool_filter = None
+            self._current_result_id = "test-result"
+            self._result_page_load_pending = None
+            self._query_results = [{
+                "result_id": "test-result",
+                "kind": "rows",
+                "headers": ["name"],
+                "rows": Model.rows,
+                "row_count": 80,
+                "table_edit": {"enabled": False},
+            }]
+
+        def _result_item_by_id(self, result_id):
+            return next(
+                (item for item in self._query_results if item["result_id"] == result_id),
+                None,
+            )
+
+        def _set_result_controls(self):
+            pass
 
     window = Window()
     MainWindow._filter_results(window, "missing")
