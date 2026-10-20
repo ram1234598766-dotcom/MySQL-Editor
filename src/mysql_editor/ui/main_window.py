@@ -1870,7 +1870,7 @@ class MainWindow(QMainWindow):
         self.fetch_more_result_rows()
 
     def fetch_more_result_rows(self) -> None:
-        """Append the next spool page without re-executing the SQL statement."""
+        """Append a local result page or safely fetch another Schema Explorer source page."""
         if self._query_running:
             self.result_model.set_paging_state(pending=False)
             return
@@ -1884,7 +1884,7 @@ class MainWindow(QMainWindow):
             self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
             return
-        start, offset, total = self._result_window_bounds(item)
+        _start, offset, total = self._result_window_bounds(item)
         if offset >= total:
             self.result_model.set_paging_state(pending=False)
             self._set_result_controls()
@@ -1895,17 +1895,47 @@ class MainWindow(QMainWindow):
             return
 
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        payload = {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS}
-        context = {"result_id": result_id, "offset": offset, "direction": "next"}
-        if item.get("view_id"):
-            payload["view_id"] = str(item["view_id"])
-            context["view_id"] = str(item["view_id"])
-        job_id = self._dispatch("fetch_result_page", payload, context)
+        loaded_count = max(0, int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0))
+        has_connected_preview = (
+            item.get("table_preview")
+            and item.get("preview_stable_order")
+            and not item.get("view_id")
+            and self._connection_available
+            and not self._disconnect_pending
+        )
+        if has_connected_preview:
+            direction = "next" if offset >= loaded_count else "cached"
+            action = "table_preview_page"
+            payload = {
+                "result_id": result_id,
+                "offset": offset,
+                "limit": RESULT_PAGE_ROWS,
+                "direction": direction,
+            }
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                # Model direction describes the active window; cached source re-reads
+                # still append rows when the user scrolls down within the loaded range.
+                "direction": "next",
+                "page_action": action,
+            }
+        else:
+            action = "fetch_result_page"
+            payload = {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS}
+            context = {"result_id": result_id, "offset": offset, "direction": "next"}
+            if item.get("view_id"):
+                payload["view_id"] = str(item["view_id"])
+                context["view_id"] = str(item["view_id"])
+
+        job_id = self._dispatch(action, payload, context)
         if job_id:
             self._result_page_load_pending = {
                 "job_id": job_id,
                 "result_id": result_id,
                 "offset": offset,
+                "direction": "next",
+                "action": action,
             }
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
@@ -1915,7 +1945,7 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
 
     def fetch_previous_result_rows(self) -> None:
-        """Load an earlier result page from the local spool without contacting MySQL."""
+        """Load an earlier page from MySQL or the local spool without rerunning SQL."""
         if self._query_running or self._result_page_load_pending is not None:
             return
         result_id = self._current_result_id
@@ -1933,17 +1963,47 @@ class MainWindow(QMainWindow):
         if limit <= 0:
             return
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        payload = {"result_id": result_id, "offset": offset, "limit": limit}
-        context = {
-            "result_id": result_id,
-            "offset": offset,
-            "direction": "previous",
-            "expected_end": start,
-        }
-        if item.get("view_id"):
-            payload["view_id"] = str(item["view_id"])
-            context["view_id"] = str(item["view_id"])
-        job_id = self._dispatch("fetch_result_page", payload, context)
+        has_connected_preview = (
+            item.get("table_preview")
+            and item.get("preview_stable_order")
+            and not item.get("view_id")
+            and self._connection_available
+            and not self._disconnect_pending
+        )
+        if has_connected_preview:
+            action = "table_preview_page"
+            payload = {
+                "result_id": result_id,
+                "offset": offset,
+                "limit": limit,
+                "direction": "previous",
+            }
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                "direction": "previous",
+                "expected_end": start,
+                "page_action": action,
+            }
+        else:
+            action = "fetch_result_page"
+            payload = {"result_id": result_id, "offset": offset, "limit": limit}
+            context = {
+                "result_id": result_id,
+                "offset": offset,
+                "direction": "previous",
+                "expected_end": start,
+            }
+            if item.get("view_id"):
+                payload["view_id"] = str(item["view_id"])
+                context["view_id"] = str(item["view_id"])
+            if item.get("table_preview") and isinstance(item.get("table_edit"), dict):
+                item["table_edit"]["enabled"] = False
+                item["table_edit"]["reason"] = (
+                    "This cached preview page was reloaded while MySQL was disconnected; "
+                    "refresh the preview before editing."
+                )
+        job_id = self._dispatch(action, payload, context)
         if job_id:
             self._result_page_load_pending = {
                 "job_id": job_id,
@@ -1951,6 +2011,7 @@ class MainWindow(QMainWindow):
                 "offset": offset,
                 "direction": "previous",
                 "expected_end": start,
+                "action": action,
             }
             self.result_model.set_paging_state(pending=True)
             self._set_result_controls()
