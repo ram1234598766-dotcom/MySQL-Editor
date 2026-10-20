@@ -1519,6 +1519,18 @@ def _editable_preview_worker(
     return worker, state, connection
 
 
+def test_preview_keyset_predicate_handles_single_and_composite_primary_keys():
+    single_expression, single_placeholders = DatabaseWorker._preview_key_expression(["id"])
+    composite_expression, composite_placeholders = DatabaseWorker._preview_key_expression(
+        ["tenant_id", "order_id"]
+    )
+
+    assert single_expression == "`id`"
+    assert single_placeholders == "%s"
+    assert composite_expression == "(`tenant_id`, `order_id`)"
+    assert composite_placeholders == "(%s, %s)"
+
+
 def test_table_preview_enables_cell_edit_only_for_primary_key_base_tables():
     worker, state, _connection = _editable_preview_worker()
     try:
