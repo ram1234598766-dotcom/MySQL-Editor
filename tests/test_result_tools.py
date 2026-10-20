@@ -116,8 +116,8 @@ def test_result_window_message_discloses_bounded_memory_and_absolute_range():
     )
     assert message == (
         "Rows result · showing rows 25,001–30,000 of 100,000. "
-        "The grid retains at most 5,000 row(s) in memory; the local spool and data exports "
-        "keep the full 100,000-row result. "
+        "The active grid window is capped at 5,000 row(s); while paging, one initial-page "
+        "recovery snapshot may also be retained. The local spool and data exports keep the full 100,000-row result. "
         "Scroll to the top for earlier rows or to the bottom for later rows."
     )
 
