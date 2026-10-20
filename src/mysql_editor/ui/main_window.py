@@ -294,7 +294,7 @@ class ResultsModel(QAbstractTableModel):
             except (InvalidOperation, ValueError):
                 return (0, 1, str(value).casefold())
 
-        indexed_rows = list(zip(self.rows, self._row_offsets))
+        indexed_rows = list(zip(self.rows, self._row_offsets, strict=True))
         non_null = [entry for entry in indexed_rows if entry[0][column] is not None]
         null_rows = [entry for entry in indexed_rows if entry[0][column] is None]
         non_null.sort(
