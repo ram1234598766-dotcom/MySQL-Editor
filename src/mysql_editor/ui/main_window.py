@@ -1726,16 +1726,148 @@ class MainWindow(QMainWindow):
         initial = item.pop("initial_rows")
         item["rows"] = [list(row) for row in initial]
         item["window_start_offset"] = 0
+        edit_context = item.get("table_edit")
+        initial_edit = item.get("initial_table_edit_page")
+        if isinstance(edit_context, dict) and isinstance(initial_edit, dict):
+            edit_context["row_keys"] = [list(row) for row in initial_edit.get("row_keys", [])]
+            edit_context["original_values"] = {
+                str(key): list(values)
+                for key, values in (initial_edit.get("original_values") or {}).items()
+            }
         try:
             total = max(len(item["rows"]), int(item.get("row_count", len(item["rows"])) or 0))
         except (TypeError, ValueError, OverflowError):
             total = len(item["rows"])
         item["preview_truncated"] = len(item["rows"]) < total
 
+    def _sync_table_edit_page_metadata(
+        self,
+        item: dict[str, Any],
+        page_data: dict[str, Any] | None,
+        *,
+        direction: str,
+        evicted: int = 0,
+    ) -> None:
+        """Keep PK/edit values aligned with the bounded grid row window."""
+        edit_context = item.get("table_edit")
+        if not isinstance(edit_context, dict) or not edit_context.get("enabled"):
+            return
+        if not isinstance(page_data, dict):
+            edit_context["enabled"] = False
+            edit_context["reason"] = (
+                "Raw row identity could not be revalidated for this page; refresh before editing."
+            )
+            return
+
+        try:
+            new_keys = [list(row) for row in page_data.get("row_keys", [])]
+            new_originals = {
+                str(key): list(values)
+                for key, values in (page_data.get("original_values") or {}).items()
+                if isinstance(values, list)
+            }
+            old_keys = [list(row) for row in (edit_context.get("row_keys") or [])]
+            old_originals = {
+                str(key): list(values)
+                for key, values in (edit_context.get("original_values") or {}).items()
+                if isinstance(values, list)
+            }
+        except Exception:
+            edit_context["enabled"] = False
+            edit_context["reason"] = "The cached table-edit identity is invalid; refresh before editing."
+            return
+
+        editable_indices = [str(index) for index in (edit_context.get("editable_column_indices") or [])]
+        if len(new_keys) != len(item.get("rows", [])) - len(old_keys) + max(0, evicted):
+            # This helper is called immediately after append/prepend, when the model
+            # may have evicted rows from the bounded window; verify exact lengths below.
+            expected_page_length = len(page_data.get("row_keys", []))
+        else:
+            expected_page_length = len(new_keys)
+        if any(len(new_originals.get(index, [])) != expected_page_length for index in editable_indices):
+            edit_context["enabled"] = False
+            edit_context["reason"] = "Raw editable values were unavailable for this page; refresh before editing."
+            return
+
+        if direction == "previous":
+            combined_keys = new_keys + old_keys
+            combined_originals = {
+                index: new_originals.get(index, []) + old_originals.get(index, [])
+                for index in editable_indices
+            }
+            if evicted:
+                combined_keys = combined_keys[:-evicted] if evicted < len(combined_keys) else []
+                combined_originals = {
+                    index: values[:-evicted] if evicted < len(values) else []
+                    for index, values in combined_originals.items()
+                }
+        else:
+            combined_keys = old_keys + new_keys
+            combined_originals = {
+                index: old_originals.get(index, []) + new_originals.get(index, [])
+                for index in editable_indices
+            }
+            if evicted:
+                combined_keys = combined_keys[evicted:]
+                combined_originals = {
+                    index: values[evicted:]
+                    for index, values in combined_originals.items()
+                }
+
+        visible_count = len(item.get("rows", []))
+        if len(combined_keys) != visible_count or any(
+            len(values) != visible_count for values in combined_originals.values()
+        ):
+            edit_context["enabled"] = False
+            edit_context["reason"] = (
+                "Row identity could not be aligned with the visible page window; refresh before editing."
+            )
+            return
+        edit_context["row_keys"] = combined_keys
+        edit_context["original_values"] = combined_originals
+
+    def _update_initial_table_edit_snapshot(
+        self,
+        item: dict[str, Any],
+        absolute_row_index: int,
+        *,
+        raw_row: list[Any] | None = None,
+        raw_original_values: dict[str, Any] | None = None,
+    ) -> None:
+        """Keep the recovery snapshot correct for edits made in the initial page."""
+        try:
+            row_index = int(absolute_row_index)
+        except (TypeError, ValueError, OverflowError):
+            return
+        snapshot = item.get("initial_table_edit_page")
+        if not isinstance(snapshot, dict) or row_index < 0:
+            return
+        originals = snapshot.get("original_values") or {}
+        if raw_row is not None:
+            for column_key, values in originals.items():
+                try:
+                    column = int(column_key)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if isinstance(values, list) and row_index < len(values) and column < len(raw_row):
+                    values[row_index] = raw_row[column]
+        if isinstance(raw_original_values, dict):
+            for column_key, value in raw_original_values.items():
+                values = originals.get(str(column_key))
+                if isinstance(values, list) and row_index < len(values):
+                    values[row_index] = value
+
     def _set_result_controls(self):
         item = self._result_item_by_id(self._current_result_id)
+        preview_incomplete = bool(
+            item
+            and isinstance(item.get("table_preview_paging"), dict)
+            and not item.get("table_preview_complete", False)
+        )
         self.export_button.setEnabled(
-            bool(self._current_result_id) and not bool(item and item.get("export_unavailable"))
+            bool(self._current_result_id)
+            and not bool(item and item.get("export_unavailable"))
+            and not preview_incomplete
         )
         start, end, total = self._result_window_bounds(item)
         is_row_result = bool(item and str(item.get("kind", "")).casefold() == "rows")
@@ -3264,6 +3396,23 @@ class MainWindow(QMainWindow):
                 self._set_result_message(sanitize_error_message(result.get("error"), fallback="Query failed."))
             if result.get("results"):
                 self._query_results = list(result["results"])
+                if action == "table_preview":
+                    for preview_item in self._query_results:
+                        paging = preview_item.get("table_preview_paging")
+                        if isinstance(paging, dict):
+                            preview_item["table_preview_complete"] = bool(paging.get("complete", False))
+                            if not preview_item["table_preview_complete"] and not paging.get("enabled"):
+                                preview_item["page_load_unavailable"] = True
+                        edit_context = preview_item.get("table_edit")
+                        if isinstance(edit_context, dict) and edit_context.get("enabled"):
+                            preview_item["initial_table_edit_page"] = {
+                                "row_keys": [list(row) for row in (edit_context.get("row_keys") or [])],
+                                "original_values": {
+                                    str(key): list(values)
+                                    for key, values in (edit_context.get("original_values") or {}).items()
+                                    if isinstance(values, list)
+                                },
+                            }
                 self.result_picker.blockSignals(True)
                 self.result_picker.clear()
                 for index, item in enumerate(self._query_results, start=1):
@@ -3304,7 +3453,21 @@ class MainWindow(QMainWindow):
             if action == "table_preview":
                 preview_item = self._result_item_by_id(self._current_result_id)
                 edit_context = preview_item.get("table_edit", {}) if preview_item else {}
-                if edit_context.get("enabled"):
+                paging = preview_item.get("table_preview_paging", {}) if preview_item else {}
+                if isinstance(paging, dict) and not preview_item.get("table_preview_complete", False):
+                    cached_count = int(paging.get("cached_rows", 0) or 0)
+                    total_count = int(paging.get("row_count", preview_item.get("row_count", 0)) or 0)
+                    if paging.get("enabled"):
+                        self.status.setText(
+                            f"Table preview loaded · {cached_count:,} of {total_count:,} rows cached. "
+                            "Scroll to the bottom or use Fetch +1,000 to continue."
+                        )
+                    else:
+                        reason = str(paging.get("reason") or "This incomplete preview cannot be paged safely.")
+                        self.status.setText(
+                            f"Table preview is partial and read-only for whole-result operations · {reason}"
+                        )
+                elif edit_context.get("enabled"):
                     self.status.setText(
                         "Table preview loaded · right-click a non-key cell to edit it. "
                         "Any UPDATE remains under MySQL's Commit/Rollback transaction controls."
@@ -3993,6 +4156,19 @@ class MainWindow(QMainWindow):
         if not result_id:
             return
         item = self._result_item_by_id(result_id)
+        if (
+            item is not None
+            and isinstance(item.get("table_preview_paging"), dict)
+            and not item.get("table_preview_complete", False)
+        ):
+            paging = item.get("table_preview_paging") or {}
+            reason = str(paging.get("reason") or "Load all table-preview pages before exporting.")
+            self.status.setText(
+                f"Export disabled · {reason}"
+                if item.get("page_load_unavailable")
+                else "Export disabled · load all table-preview pages before exporting."
+            )
+            return
         if item is not None and item.get("export_unavailable"):
             self.status.setText(
                 "Result export is disabled because the preview cache could not be restored after rollback. "
@@ -4051,6 +4227,14 @@ class MainWindow(QMainWindow):
         copy_headers_action = menu.addAction("Copy column headers")
         menu.addSeparator()
         export_action = menu.addAction("Export fetched result… (CSV, JSON, or NDJSON)")
+        selected_item = self._result_item_by_id(self._current_result_id)
+        if (
+            selected_item is not None
+            and isinstance(selected_item.get("table_preview_paging"), dict)
+            and not selected_item.get("table_preview_complete", False)
+        ):
+            export_action.setEnabled(False)
+            export_action.setToolTip("Load all table-preview pages before exporting the complete table.")
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
         if chosen == details_action:
             self.show_cell_details(clicked)
