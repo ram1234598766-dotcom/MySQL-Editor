@@ -880,3 +880,9 @@ Next: continue with the bounded result-window and spool-backed sort/filter work 
 - README and release notes describe the formats and caveats. CSV behavior and its existing `\\N` convention are retained.
 
 **Acceptance still open:** XLSX remains a separate decision because it needs a streaming writer and dependency/license/packaging evaluation. Bounded model-row retention, spool-backed filtering/sorting, and the Schema Explorer preview cap are still unresolved. Large-result performance and physical-Windows QA have not been measured by this change.
+
+### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
+
+**Status: implementation in this PR; CI validation pending.** The SQL editor supports a Ctrl+/ action to toggle MySQL line comments on the current line or selected lines. It preserves leading indentation, cursor/selection positions relative to SQL text, and the surrounding lines. The operation is grouped as one undo action and does not submit or execute SQL.
+
+Regression tests cover current-line comment/uncomment, selected multi-line blocks with mixed indentation and blank lines, pre-existing MySQL line comments, selection/cursor restoration, single-step undo, and accessible keyboard help. The README keyboard-shortcut reference and release notes document the interaction.
