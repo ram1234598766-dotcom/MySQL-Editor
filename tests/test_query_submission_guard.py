@@ -784,13 +784,43 @@ def test_sorting_an_existing_filtered_view_sorts_that_view_not_the_source_query(
         window._filter_debounce_timer.stop()
         window._dispatch_spool_filter()
 
-        action, payload, _job_id = worker.submissions[-1]
+        action, payload, job_id = worker.submissions[-1]
         assert action == "sort_result_spool"
-        assert payload["base_view_id"] == "active-alpha-view"
-        assert payload["result_id"] == item["result_id"]
-        assert payload["column"] == 1
-        assert payload["descending"] is True
-        assert payload["query"] if False else True
+        assert payload == {
+            "result_id": item["result_id"],
+            "column": 1,
+            "descending": True,
+            "base_view_id": "active-alpha-view",
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+
+        window._on_worker_completed(
+            job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "active-alpha-view-sorted",
+                "query": "alpha",
+                "offset": 0,
+                "rows": [["Alpha", 95], ["alphabet", 80]],
+                "source_offsets": [0, 2],
+                "row_count": 3,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": True,
+                "sort_column": 1,
+                "sort_descending": True,
+            },
+        )
+        assert item["view_id"] == "active-alpha-view-sorted"
+        assert item["view_query"] == "alpha"
+        assert item["sort_column"] == 1
+        assert item["sort_descending"] is True
+        assert item["row_count"] == 8
+        assert item["view_row_count"] == 3
+        assert window.result_model.rows == [["Alpha", 95], ["alphabet", 80]]
+        assert window.result_model.absolute_row_index(0) == 0
     finally:
         window._filter_debounce_timer.stop()
         window.close()
