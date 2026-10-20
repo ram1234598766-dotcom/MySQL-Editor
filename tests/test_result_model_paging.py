@@ -8,7 +8,7 @@ from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QApplication
 
 from mysql_editor.database import RESULT_PAGE_ROWS as RESULT_PAGE_SIZE
-from mysql_editor.ui.main_window import ResultsFilterProxyModel, ResultsModel
+from mysql_editor.ui.main_window import MainWindow, ResultsFilterProxyModel, ResultsModel
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -201,4 +201,56 @@ def test_proxy_vertical_headers_keep_absolute_row_numbers_after_sorting():
         proxy.deleteLater()
         model.deleteLater()
         _APP.processEvents()
+
+def test_manual_page_action_can_load_earlier_rows_when_filter_hides_scrollbar():
+    class Scrollbar:
+        def __init__(self, maximum):
+            self.maximum_value = maximum
+
+        def maximum(self):
+            return self.maximum_value
+
+    class Grid:
+        def __init__(self, maximum):
+            self.scrollbar = Scrollbar(maximum)
+
+        def verticalScrollBar(self):
+            return self.scrollbar
+
+    class Window:
+        _current_result_id = "result"
+
+        def __init__(self, *, start, end, total, scrollbar_maximum):
+            self.item = {"result_id": "result", "row_count": total, "kind": "rows"}
+            self.bounds = (start, end, total)
+            self.result_grid = Grid(scrollbar_maximum)
+            self.previous_requests = 0
+            self.next_requests = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result" else None
+
+        def _result_window_bounds(self, _item):
+            return self.bounds
+
+        def fetch_previous_result_rows(self):
+            self.previous_requests += 1
+
+        def fetch_more_result_rows(self):
+            self.next_requests += 1
+
+    filtered = Window(start=5_000, end=10_000, total=50_000, scrollbar_maximum=0)
+    MainWindow.fetch_result_page_manually(filtered)
+    assert filtered.previous_requests == 1
+    assert filtered.next_requests == 0
+
+    ordinary = Window(start=5_000, end=10_000, total=50_000, scrollbar_maximum=300)
+    MainWindow.fetch_result_page_manually(ordinary)
+    assert ordinary.previous_requests == 0
+    assert ordinary.next_requests == 1
+
+    final_window = Window(start=45_000, end=50_000, total=50_000, scrollbar_maximum=0)
+    MainWindow.fetch_result_page_manually(final_window)
+    assert final_window.previous_requests == 1
+    assert final_window.next_requests == 0
 
