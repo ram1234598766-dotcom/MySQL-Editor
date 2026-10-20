@@ -995,8 +995,8 @@ def test_ctrl_slash_toggles_mysql_comment_on_current_line_and_undoes_atomically(
 
 def test_ctrl_slash_toggles_selected_block_preserving_indent_blank_lines_and_selection():
     editor = SqlEditor()
-    source = "    SELECT x\\n\\tFROM t\\n\\nWHERE y = 1"
-    expected_commented = "    -- SELECT x\\n\\t-- FROM t\\n-- \\nWHERE y = 1"
+    source = "    SELECT x\n\tFROM t\n\nWHERE y = 1"
+    expected_commented = "    -- SELECT x\n\t-- FROM t\n-- \nWHERE y = 1"
     selection_end = source.index("WHERE")
     try:
         editor.setPlainText(source)
@@ -1035,8 +1035,8 @@ def test_ctrl_slash_toggles_selected_block_preserving_indent_blank_lines_and_sel
 
 def test_ctrl_slash_uncomments_existing_mysql_line_comments_and_preserves_text():
     editor = SqlEditor()
-    source = "  -- SELECT 1\\n\\t--\\tFROM t\\n-- "
-    expected = "  SELECT 1\\n\\tFROM t\\n"
+    source = "  -- SELECT 1\n\t--\tFROM t\n-- "
+    expected = "  SELECT 1\n\tFROM t\n"
     try:
         editor.setPlainText(source)
         cursor = editor.textCursor()
@@ -1064,4 +1064,4 @@ def test_sql_editor_keyboard_help_documents_comment_toggle():
     finally:
         editor.deleteLater()
         _APP.processEvents()
-\n
+
