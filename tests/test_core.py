@@ -88,6 +88,41 @@ def test_risk_advisory_understands_cte_wrapped_mutations():
     )[0] == "medium"
 
 
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "WITH candidate AS (SELECT id FROM users WHERE active=0) DELETE FROM users",
+        "WITH candidate AS (SELECT id FROM users WHERE active=0) UPDATE users SET active=1",
+        (
+            "WITH RECURSIVE candidate(id) AS ("
+            "SELECT id FROM users WHERE active=0 "
+            "UNION ALL SELECT id FROM candidate WHERE id < 100"
+            ") DELETE FROM users"
+        ),
+        (
+            "WITH first_candidates AS (SELECT id FROM users WHERE active=0), "
+            "second_candidates AS (SELECT id FROM first_candidates WHERE id > 10) "
+            "DELETE FROM users"
+        ),
+    ],
+)
+def test_cte_internal_where_clauses_do_not_bound_outer_mutations(query):
+    risk, message = classify_statement(query)
+
+    assert risk == "high"
+    assert "top-level WHERE clause" in message
+
+
+def test_cte_with_top_level_where_stays_medium_despite_nested_where_clauses():
+    query = (
+        "WITH candidate AS (SELECT id FROM users WHERE active=0) "
+        "UPDATE users SET active=1 WHERE id IN (SELECT id FROM candidate WHERE id > 10)"
+    )
+
+    assert classify_statement(query)[0] == "medium"
+
+
 def test_risk_advisory_ignores_quoted_identifiers_and_comment_keywords():
     assert classify_statement("UPDATE " + chr(96) + "where" + chr(96) + " SET value = 1")[0] == "high"
     assert classify_statement("SELECT 'DROP TABLE users' /* UPDATE users */")[0] == "low"
