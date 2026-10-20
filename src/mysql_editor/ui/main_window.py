@@ -2335,10 +2335,27 @@ class MainWindow(QMainWindow):
 
     def _filter_results(self, value: str) -> None:
         query = str(value or "").strip()
+        item = self._result_item_by_id(self._current_result_id)
+        queued_view_request = self._pending_spool_filter
+        if (
+            queued_view_request is not None
+            and queued_view_request.get("generation") == self._filter_generation
+            and queued_view_request.get("result_id") == self._current_result_id
+            and queued_view_request.get("query") == query
+        ):
+            # Paging completion calls _filter_results again for the current text.
+            # Do not invalidate a queued global filter/sort as a side effect.
+            self.result_proxy.setFilterFixedString("")
+            if item is not None and item.get("view_id") and str(item.get("view_query") or "") == query:
+                self._set_spool_filter_message(item)
+            self.result_model.set_paging_state(pending=True)
+            self._filter_debounce_timer.start(0)
+            self._set_result_controls()
+            return
+
         self._filter_generation += 1
         generation = self._filter_generation
         self._filter_debounce_timer.stop()
-        item = self._result_item_by_id(self._current_result_id)
 
         if item is None:
             self._pending_spool_filter = None
