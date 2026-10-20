@@ -692,7 +692,18 @@ class DatabaseWorker(QThread):
         if preview_context is not None and not view_id:
             loaded_count = max(0, int(preview_context.get("loaded_count", 0) or 0))
             if page_offset >= loaded_count:
-                return self._fetch_table_preview_page(chosen_result_id, page_offset, page_limit)
+                return self._fetch_table_preview_page(
+                    chosen_result_id, page_offset, page_limit, replay=False
+                )
+            if (
+                isinstance(preview_context.get("table_edit"), dict)
+                and preview_context["table_edit"].get("enabled")
+            ):
+                page_starts = preview_context.get("page_start_keys") or {}
+                if page_offset in page_starts:
+                    return self._fetch_table_preview_page(
+                        chosen_result_id, page_offset, page_limit, replay=True
+                    )
         try:
             meta = self._spool.execute(
                 "SELECT row_count FROM result_meta WHERE result_id=?",
@@ -831,9 +842,9 @@ class DatabaseWorker(QThread):
         )
 
     def _fetch_table_preview_page(
-        self, result_id: str, offset: int, limit: int
+        self, result_id: str, offset: int, limit: int, *, replay: bool = False
     ) -> dict[str, Any]:
-        """Fetch the next bounded primary-key page from MySQL and append it to the local spool."""
+        """Fetch a bounded keyset page or safely revalidate an evicted editable page."""
         previews = getattr(self, "_table_preview_pages", {})
         preview = previews.get(result_id)
         if not isinstance(preview, dict) or not preview.get("enabled"):
@@ -855,31 +866,50 @@ class DatabaseWorker(QThread):
         try:
             loaded_count = max(0, int(preview.get("loaded_count", 0) or 0))
             expected_count = max(0, int(preview.get("total_count", 0) or 0))
+            page_limit = min(RESULT_PAGE_ROWS, max(1, int(limit or RESULT_PAGE_ROWS)))
         except (TypeError, ValueError, OverflowError):
-            loaded_count = expected_count = 0
-        if offset != loaded_count:
             return {
                 "ok": False,
-                "error": "Table preview pages must be loaded in order. Refresh the table if its cached page boundary is inconsistent.",
+                "error": "The requested table-preview page is invalid.",
                 "result_id": result_id,
                 "offset": offset,
                 "rows": [],
             }
-        if loaded_count >= expected_count:
-            preview["enabled"] = False
-            return {
-                "ok": True, "result_id": result_id, "offset": offset, "rows": [],
-                "row_count": expected_count, "source_row_count": expected_count,
-                "page_size": min(RESULT_PAGE_ROWS, max(1, int(limit or RESULT_PAGE_ROWS))),
-                "has_more": False, "table_preview_page": True,
-                "cached_rows": loaded_count, "cache_complete": True,
-            }
+        if replay:
+            page_starts = preview.get("page_start_keys") or {}
+            if offset not in page_starts or offset < 0 or offset + page_limit > loaded_count:
+                return {
+                    "ok": False,
+                    "error": "The earlier table-preview page is no longer available. Refresh the table before editing.",
+                    "result_id": result_id,
+                    "offset": offset,
+                    "rows": [],
+                }
+            cursor_key = page_starts[offset]
+        else:
+            if offset != loaded_count:
+                return {
+                    "ok": False,
+                    "error": "Table preview pages must be loaded in order. Refresh the table if its cached page boundary is inconsistent.",
+                    "result_id": result_id,
+                    "offset": offset,
+                    "rows": [],
+                }
+            if loaded_count >= expected_count:
+                preview["enabled"] = False
+                return {
+                    "ok": True, "result_id": result_id, "offset": offset, "rows": [],
+                    "row_count": expected_count, "source_row_count": expected_count,
+                    "page_size": page_limit, "has_more": False,
+                    "table_preview_page": True, "cached_rows": loaded_count,
+                    "cache_complete": True,
+                }
+            cursor_key = preview.get("last_key_values")
 
         schema = str(preview.get("schema") or "")
         table = str(preview.get("table") or "")
         key_columns = [str(name) for name in (preview.get("primary_key_columns") or [])]
         headers = [str(name) for name in (preview.get("headers") or [])]
-        last_key = preview.get("last_key_values")
         try:
             key_indices = [int(value) for value in (preview.get("primary_key_indices") or [])]
         except (TypeError, ValueError, OverflowError):
@@ -887,9 +917,12 @@ class DatabaseWorker(QThread):
         if (
             not schema or not table or not key_columns
             or len(key_columns) != len(key_indices)
-            or not isinstance(last_key, (list, tuple))
-            or len(last_key) != len(key_columns)
             or any(index < 0 or index >= len(headers) for index in key_indices)
+            or (cursor_key is not None and (
+                not isinstance(cursor_key, (list, tuple))
+                or len(cursor_key) != len(key_columns)
+            ))
+            or (not replay and not isinstance(cursor_key, (list, tuple)))
         ):
             return {
                 "ok": False,
@@ -900,12 +933,11 @@ class DatabaseWorker(QThread):
             }
 
         qualified = f"{safe_identifier(schema)}.{safe_identifier(table)}"
-        page_limit = min(RESULT_PAGE_ROWS, max(1, int(limit or RESULT_PAGE_ROWS)))
         cursor = None
         try:
             cursor = self._connection.cursor()
-            # Recheck row count before each page. A concurrent INSERT/DELETE invalidates
-            # the old count and must cause a refresh rather than a misleading complete view.
+            # Recheck row count before each page. A concurrent INSERT/DELETE must not
+            # leave the cached preview claiming to be complete.
             cursor.execute(f"SELECT COUNT(*) FROM {qualified}")
             count_row = cursor.fetchone()
             current_count = max(0, int(count_row[0] or 0)) if count_row else 0
@@ -921,22 +953,25 @@ class DatabaseWorker(QThread):
                     "rows": [],
                 }
 
-            terms: list[str] = []
-            parameters: list[Any] = []
-            for index, column in enumerate(key_columns):
-                comparisons = [
-                    f"{safe_identifier(key_columns[previous])} = %s"
-                    for previous in range(index)
-                ]
-                parameters.extend(last_key[:index])
-                comparisons.append(f"{safe_identifier(column)} > %s")
-                parameters.append(last_key[index])
-                terms.append("(" + " AND ".join(comparisons) + ")")
             order_by = ", ".join(safe_identifier(name) for name in key_columns)
-            query = (
-                f"SELECT * FROM {qualified} WHERE {' OR '.join(terms)} "
-                f"ORDER BY {order_by} LIMIT %s"
-            )
+            parameters: list[Any] = []
+            if cursor_key is None:
+                query = f"SELECT * FROM {qualified} ORDER BY {order_by} LIMIT %s"
+            else:
+                terms: list[str] = []
+                for index, column in enumerate(key_columns):
+                    comparisons = [
+                        f"{safe_identifier(key_columns[previous])} = %s"
+                        for previous in range(index)
+                    ]
+                    parameters.extend(cursor_key[:index])
+                    comparisons.append(f"{safe_identifier(column)} > %s")
+                    parameters.append(cursor_key[index])
+                    terms.append("(" + " AND ".join(comparisons) + ")")
+                query = (
+                    f"SELECT * FROM {qualified} WHERE {' OR '.join(terms)} "
+                    f"ORDER BY {order_by} LIMIT %s"
+                )
             parameters.append(page_limit)
             cursor.execute(query, tuple(parameters))
             page_headers = [str(desc[0]) for desc in (cursor.description or [])]
@@ -972,9 +1007,7 @@ class DatabaseWorker(QThread):
         if len(raw_rows) < page_limit and offset + len(raw_rows) < expected_count:
             return {
                 "ok": False,
-                "error": (
-                    "Rows changed while the preview was being paged. Refresh the preview before continuing."
-                ),
+                "error": "Rows changed while the preview was being paged. Refresh the preview before continuing.",
                 "result_id": result_id,
                 "offset": offset,
                 "rows": [],
@@ -986,38 +1019,60 @@ class DatabaseWorker(QThread):
                 "ok": False, "error": "The result cache is no longer available.",
                 "result_id": result_id, "offset": offset, "rows": [],
             }
-        try:
-            if raw_rows:
-                self._spool.executemany(
-                    "INSERT INTO result_rows(result_id,row_idx,values_json) VALUES(?,?,?)",
-                    [
-                        (result_id, offset + index, json.dumps(row, ensure_ascii=False))
-                        for index, row in enumerate(rows)
-                    ],
-                )
-            loaded_count = offset + len(rows)
-            current_total = loaded_count if loaded_count == expected_count or len(raw_rows) < page_limit else expected_count
-            self._spool.execute(
-                "UPDATE result_meta SET row_count=? WHERE result_id=?",
-                (current_total, result_id),
-            )
-            self._spool.commit()
-        except Exception as exc:
-            try:
-                self._spool.rollback()
-            except Exception:
-                pass
-            return {
-                "ok": False, "error": safe_db_error(exc),
-                "result_id": result_id, "offset": offset, "rows": [],
-            }
 
-        preview["loaded_count"] = loaded_count
-        preview["total_count"] = current_total
-        if raw_rows:
-            preview["last_key_values"] = [raw_rows[-1][index] for index in key_indices]
-        if loaded_count >= current_total:
-            preview["enabled"] = False
+        if replay:
+            cached = self._spool.execute(
+                "SELECT values_json FROM result_rows WHERE result_id=? AND row_idx>=? AND row_idx<? ORDER BY row_idx",
+                (result_id, offset, offset + len(rows)),
+            ).fetchall()
+            cached_rows = [json.loads(value_json) for (value_json,) in cached]
+            if cached_rows != rows or len(cached_rows) != len(rows):
+                self._invalid_table_previews.add(result_id)
+                return {
+                    "ok": False,
+                    "error": (
+                        "MySQL table contents changed since this page was cached. "
+                        "The preview is now read-only; refresh the table before editing or exporting."
+                    ),
+                    "result_id": result_id,
+                    "offset": offset,
+                    "rows": [],
+                }
+            current_total = expected_count
+        else:
+            try:
+                if raw_rows:
+                    self._spool.executemany(
+                        "INSERT INTO result_rows(result_id,row_idx,values_json) VALUES(?,?,?)",
+                        [
+                            (result_id, offset + index, json.dumps(row, ensure_ascii=False))
+                            for index, row in enumerate(rows)
+                        ],
+                    )
+                current_total = expected_count
+                self._spool.execute(
+                    "UPDATE result_meta SET row_count=? WHERE result_id=?",
+                    (current_total, result_id),
+                )
+                self._spool.commit()
+            except Exception as exc:
+                try:
+                    self._spool.rollback()
+                except Exception:
+                    pass
+                return {
+                    "ok": False, "error": safe_db_error(exc),
+                    "result_id": result_id, "offset": offset, "rows": [],
+                }
+            preview.setdefault("page_start_keys", {})[offset] = (
+                list(cursor_key) if cursor_key is not None else None
+            )
+            preview["loaded_count"] = offset + len(rows)
+            preview["total_count"] = current_total
+            if raw_rows:
+                preview["last_key_values"] = [raw_rows[-1][index] for index in key_indices]
+            if preview["loaded_count"] >= current_total:
+                preview["enabled"] = False
 
         table_edit_page = None
         edit_context = preview.get("table_edit")
@@ -1030,6 +1085,7 @@ class DatabaseWorker(QThread):
                     for index in editable_indices
                 },
             }
+        cached_count = int(preview.get("loaded_count", loaded_count))
         return {
             "ok": True,
             "result_id": result_id,
@@ -1039,10 +1095,10 @@ class DatabaseWorker(QThread):
             "row_count": current_total,
             "source_row_count": current_total,
             "page_size": page_limit,
-            "has_more": loaded_count < current_total,
+            "has_more": offset + len(rows) < current_total,
             "table_preview_page": True,
-            "cached_rows": loaded_count,
-            "cache_complete": loaded_count >= current_total,
+            "cached_rows": cached_count,
+            "cache_complete": cached_count >= current_total,
             "table_edit_page": table_edit_page,
         }
 
