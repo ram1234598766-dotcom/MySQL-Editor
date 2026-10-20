@@ -405,6 +405,9 @@ def test_mutation_advisory_falls_back_when_sqlglot_is_unavailable(monkeypatch):
 
 
 def test_parseable_mutations_use_sqlglot_ast_before_heuristic_fallback(monkeypatch):
+    parsed_delete = core_module._sqlglot_parse_one("DELETE FROM users", read="mysql")
+    assert isinstance(parsed_delete, core_module.sqlglot_exp.Delete), type(parsed_delete).__name__
+
     def fail_if_fallback(sql):
         pytest.fail(f"SQLGlot parsed the mutation, but the heuristic fallback ran: {sql}")
 
