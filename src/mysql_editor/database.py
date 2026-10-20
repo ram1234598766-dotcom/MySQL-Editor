@@ -1763,9 +1763,11 @@ class DatabaseWorker(QThread):
 
     @staticmethod
     def _preview_key_expression(primary_key_columns: list[str]) -> tuple[str, str]:
-        identifiers = "(" + ", ".join(safe_identifier(name) for name in primary_key_columns) + ")"
-        placeholders = "(" + ", ".join("%s" for _ in primary_key_columns) + ")"
-        return identifiers, placeholders
+        quoted = [safe_identifier(name) for name in primary_key_columns]
+        markers = ["%s" for _ in primary_key_columns]
+        if len(quoted) == 1:
+            return quoted[0], markers[0]
+        return "(" + ", ".join(quoted) + ")", "(" + ", ".join(markers) + ")"
 
     def _preview_table(self, schema: str, table: str) -> dict[str, Any]:
         if self._connection is None:
