@@ -2123,7 +2123,7 @@ def test_prepare_result_sort_is_numeric_aware_stable_and_keeps_nulls_last():
         ascending = DatabaseWorker._prepare_result_sort(
             worker, result_id, 0, False, limit=3
         )
-        assert ascending["ok"] is True
+        assert ascending["ok"] is True, ascending.get("error")
         assert ascending["rows"] == [["-1"], ["2"], ["2.0"]]
         assert ascending["source_offsets"] == [5, 1, 6]
         assert ascending["row_count"] == len(rows)
@@ -2189,7 +2189,7 @@ def test_prepare_result_sort_composes_with_filtered_view_and_preserves_source_of
             limit=2,
             base_view_id=filtered["view_id"],
         )
-        assert sorted_view["ok"] is True
+        assert sorted_view["ok"] is True, sorted_view.get("error")
         assert sorted_view["query"] == "alpha"
         assert sorted_view["row_count"] == 3
         assert sorted_view["source_row_count"] == len(rows)
@@ -2241,7 +2241,7 @@ def test_prepare_result_sort_processes_large_results_in_batches_and_reports_prog
             worker, result_id, 1, True, limit=2
         )
 
-        assert result["ok"] is True
+        assert result["ok"] is True, result.get("error")
         assert result["row_count"] == len(rows)
         assert result["source_row_count"] == len(rows)
         assert result["rows"] == [["row-10049", 10049], ["row-10048", 10048]]
