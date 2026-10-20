@@ -1738,10 +1738,17 @@ class MainWindow(QMainWindow):
             and start > 0
             and not item.get("page_load_unavailable")
         )
-        filter_pending = (
+        current_filter_pending = (
             self._pending_spool_filter is not None
-            or self._spool_filter_request is not None
+            and self._pending_spool_filter.get("result_id") == self._current_result_id
+            and self._pending_spool_filter.get("generation") == self._filter_generation
         )
+        current_filter_running = (
+            self._spool_filter_request is not None
+            and self._spool_filter_request.get("result_id") == self._current_result_id
+            and self._spool_filter_request.get("generation") == self._filter_generation
+        )
+        filter_pending = current_filter_pending or current_filter_running
         pending = self._result_page_load_pending is not None or filter_pending
         if filter_pending:
             self.fetch_more_button.setText("Filtering…")
@@ -2260,18 +2267,308 @@ class MainWindow(QMainWindow):
         self._update_all_editor_completions()
 
     def _filter_results(self, value: str) -> None:
-        query = value.strip()
-        self.result_proxy.setFilterFixedString(query)
-        if not query:
-            self.result_message.setText(self._result_base_message)
+        query = str(value or "").strip()
+        self._filter_generation += 1
+        generation = self._filter_generation
+        self._filter_debounce_timer.stop()
+        item = self._result_item_by_id(self._current_result_id)
+
+        if item is None:
+            self._pending_spool_filter = None
+            self.result_proxy.setFilterFixedString(query)
             return
 
-        preview_rows = len(self.result_model.rows)
-        visible_rows = self.result_proxy.rowCount()
-        message = result_filter_message(
-            query, visible_rows, preview_rows, self._result_fetched_row_count
+        if not query:
+            self._pending_spool_filter = None
+            self.result_proxy.setFilterFixedString("")
+            if item.get("view_id"):
+                self._restore_initial_result_window(item)
+                headers = item.get("headers", [])
+                rows = item.get("rows", [])
+                try:
+                    source_total = max(
+                        len(rows),
+                        int(item.get("row_count", len(rows)) or 0),
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    source_total = len(rows)
+                self.result_model.update(
+                    headers, rows, base_offset=0, total_rows=source_total
+                )
+                item["rows"] = self.result_model.rows
+                item.pop("source_offsets", None)
+                item["window_start_offset"] = 0
+                item["preview_truncated"] = len(rows) < source_total
+                self.result_model.set_paging_state(
+                    total_rows=source_total,
+                    pending=self._result_page_load_pending is not None,
+                    available=not bool(item.get("page_load_unavailable")),
+                )
+                self._result_fetched_row_count = source_total
+                self.query_meta.setText(f"{source_total:,} row(s) fetched")
+                self._set_result_message(result_summary_message(item, len(rows), source_total))
+                self._size_result_columns(headers, rows)
+                self._set_result_controls()
+            else:
+                self.result_model.set_paging_state(
+                    pending=self._result_page_load_pending is not None
+                )
+                self.result_message.setText(self._result_base_message)
+                self._set_result_controls()
+            return
+
+        if item.get("view_id") and str(item.get("view_query") or "") == query:
+            # The current window is already the complete result of this spool-backed
+            # query; do not scan the full result again when paging updates the message.
+            self.result_proxy.setFilterFixedString("")
+            self._set_spool_filter_message(item)
+            return
+
+        if len(query) > 256:
+            query = query[:256]
+
+        original_rows = item.get("initial_rows", item.get("rows", []))
+        try:
+            source_total = max(
+                len(original_rows),
+                int(item.get("row_count", len(original_rows)) or 0),
+            )
+        except (TypeError, ValueError, OverflowError):
+            source_total = len(original_rows)
+        supports_spool_filter = (
+            str(item.get("kind", "")).casefold() == "rows"
+            and not bool(item.get("table_edit"))
+            and (bool(item.get("view_id")) or source_total > len(original_rows))
         )
-        self.result_message.setText(message)
+
+        if not supports_spool_filter:
+            self._pending_spool_filter = None
+            self.result_model.set_paging_state(pending=False)
+            self.result_proxy.setFilterFixedString(query)
+            visible_rows = self.result_proxy.rowCount()
+            self.result_message.setText(
+                result_filter_message(
+                    query, visible_rows, len(self.result_model.rows), source_total
+                )
+            )
+            return
+
+        # Preserve one original preview for clearing the filter, and keep only a
+        # bounded number of rows in the grid while the worker indexes all matches.
+        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+        self.result_proxy.setFilterFixedString("")
+        self._pending_spool_filter = {
+            "generation": generation,
+            "result_id": str(item.get("result_id") or ""),
+            "query": query,
+        }
+        self.result_model.set_paging_state(pending=True)
+        self.query_meta.setText(f"Searching {source_total:,} fetched row(s)…")
+        self._set_result_message(
+            f"Searching the full local result for {query!r}. "
+            f"All {source_total:,} fetched row(s) remain in the export set."
+        )
+        self.status.setText(
+            f"Filtering the full result · scanning {source_total:,} cached row(s)…"
+        )
+        self._set_result_controls()
+        self._filter_debounce_timer.start()
+
+    def _dispatch_spool_filter(self) -> None:
+        """Dispatch one debounced full-spool scan at a time."""
+        pending = self._pending_spool_filter
+        if pending is None:
+            return
+        if (
+            pending.get("generation") != self._filter_generation
+            or pending.get("result_id") != self._current_result_id
+            or pending.get("query") != self.result_filter.text().strip()
+        ):
+            self._pending_spool_filter = None
+            self._set_result_controls()
+            return
+        if self._spool_filter_request is not None or self._result_page_load_pending is not None:
+            self._filter_debounce_timer.start(120)
+            return
+        item = self._result_item_by_id(pending["result_id"])
+        if item is None:
+            self._pending_spool_filter = None
+            self.result_model.set_paging_state(pending=False)
+            self._set_result_controls()
+            return
+
+        self._pending_spool_filter = None
+        job_id = self._dispatch(
+            "filter_result_spool",
+            {
+                "result_id": pending["result_id"],
+                "query": pending["query"],
+                "limit": RESULT_PAGE_ROWS,
+            },
+            dict(pending),
+        )
+        if job_id:
+            self._spool_filter_request = {**pending, "job_id": job_id}
+            self.result_model.set_paging_state(pending=True)
+        else:
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText(
+                "Full-result filter did not start. Retry the search or clear the filter."
+            )
+            self.result_message.setText(
+                "The full result could not be searched. The current grid remains available; "
+                "exports still include all fetched rows."
+            )
+        self._set_result_controls()
+
+    def _set_spool_filter_message(self, item: dict) -> None:
+        query = str(item.get("view_query") or "")
+        try:
+            source_total = max(0, int(item.get("row_count", 0) or 0))
+            matched_total = max(0, int(item.get("view_row_count", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            source_total = 0
+            matched_total = 0
+        if matched_total == 0:
+            message = (
+                f"No fetched rows match {query!r}. Searched all {source_total:,} result row(s). "
+                f"Exports still include all {source_total:,} original row(s)."
+            )
+        else:
+            message = (
+                f"Full-result filter: {matched_total:,} of {source_total:,} fetched row(s) match "
+                f"{query!r}. The grid is a bounded matching window; exports still include all "
+                f"{source_total:,} original row(s)."
+            )
+        self._set_result_message(message)
+
+    def _handle_spool_filter_completed(
+        self, job_id: str, result: dict, context: dict
+    ) -> None:
+        request = self._spool_filter_request
+        view_id = str(result.get("view_id") or "")
+        if request is None or request.get("job_id") != job_id:
+            if view_id:
+                self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            return
+        self._spool_filter_request = None
+        generation = request.get("generation")
+        result_id = str(request.get("result_id") or "")
+        query = str(request.get("query") or "")
+        is_current = (
+            generation == self._filter_generation
+            and result_id == self._current_result_id
+            and query == self.result_filter.text().strip()
+        )
+        item = self._result_item_by_id(result_id)
+        if not is_current or item is None:
+            if view_id:
+                self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            if self._pending_spool_filter is not None:
+                QTimer.singleShot(0, self._dispatch_spool_filter)
+            self._set_result_controls()
+            return
+
+        if not result.get("ok"):
+            self._restore_initial_result_window(item)
+            headers = item.get("headers", [])
+            rows = item.get("rows", [])
+            try:
+                source_total = max(
+                    len(rows), int(item.get("row_count", len(rows)) or 0)
+                )
+            except (TypeError, ValueError, OverflowError):
+                source_total = len(rows)
+            self.result_model.update(headers, rows, base_offset=0, total_rows=source_total)
+            item["rows"] = self.result_model.rows
+            self.result_model.set_paging_state(
+                total_rows=source_total, pending=False,
+                available=not bool(item.get("page_load_unavailable")),
+            )
+            self.result_proxy.setFilterFixedString(query)
+            self._result_fetched_row_count = source_total
+            self.query_meta.setText(f"{source_total:,} row(s) fetched · full filter unavailable")
+            detail = sanitize_error_message(
+                result.get("error"),
+                fallback="The full local result could not be searched.",
+            )
+            visible = self.result_proxy.rowCount()
+            self._set_result_message(
+                f"Full-result filter failed: {detail} "
+                f"Showing matches in the loaded window only ({visible:,} of {len(rows):,} row(s)); "
+                f"exports still include all {source_total:,} fetched row(s)."
+            )
+            self.status.setText("Full-result filter failed · only the loaded window is filtered.")
+            self._set_result_controls()
+            return
+
+        if not view_id:
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText("Full-result filter returned no usable view. Clear and retry the filter.")
+            self._set_result_controls()
+            return
+
+        old_view_id = str(item.get("view_id") or "")
+        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+        headers = item.get("headers", [])
+        rows = [list(row) for row in (result.get("rows") or [])]
+        try:
+            source_total = max(0, int(result.get("source_row_count", item.get("row_count", 0)) or 0))
+            matched_total = max(0, int(result.get("row_count", 0) or 0))
+            source_offsets = [int(value) for value in (result.get("source_offsets") or [])]
+        except (TypeError, ValueError, OverflowError):
+            self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText("Full-result filter returned invalid row metadata.")
+            self._set_result_controls()
+            return
+        if len(source_offsets) != len(rows) or len(rows) > ResultsModel.MAX_RETAINED_ROWS:
+            self._dispatch("drop_result_filter", {"view_id": view_id}, {"view_id": view_id})
+            self.result_model.set_paging_state(pending=False)
+            self.status.setText("Full-result filter returned an invalid result page.")
+            self._set_result_controls()
+            return
+
+        item["view_id"] = view_id
+        item["view_query"] = query
+        item["view_row_count"] = matched_total
+        item["row_count"] = source_total
+        item["window_start_offset"] = 0
+        item["rows"] = rows
+        item["source_offsets"] = source_offsets
+        item["preview_truncated"] = matched_total > len(rows)
+        item.pop("page_load_unavailable", None)
+        self.result_proxy.setFilterFixedString("")
+        self.result_model.update(
+            headers,
+            rows,
+            base_offset=0,
+            source_offsets=source_offsets,
+            total_rows=matched_total,
+        )
+        item["rows"] = self.result_model.rows
+        item["source_offsets"] = list(self.result_model._row_offsets)
+        self.result_model.set_paging_state(
+            total_rows=matched_total, pending=False, available=True
+        )
+        self._result_fetched_row_count = source_total
+        self.query_meta.setText(
+            f"{matched_total:,} match(es) · {source_total:,} fetched row(s)"
+        )
+        self._size_result_columns(headers, rows)
+        self._set_spool_filter_message(item)
+        start, end, total = self._result_window_bounds(item)
+        self.status.setText(
+            f"Full-result filter ready · matching rows {start + 1:,}–{end:,} of {total:,}; "
+            "source row numbers are preserved and SQL was not rerun."
+        )
+        self._set_result_controls()
+        if old_view_id and old_view_id != view_id:
+            self._dispatch(
+                "drop_result_filter",
+                {"view_id": old_view_id},
+                {"view_id": old_view_id},
+            )
 
     def _set_result_message(self, message: str) -> None:
         """Store the unfiltered result state so clearing a filter restores it."""
