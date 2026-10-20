@@ -862,12 +862,12 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 
 **Acceptance still open; do not describe WS4 as complete:**
 
-- Loaded rows are currently retained in the result model as the user browses. The UI does not yet use a bounded LRU/window cache, so intentionally browsing every row in a very large result can still accumulate model memory.
+- [x] The active Qt grid model now uses a 5,000-row bounded window over the existing SQLite result spool. Later and earlier 1,000-row pages evict the opposite edge while retaining absolute spool offsets and absolute vertical row labels. One first-page restore snapshot may remain in memory while that result is actively paged; switching to another result restores the inactive entry to its first page.
 - Schema Explorer table preview remains capped at 1,000 rows. Removing that cap safely requires a separately tested preview paging/data-consistency path that preserves guarded cell-edit semantics and does not fetch an unexpectedly large table into memory.
-- Sorting and quick filtering still operate on the loaded preview rather than query the full SQLite spool. Full spool-backed sort/filter belongs to the remaining results workstream.
+- Sorting and quick filtering still operate on the active in-memory window rather than query the full SQLite spool. Full spool-backed sort/filter belongs to the remaining results workstream.
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
-Next: continue with the bounded result-window and spool-backed sort/filter work before marking the large-results exit gate closed.
+This increment closes the bounded active-grid window portion of the results workstream, but not the entire large-results exit gate. Remaining work: spool-backed sort/filter, Schema Explorer table-preview paging that preserves guarded editing/rollback semantics, aggregate-memory review across many result sets, and measured one-million-row responsiveness on physical Windows.
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
