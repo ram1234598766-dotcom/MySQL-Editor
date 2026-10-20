@@ -575,8 +575,8 @@ def test_qualified_completion_prefers_the_innermost_alias_when_outer_alias_colli
     )
     editor.setPlainText(source)
     cursor = editor.textCursor()
-    token = "customer_i"
-    cursor.setPosition(source.index(token, source.index("WHERE EXISTS")) + len(token))
+    column_prefix = "customer_i"
+    cursor.setPosition(source.index(column_prefix, source.index("WHERE EXISTS")) + len(column_prefix))
     editor.setTextCursor(cursor)
 
     candidates = set(editor._context_completion_words())
@@ -603,8 +603,8 @@ def test_qualified_completion_can_resolve_a_correlated_outer_alias():
     )
     editor.setPlainText(source)
     cursor = editor.textCursor()
-    token = "order_i"
-    cursor.setPosition(source.index(token) + len(token))
+    column_prefix = "order_i"
+    cursor.setPosition(source.index(column_prefix) + len(column_prefix))
     editor.setTextCursor(cursor)
 
     candidates = set(editor._context_completion_words())
