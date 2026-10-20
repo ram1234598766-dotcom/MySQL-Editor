@@ -1697,14 +1697,14 @@ class MainWindow(QMainWindow):
             self.fetch_more_button.setToolTip(
                 f"Load rows {end + 1:,}–{min(total, end + next_count):,} from the local SQLite result cache. "
                 "Scroll to the grid's bottom for the next page or to the top for earlier rows. "
-                "The grid retains at most 5,000 rows in memory; exports use the full result spool."
+                "The active grid window is capped at 5,000 rows; one initial-page recovery snapshot may be retained while paging. Exports use the full result spool."
             )
             self.fetch_more_button.setEnabled(True)
         elif has_previous:
             self.fetch_more_button.setText("Earlier Rows Available")
             self.fetch_more_button.setToolTip(
                 "Scroll to the top of the grid to load earlier rows. "
-                "The grid retains only a bounded row window; exports use the full result spool."
+                "The active grid window is bounded; exports use the full result spool."
             )
             self.fetch_more_button.setEnabled(False)
         elif is_row_result and not item.get("page_load_unavailable"):
