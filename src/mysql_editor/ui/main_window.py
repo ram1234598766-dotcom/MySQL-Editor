@@ -3410,7 +3410,7 @@ class MainWindow(QMainWindow):
             if action == "query":
                 self._flush_deferred_export_notifications()
             return
-        if action == "fetch_result_page":
+        if action in {"fetch_result_page", "table_preview_page"}:
             pending_page = self._result_page_load_pending
             if not pending_page or pending_page.get("job_id") != job_id:
                 return
@@ -3439,9 +3439,18 @@ class MainWindow(QMainWindow):
                 if not self._query_running:
                     detail = sanitize_error_message(
                         result.get("error"),
-                        fallback="The local result cache could not supply more rows.",
+                        fallback=(
+                            "The MySQL table preview could not supply another page."
+                            if action == "table_preview_page"
+                            else "The local result cache could not supply more rows."
+                        ),
                     )
-                    self.status.setText("Could not fetch result rows · " + detail)
+                    prefix = (
+                        "Could not fetch table-preview rows · "
+                        if action == "table_preview_page"
+                        else "Could not fetch result rows · "
+                    )
+                    self.status.setText(prefix + detail)
                 self._set_result_controls()
                 return
 
@@ -3566,12 +3575,39 @@ class MainWindow(QMainWindow):
                     pass
             else:
                 item["row_count"] = total
+            if action == "table_preview_page":
+                try:
+                    item["preview_loaded_count"] = max(
+                        0, int(result.get("loaded_count", result.get("row_count", total)) or 0)
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    item["preview_loaded_count"] = max(0, int(result.get("row_count", total) or 0))
+                item["preview_has_more"] = bool(result.get("has_more"))
+                item["preview_stable_order"] = bool(result.get("preview_stable_order", True))
+                item["row_count"] = item["preview_loaded_count"]
+                self._merge_table_preview_edit_page(
+                    item,
+                    result.get("table_edit"),
+                    direction=direction,
+                    page_count=page_count,
+                    evicted=evicted,
+                )
             item["preview_truncated"] = (
                 item.get("window_start_offset", 0) > 0
                 or item.get("window_start_offset", 0) + len(loaded_rows) < total
+                or bool(item.get("table_preview") and item.get("preview_has_more"))
             )
+            paging_total = total
+            if item.get("table_preview") and item.get("preview_has_more") and not item.get("view_id"):
+                try:
+                    paging_total = max(
+                        paging_total,
+                        int(item.get("preview_loaded_count", item.get("row_count", total)) or 0) + 1,
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    paging_total = total + 1
             self.result_model.set_paging_state(
-                total_rows=total,
+                total_rows=paging_total,
                 pending=False,
                 available=not bool(item.get("page_load_unavailable")),
             )
@@ -3594,10 +3630,18 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
             if not self._query_running:
                 start, end, _ = self._result_window_bounds(item)
-                self.status.setText(
-                    f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
-                    f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
-                )
+                if action == "table_preview_page":
+                    preview_loaded = int(item.get("preview_loaded_count", item.get("row_count", total)) or 0)
+                    more_notice = " More rows remain in MySQL." if item.get("preview_has_more") else " End of table reached."
+                    self.status.setText(
+                        f"Loaded {page_count:,} table-preview row(s) from MySQL · "
+                        f"{preview_loaded:,} row(s) cached.{more_notice}"
+                    )
+                else:
+                    self.status.setText(
+                        f"Loaded {page_count:,} {page_description} row(s) from the local result cache · "
+                        f"window rows {start + 1:,}–{end:,} of {total:,}. SQL was not rerun."
+                    )
             return
         if action == "update_table_cell":
             self._cell_edit_pending = False
