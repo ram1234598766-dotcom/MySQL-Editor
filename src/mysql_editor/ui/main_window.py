@@ -2361,6 +2361,8 @@ class MainWindow(QMainWindow):
                     "sort_column": int(sort_column),
                     "sort_descending": bool(item.get("sort_descending", False)),
                     "base_view_id": None,
+                    "previous_sort_column": int(sort_column),
+                    "previous_sort_descending": bool(item.get("sort_descending", False)),
                 })
                 return
             if item.get("view_id") and view_query:
@@ -2682,6 +2684,23 @@ class MainWindow(QMainWindow):
             self.result_model.set_paging_state(
                 pending=False, available=not bool(item.get("page_load_unavailable"))
             )
+            header = self.result_grid.horizontalHeader()
+            header.blockSignals(True)
+            try:
+                if previous_column is None:
+                    header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+                    self.result_proxy.sort(-1, Qt.SortOrder.AscendingOrder)
+                else:
+                    restored_column = int(previous_column)
+                    restored_order = (
+                        Qt.SortOrder.DescendingOrder
+                        if bool(previous_descending)
+                        else Qt.SortOrder.AscendingOrder
+                    )
+                    header.setSortIndicator(restored_column, restored_order)
+                    self.result_proxy.sort(restored_column, restored_order)
+            finally:
+                header.blockSignals(False)
             detail = sanitize_error_message(
                 result.get("error"),
                 fallback="The full local result could not be sorted.",
