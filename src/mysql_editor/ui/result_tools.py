@@ -228,8 +228,9 @@ def result_window_message(
     end = min(total, start + count)
     message = f"Rows result · showing rows {start + 1:,}–{end:,} of {total:,}."
     message += (
-        f" The grid retains at most {max(1, int(max_retained_rows)):,} row(s) in memory; "
-        f"the local spool and data exports keep the full {total:,}-row result."
+        f" The active grid window is capped at {max(1, int(max_retained_rows)):,} row(s); "
+        "while paging, one initial-page recovery snapshot may also be retained. "
+        f"The local spool and data exports keep the full {total:,}-row result."
     )
     if start > 0 and end < total:
         message += " Scroll to the top for earlier rows or to the bottom for later rows."
