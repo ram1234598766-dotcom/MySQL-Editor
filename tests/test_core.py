@@ -402,3 +402,13 @@ def test_mutation_advisory_falls_back_when_sqlglot_is_unavailable(monkeypatch):
 
     assert classify_statement("DELETE FROM users")[0] == "high"
     assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
+
+
+def test_parseable_mutations_use_sqlglot_ast_before_heuristic_fallback(monkeypatch):
+    def fail_if_fallback(sql):
+        pytest.fail(f"SQLGlot parsed the mutation, but the heuristic fallback ran: {sql}")
+
+    monkeypatch.setattr(core_module, "_classify_statement_core_heuristic", fail_if_fallback)
+
+    assert classify_statement("DELETE FROM users")[0] == "high"
+    assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
