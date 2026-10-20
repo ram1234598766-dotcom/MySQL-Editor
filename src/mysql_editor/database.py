@@ -707,22 +707,27 @@ class DatabaseWorker(QThread):
                     "rows": [],
                 }
             source_row_count = max(0, int(meta[0] or 0))
-            if not view_id and page_offset >= source_row_count:
-                statement_row = self._spool.execute(
+            if not view_id:
+                preview_meta = self._spool.execute(
                     "SELECT statement FROM result_meta WHERE result_id=?",
                     (chosen_result_id,),
                 ).fetchone()
-                if statement_row and str(statement_row[0] or "").startswith("Preview "):
-                    return {
-                        "ok": False,
-                        "error": (
-                            "This table preview is incomplete and has no active safe paging cursor. "
-                            "Refresh the table; if it has no primary key, use Create SELECT preview instead."
-                        ),
-                        "result_id": chosen_result_id,
-                        "offset": page_offset,
-                        "rows": [],
-                    }
+                if preview_meta and str(preview_meta[0] or "").startswith("Preview "):
+                    cached_count = int(self._spool.execute(
+                        "SELECT COUNT(*) FROM result_rows WHERE result_id=?",
+                        (chosen_result_id,),
+                    ).fetchone()[0])
+                    if cached_count < source_row_count and page_offset >= cached_count:
+                        return {
+                            "ok": False,
+                            "error": (
+                                "This table preview is incomplete and has no active safe paging cursor. "
+                                "Refresh the table; if it has no primary key, use Create SELECT preview instead."
+                            ),
+                            "result_id": chosen_result_id,
+                            "offset": page_offset,
+                            "rows": [],
+                        }
             source_offsets: list[int] = []
             if view_id:
                 view_meta = self._spool.execute(
