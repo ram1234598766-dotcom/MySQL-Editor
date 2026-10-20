@@ -257,5 +257,8 @@ def test_result_export_target_uses_selected_filter_and_canonical_suffix():
     )
     assert result_export_target("events.jsonl", "") == ("events.ndjson", "ndjson")
     assert result_export_target("report.txt", "CSV files (*.csv)") == ("report.csv", "csv")
+    assert result_export_target("report", "Excel workbook (*.xlsx)") == ("report.xlsx", "xlsx")
+    assert result_export_target("report.csv", "Excel workbook (*.xlsx)") == ("report.xlsx", "xlsx")
+    assert result_export_target("report.xlsx", "") == ("report.xlsx", "xlsx")
     assert result_export_target("", "JSON array (*.json)") == ("", "")
 
