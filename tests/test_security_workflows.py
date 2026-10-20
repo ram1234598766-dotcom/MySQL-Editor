@@ -156,3 +156,32 @@ def test_release_publication_is_gated_by_full_test_matrix_and_mysql_integration(
     assert "http://timestamp.digicert.com" in workflow
     assert "dist/RELEASE-MANIFEST.json" in workflow
     assert "dist/MySQLEditor/MySQLEditor.exe" in workflow
+
+def test_stable_tag_build_is_separate_from_release_publication():
+    workflow = _read_workflow(".github/workflows/windows-release.yml")
+    dispatch = workflow.split("  workflow_dispatch:\\n", 1)[1].split("\\n\\npermissions:", 1)[0]
+    publish_job = workflow.split("  publish:\\n", 1)[1]
+
+    # A tag push builds and signs stable candidates, but does not publish one by itself.
+    assert "publish_release:" in dispatch
+    assert "default: false" in dispatch
+    assert "type: boolean" in dispatch
+    assert "$signingRequired = $isTag -and -not $isPreviewTag" in workflow
+    assert "Stable tag pushes build signed candidates for review but do not publish a" in workflow
+
+    publish_if = publish_job.split("    if: >-\\n", 1)[1].split("\\n    runs-on:", 1)[0]
+    assert "github.event_name == 'push'" in publish_if
+    assert "github.event_name == 'workflow_dispatch'" in publish_if
+    assert "inputs.publish_release == true" in publish_if
+    assert "contains(github.ref_name, '-alpha')" in publish_if
+    assert "contains(github.ref_name, '-beta')" in publish_if
+    assert "contains(github.ref_name, '-rc')" in publish_if
+    assert "contains(github.ref_name, '-preview')" in publish_if
+    assert "Validate explicit stable release publication request" in publish_job
+    assert "A manual stable release publication request must target an existing v-prefixed version tag." in publish_job
+
+    # Keep write access limited to the isolated publish job.
+    build_job = workflow.split("  build:\\n", 1)[1].split("  publish:\\n", 1)[0]
+    assert "contents: write" not in build_job
+    assert "permissions:\\n      contents: write" in workflow
+
