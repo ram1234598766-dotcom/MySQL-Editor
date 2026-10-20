@@ -1845,7 +1845,7 @@ class DatabaseWorker(QThread):
         """Fetch one bounded Schema Explorer page and validate its source/session."""
         result_id = str(payload.get("result_id", "") or "").strip()
         direction = str(payload.get("direction", "next") or "next").casefold()
-        if direction not in {"next", "previous"}:
+        if direction not in {"next", "previous", "cached"}:
             return {"ok": False, "error": "The table-preview page direction is invalid.", "result_id": result_id}
         if not result_id or self._connection is None or self._spool is None:
             return {"ok": False, "error": "The table-preview cache or connection is no longer available.", "result_id": result_id}
@@ -1892,7 +1892,7 @@ class DatabaseWorker(QThread):
             if offset >= loaded_count or offset + limit > loaded_count:
                 return {
                     "ok": False,
-                    "error": "The requested earlier preview page is outside the cached source range.",
+                    "error": "The requested cached preview page is outside the loaded source range.",
                     "result_id": result_id,
                     "offset": offset,
                 }
@@ -1979,7 +1979,7 @@ class DatabaseWorker(QThread):
             raw_rows = fetched_rows
 
         rows = [[json_value(value) for value in row] for row in raw_rows]
-        if direction == "previous":
+        if direction != "next":
             cached_page = self._spool.execute(
                 "SELECT values_json FROM result_rows WHERE result_id=? "
                 "AND row_idx>=? AND row_idx<? ORDER BY row_idx",
