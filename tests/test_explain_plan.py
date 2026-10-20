@@ -297,7 +297,7 @@ def test_extract_explain_json_rejects_oversized_and_excessively_nested_payloads(
             "rows": [[deeply_nested]],
         }],
     }
-    with pytest.raises(ExplainPlanError, match="malformed or excessively nested JSON"):
+    with pytest.raises(ExplainPlanError, match="nested deeper"):
         extract_explain_json(nested)
 
 
@@ -343,4 +343,18 @@ def test_explain_tree_enforces_depth_budget_and_keeps_raw_json(monkeypatch):
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+def test_explain_json_depth_scan_ignores_brackets_inside_strings():
+    text_value = "[" * 120 + "{" * 120 + "]" * 120 + "}" * 120
+    plan = {"query_block": {"attached_condition": text_value}}
+    result = {
+        "ok": True,
+        "results": [{
+            "kind": "rows",
+            "headers": ["EXPLAIN"],
+            "rows": [[json.dumps(plan)]],
+        }],
+    }
+
+    assert extract_explain_json(result) == plan
 
