@@ -1983,6 +1983,12 @@ class _FilterSpoolWorker:
     def _report_activity(self, message):
         self.activities.append(str(message))
 
+    def _sort_result_view_rows(self, view_id, column, *, descending=False):
+        """Expose the production disk-backed sort method to this lightweight test worker."""
+        DatabaseWorker._sort_result_view_rows(
+            self, view_id, column, descending=descending
+        )
+
 
 def _make_filter_spool(rows):
     import sqlite3
