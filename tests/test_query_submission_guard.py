@@ -436,3 +436,107 @@ def test_late_export_progress_and_completion_cannot_overwrite_newer_query_status
         window.close()
         repository.close()
 
+def test_large_result_filter_scans_spool_pages_matches_and_preserves_export_total(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    item = {
+        "result_id": "full-filter-result",
+        "kind": "rows",
+        "headers": ["name", "rank"],
+        "rows": [["Alpha preview", 1], ["Bravo preview", 2]],
+        "row_count": 8,
+        "preview_truncated": True,
+        "duration_ms": 7,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=8)
+    window._result_fetched_row_count = 8
+    window.result_proxy.setFilterFixedString("")
+    try:
+        window.result_filter.setText("alpha")
+        window._filter_debounce_timer.stop()
+        pending = dict(window._pending_spool_filter)
+        assert pending["query"] == "alpha"
+        assert pending["result_id"] == item["result_id"]
+
+        window._dispatch_spool_filter()
+        action, payload, job_id = worker.submissions[-1]
+        assert action == "filter_result_spool"
+        assert payload == {
+            "result_id": item["result_id"],
+            "query": "alpha",
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+        assert window._spool_filter_request["job_id"] == job_id
+
+        window._on_worker_completed(
+            job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "view-alpha",
+                "query": "alpha",
+                "offset": 0,
+                "rows": [["Alpha row", 10], ["alphabet row", 20]],
+                "source_offsets": [1, 4],
+                "row_count": 4,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": True,
+            },
+        )
+
+        assert item["view_id"] == "view-alpha"
+        assert item["view_query"] == "alpha"
+        assert item["view_row_count"] == 4
+        assert item["row_count"] == 8
+        assert window.result_model.rows == [["Alpha row", 10], ["alphabet row", 20]]
+        assert window.result_model.absolute_row_index(0) == 1
+        assert window.result_model.absolute_row_index(1) == 4
+        assert window.result_model.total_rows == 4
+        assert "4 of 8 fetched row(s) match" in window.result_message.text()
+        assert "exports still include all 8" in window.result_message.text()
+
+        window.fetch_more_result_rows()
+        action, payload, page_job_id = worker.submissions[-1]
+        assert action == "fetch_result_page"
+        assert payload["view_id"] == "view-alpha"
+        assert payload["offset"] == 2
+
+        window._on_worker_completed(
+            page_job_id,
+            action,
+            {
+                "ok": True,
+                "result_id": item["result_id"],
+                "view_id": "view-alpha",
+                "offset": 2,
+                "rows": [["ALPHA next", 30], ["Alpha last", 40]],
+                "source_offsets": [6, 7],
+                "row_count": 4,
+                "source_row_count": 8,
+                "page_size": 2,
+                "has_more": False,
+            },
+        )
+
+        assert window.result_model.rows[-2:] == [["ALPHA next", 30], ["Alpha last", 40]]
+        assert window.result_model.absolute_row_index(2) == 6
+        assert window.result_model.absolute_row_index(3) == 7
+        assert window._result_fetched_row_count == 8
+        assert item["row_count"] == 8
+
+        window.result_filter.clear()
+        assert "view_id" not in item
+        assert item["rows"] == [["Alpha preview", 1], ["Bravo preview", 2]]
+        assert window.result_model.rows == item["rows"]
+        assert window.result_model.total_rows == 8
+        assert window._result_fetched_row_count == 8
+        assert worker.submissions[-1][0] == "drop_result_filter"
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
