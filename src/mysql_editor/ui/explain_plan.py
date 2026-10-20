@@ -29,9 +29,40 @@ class ExplainPlanError(ValueError):
 # EXPLAIN plans come from a remote server. Bound parsing and widget construction so
 # an unexpectedly large or deeply nested response cannot stall the desktop UI.
 MAX_EXPLAIN_JSON_CHARS = 2 * 1024 * 1024
+MAX_EXPLAIN_JSON_DEPTH = 64
 MAX_PLAN_TREE_NODES = 3000
 MAX_PLAN_TREE_DEPTH = 32
 MAX_PLAN_SUMMARY_NODES = 10000
+
+
+def _validate_json_depth(raw: str) -> None:
+    """Reject over-deep JSON containers before the standard decoder builds objects.
+
+    Braces and brackets inside JSON strings are ignored. Structural correctness is
+    still validated by json.loads after this resource-limit precheck.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_EXPLAIN_JSON_DEPTH:
+                raise ExplainPlanError(
+                    f"MySQL returned JSON nested deeper than the {MAX_EXPLAIN_JSON_DEPTH}-level limit."
+                )
+        elif character in "]}":
+            depth = max(0, depth - 1)
 
 
 def extract_explain_json(result: Mapping[str, Any]) -> dict[str, Any] | list[Any]:
@@ -70,10 +101,13 @@ def extract_explain_json(result: Mapping[str, Any]) -> dict[str, Any] | list[Any
         raise ExplainPlanError(
             f"MySQL returned an execution plan larger than the {MAX_EXPLAIN_JSON_CHARS:,}-character limit."
         )
+    _validate_json_depth(raw_text)
     try:
         plan = json.loads(raw_text)
-    except (json.JSONDecodeError, TypeError, ValueError, RecursionError) as exc:
-        raise ExplainPlanError("MySQL returned malformed or excessively nested JSON execution-plan data.") from exc
+    except RecursionError as exc:
+        raise ExplainPlanError("MySQL returned excessively nested JSON execution-plan data.") from exc
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ExplainPlanError("MySQL returned malformed JSON execution-plan data.") from exc
     if not isinstance(plan, (dict, list)):
         raise ExplainPlanError("The JSON execution plan must be an object or array.")
     return plan
