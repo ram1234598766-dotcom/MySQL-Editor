@@ -207,6 +207,94 @@ def test_csv_export_failure_preserves_previous_file_and_removes_temp_file(tmp_pa
 
 
 
+def test_structured_exports_preserve_fetch_order_null_empty_unicode_and_duplicate_headers(tmp_path):
+    import json
+
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    result_id = "structured-result"
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["id", "label", "label"]), "SELECT", 2),
+    )
+    # Insert in reverse order to prove the exporter uses the stable spool row index.
+    worker._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [
+            (result_id, 1, json.dumps([2, "βeta", "second"])),
+            (result_id, 0, json.dumps([1, None, ""])),
+        ],
+    )
+    worker._spool.commit()
+    expected = [
+        {"id": 1, "label": None, "label (2)": ""},
+        {"id": 2, "label": "βeta", "label (2)": "second"},
+    ]
+    try:
+        json_path = tmp_path / "rows.json"
+        json_result = worker._dispatch(
+            "export_json", {"result_id": result_id, "path": str(json_path)}
+        )
+        assert json_result == {
+            "ok": True, "path": str(json_path), "row_count": 2, "format": "json"
+        }
+        assert json.loads(json_path.read_text(encoding="utf-8")) == expected
+        assert list(tmp_path.glob(".rows.json.*.tmp")) == []
+
+        ndjson_path = tmp_path / "rows.ndjson"
+        ndjson_result = worker._dispatch(
+            "export_ndjson", {"result_id": result_id, "path": str(ndjson_path)}
+        )
+        assert ndjson_result == {
+            "ok": True, "path": str(ndjson_path), "row_count": 2, "format": "ndjson"
+        }
+        ndjson_lines = ndjson_path.read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line) for line in ndjson_lines] == expected
+        assert len(ndjson_lines) == 2
+        assert list(tmp_path.glob(".rows.ndjson.*.tmp")) == []
+    finally:
+        worker._spool.close()
+        worker._spool = None
+
+
+def test_structured_export_failure_preserves_existing_destination_and_cleans_temporary_file(
+    tmp_path, monkeypatch
+):
+    import json
+
+    import pytest
+
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    result_id = "broken-structured-result"
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["name"]), "SELECT", 1),
+    )
+    worker._spool.execute(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        (result_id, 0, "{not valid json"),
+    )
+    worker._spool.commit()
+    previous_content = "previous export must survive"
+    try:
+        for export_format, extension in (("json", ".json"), ("ndjson", ".ndjson")):
+            destination = tmp_path / f"report{extension}"
+            destination.write_text(previous_content, encoding="utf-8")
+            with pytest.raises(json.JSONDecodeError):
+                worker._dispatch(
+                    f"export_{export_format}",
+                    {"result_id": result_id, "path": str(destination)},
+                )
+            assert destination.read_text(encoding="utf-8") == previous_content
+            assert list(tmp_path.glob(f".report{extension}.*.tmp")) == []
+    finally:
+        worker._spool.close()
+        worker._spool = None
+
+
 def test_only_explicit_mysql_interruption_errors_are_classified_as_interrupted():
     class MysqlException(Exception):
         def __init__(self, message, errno=None, sqlstate=None):
