@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from datetime import date, datetime, time as dtime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
@@ -23,6 +23,24 @@ FETCH_BATCH = 500
 RESULT_PAGE_ROWS = 1000
 
 CSV_NULL_TOKEN = r"\N"  # noqa: S105 - CSV marker, not a credential.
+
+
+def _decimal_sort_collation(left: str, right: str) -> int:
+    """Compare decimal keys without converting arbitrary-precision values to floats."""
+    if left == right:
+        return 0
+    if not left or not right:
+        return -1 if left < right else 1
+    try:
+        first = Decimal(left)
+        second = Decimal(right)
+        if first < second:
+            return -1
+        if first > second:
+            return 1
+        return 0
+    except (InvalidOperation, ValueError):
+        return -1 if left < right else 1
 
 
 def _csv_export_value(value: Any) -> Any:
@@ -175,6 +193,10 @@ class DatabaseWorker(QThread):
     def _initialize_result_spool(self) -> None:
         """Create the worker-owned on-disk result cache."""
         self._spool = sqlite3.connect(self._spool_path)
+        self._spool.create_collation("DECIMAL", _decimal_sort_collation)
+        # Large view sorts must spill to disk instead of building a million-row
+        # in-memory temporary B-tree alongside the bounded Qt model.
+        self._spool.execute("PRAGMA temp_store=FILE")
         self._spool.execute("PRAGMA journal_mode=WAL")
         self._spool.executescript("""
             CREATE TABLE result_meta (
@@ -194,6 +216,12 @@ class DatabaseWorker(QThread):
             CREATE TABLE result_filter_view_rows (
                 view_id TEXT NOT NULL, view_idx INTEGER NOT NULL, source_idx INTEGER NOT NULL,
                 PRIMARY KEY(view_id,view_idx)
+            );
+            CREATE TABLE result_view_sort_keys (
+                view_id TEXT NOT NULL, ordinal INTEGER NOT NULL, source_idx INTEGER NOT NULL,
+                null_rank INTEGER NOT NULL, type_rank INTEGER NOT NULL,
+                numeric_key TEXT NOT NULL, text_key TEXT NOT NULL,
+                PRIMARY KEY(view_id,ordinal)
             );
         """)
         self._spool.commit()
@@ -521,6 +549,16 @@ class DatabaseWorker(QThread):
                 str(payload.get("result_id", "") or ""),
                 str(payload.get("query", "") or ""),
                 payload.get("limit", RESULT_PAGE_ROWS),
+                sort_column=payload.get("sort_column"),
+                sort_descending=bool(payload.get("sort_descending", False)),
+            )
+        if action == "sort_result_spool":
+            return self._prepare_result_sort(
+                str(payload.get("result_id", "") or ""),
+                payload.get("column", -1),
+                bool(payload.get("descending", False)),
+                payload.get("limit", RESULT_PAGE_ROWS),
+                base_view_id=str(payload.get("base_view_id", "") or "") or None,
             )
         if action == "drop_result_filter":
             return self._drop_result_filter(str(payload.get("view_id", "") or ""))
@@ -742,6 +780,9 @@ class DatabaseWorker(QThread):
         result_id: str,
         query: str,
         limit: Any = RESULT_PAGE_ROWS,
+        *,
+        sort_column: Any | None = None,
+        sort_descending: bool = False,
     ) -> dict[str, Any]:
         """Build a disk-backed, ordered index of rows matching a case-insensitive substring."""
         if self._spool is None:
@@ -764,7 +805,7 @@ class DatabaseWorker(QThread):
         view_id = uuid.uuid4().hex
         try:
             meta = self._spool.execute(
-                "SELECT row_count FROM result_meta WHERE result_id=?",
+                "SELECT headers, row_count FROM result_meta WHERE result_id=?",
                 (chosen_result_id,),
             ).fetchone()
             if meta is None:
@@ -774,7 +815,24 @@ class DatabaseWorker(QThread):
                     "result_id": chosen_result_id,
                     "query": needle,
                 }
-            source_row_count = max(0, int(meta[0] or 0))
+            try:
+                headers = json.loads(meta[0])
+            except (TypeError, json.JSONDecodeError):
+                headers = []
+            source_row_count = max(0, int(meta[1] or 0))
+            sort_column_index: int | None = None
+            if sort_column is not None:
+                try:
+                    sort_column_index = int(sort_column)
+                except (TypeError, ValueError, OverflowError):
+                    sort_column_index = -1
+                if not 0 <= sort_column_index < len(headers):
+                    return {
+                        "ok": False,
+                        "error": "The requested sort column is invalid for this result.",
+                        "result_id": chosen_result_id,
+                        "query": needle,
+                    }
             self._spool.commit()
             self._spool.execute("BEGIN")
             self._spool.execute(
@@ -822,6 +880,10 @@ class DatabaseWorker(QThread):
                 "UPDATE result_filter_views SET row_count=? WHERE view_id=?",
                 (matched, view_id),
             )
+            if sort_column_index is not None:
+                self._sort_result_view_rows(
+                    view_id, sort_column_index, descending=bool(sort_descending)
+                )
             self._spool.commit()
             first_page = self._spool.execute(
                 "SELECT r.values_json, v.source_idx "
@@ -842,10 +904,13 @@ class DatabaseWorker(QThread):
                 "source_row_count": source_row_count,
                 "page_size": page_rows,
                 "has_more": len(first_page) < matched,
+                "sort_column": sort_column_index,
+                "sort_descending": bool(sort_descending) if sort_column_index is not None else None,
             }
         except Exception as exc:
             try:
                 self._spool.rollback()
+                self._spool.execute("DELETE FROM result_view_sort_keys WHERE view_id=?", (view_id,))
                 self._spool.execute("DELETE FROM result_filter_view_rows WHERE view_id=?", (view_id,))
                 self._spool.execute("DELETE FROM result_filter_views WHERE view_id=?", (view_id,))
                 self._spool.commit()
@@ -866,6 +931,10 @@ class DatabaseWorker(QThread):
         if not chosen_view_id:
             return {"ok": False, "error": "A filter view identifier is required."}
         try:
+            self._spool.execute(
+                "DELETE FROM result_view_sort_keys WHERE view_id=?",
+                (chosen_view_id,),
+            )
             self._spool.execute(
                 "DELETE FROM result_filter_view_rows WHERE view_id=?",
                 (chosen_view_id,),
