@@ -3139,7 +3139,7 @@ class MainWindow(QMainWindow):
             paths = sorted(self._saved_root().glob("*.sql"), key=lambda p: p.name.casefold())
         except OSError as exc:
             self.saved_list.addItem("Saved queries are unavailable.")
-            self.saved_list.setToolTip(redact_secrets(str(exc)))
+            self.saved_list.setToolTip(sanitize_error_message(exc))
             return
         for path in paths:
             item = QListWidgetItem(path.name)
@@ -3156,7 +3156,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Open SQL file",
                 f"Could not open {source_path.name}. The file may be missing, locked, or not valid text.\n\n"
-                + redact_secrets(str(exc)),
+                + sanitize_error_message(exc),
             )
             self.status.setText("Could not open SQL file.")
             return False
@@ -3257,7 +3257,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Save SQL file",
                 f"Could not save {destination.name}. Your query remains open and unchanged.\n\n"
-                + redact_secrets(str(exc)),
+                + sanitize_error_message(exc),
             )
             self.status.setText("Save failed; your query remains open.")
             return False
@@ -3351,7 +3351,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(
                 self, "Save SQL snippet",
-                "The saved-queries folder could not be created.\n\n" + redact_secrets(str(exc)),
+                "The saved-queries folder could not be created.\n\n" + sanitize_error_message(exc),
             )
             return
         path = root / (safe_name if safe_name.lower().endswith(".sql") else safe_name + ".sql")
@@ -3599,7 +3599,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Profile not saved",
                 "Connected successfully, but the profile/password was not saved securely. "
-                "The password was not written to a file.\n\n" + redact_secrets(str(exc)),
+                "The password was not written to a file.\n\n" + sanitize_error_message(exc),
             )
 
     def _set_connection_badge_state(self, state: str) -> None:
