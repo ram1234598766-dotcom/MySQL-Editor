@@ -848,3 +848,22 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 **Regression coverage:** MySQL joined UPDATE, an outer CTE containing an unbounded UPDATE, a CTE-wrapped DELETE with a real outer predicate, a predicate containing a nested subquery, fallback behavior when SQLGlot is unavailable, and multi-statement formatting. The result remains advisory; server-side MySQL privileges remain the actual authorization boundary.
 
 **Not completed by this increment:** full AST-based statement splitting, schema-aware completion, inline diagnostics, a full MySQL grammar, semantic validation, and physical-Windows acceptance. Merge only after the exact PR head passes the full CI and Windows packaging workflow.
+
+### Phase 5 follow-up — scroll-triggered result paging — 20 October 2026
+
+**Status: implementation branch ready for CI; not yet merged.** This increment builds on the existing SQLite result spool and preserves the existing **Fetch +1,000** control as a fallback.
+
+- The result table model now exposes Qt's `canFetchMore()`/`fetchMore()` contract and emits a request when the grid reaches the end of its loaded rows.
+- The request is routed to the existing database worker's `fetch_result_page` action. It reads the local spool rather than issuing SQL to MySQL; one request can be active at a time, duplicate requests are blocked, and rows are inserted incrementally without resetting the model.
+- Result filtering, sorting, CSV fetch-order semantics, row-count summaries, and existing explicit page loading remain in place.
+- Regression tests cover one-page-at-a-time behavior, duplicate suppression while a page is pending, incremental row insertion without a model reset, child-index/failure states, proxy-model forwarding, and the scroll-to-end worker-dispatch path.
+- README and release notes explain the automatic paging behavior and the existing manual fallback.
+
+**Acceptance still open; do not describe WS4 as complete:**
+
+- Loaded rows are currently retained in the result model as the user browses. The UI does not yet use a bounded LRU/window cache, so intentionally browsing every row in a very large result can still accumulate model memory.
+- Schema Explorer table preview remains capped at 1,000 rows. Removing that cap safely requires a separately tested preview paging/data-consistency path that preserves guarded cell-edit semantics and does not fetch an unexpectedly large table into memory.
+- Sorting and quick filtering still operate on the loaded preview rather than query the full SQLite spool. Full spool-backed sort/filter belongs to the remaining results workstream.
+- The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
+
+The exact branch/PR checks must pass before merge. Afterward, continue with the bounded result-window and spool-backed sort/filter work before marking the large-results exit gate closed.
