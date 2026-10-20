@@ -707,6 +707,22 @@ class DatabaseWorker(QThread):
                     "rows": [],
                 }
             source_row_count = max(0, int(meta[0] or 0))
+            if not view_id and page_offset >= source_row_count:
+                statement_row = self._spool.execute(
+                    "SELECT statement FROM result_meta WHERE result_id=?",
+                    (chosen_result_id,),
+                ).fetchone()
+                if statement_row and str(statement_row[0] or "").startswith("Preview "):
+                    return {
+                        "ok": False,
+                        "error": (
+                            "This table preview is incomplete and has no active safe paging cursor. "
+                            "Refresh the table; if it has no primary key, use Create SELECT preview instead."
+                        ),
+                        "result_id": chosen_result_id,
+                        "offset": page_offset,
+                        "rows": [],
+                    }
             source_offsets: list[int] = []
             if view_id:
                 view_meta = self._spool.execute(
@@ -2583,6 +2599,9 @@ class DatabaseWorker(QThread):
 
 
     def _export_csv(self, result_id: str, path: str) -> dict[str, Any]:
+        incomplete_preview = self._incomplete_table_preview_error(result_id, "export")
+        if incomplete_preview:
+            return {"ok": False, "error": incomplete_preview}
         if result_id in getattr(self, "_invalid_table_previews", set()):
             return {
                 "ok": False,
@@ -2646,6 +2665,9 @@ class DatabaseWorker(QThread):
     def _export_structured(
         self, result_id: str, path: str, *, export_format: str
     ) -> dict[str, Any]:
+        incomplete_preview = self._incomplete_table_preview_error(result_id, "export")
+        if incomplete_preview:
+            return {"ok": False, "error": incomplete_preview}
         if export_format not in {"json", "ndjson"}:
             return {"ok": False, "error": "The requested structured export format is unsupported."}
         if result_id in getattr(self, "_invalid_table_previews", set()):
