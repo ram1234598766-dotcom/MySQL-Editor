@@ -1577,9 +1577,14 @@ class MainWindow(QMainWindow):
 
     def fetch_more_result_rows(self) -> None:
         """Append the next spool page without re-executing the SQL statement."""
-        if self._query_running or self._result_page_load_pending is not None:
-            if self._result_page_load_pending is None:
-                self.result_model.set_paging_state(pending=False)
+        if self._query_running:
+            self.result_model.set_paging_state(pending=False)
+            return
+        if self._result_page_load_pending is not None:
+            if self._result_page_load_pending.get("result_id") != self._current_result_id:
+                # The single worker slot is still paging a result that is no longer
+                # selected. Keep the current model available after that request ends.
+                self.result_model.set_paging_state(pending=False, available=False)
             return
         result_id = self._current_result_id
         item = self._result_item_by_id(result_id)
@@ -2301,6 +2306,13 @@ class MainWindow(QMainWindow):
                 self._result_page_load_pending = None
             result_id = str(context.get("result_id") or "")
             item = self._result_item_by_id(result_id)
+            if pending_page and pending_page.get("job_id") == job_id and result_id != self._current_result_id:
+                current_item = self._result_item_by_id(self._current_result_id)
+                if current_item is not None:
+                    self.result_model.set_paging_state(
+                        pending=False,
+                        available=not bool(current_item.get("page_load_unavailable")),
+                    )
             if not result.get("ok"):
                 if item is not None:
                     item["page_load_unavailable"] = True
