@@ -1416,7 +1416,7 @@ def _editable_preview_worker(
                 key_value = params[0] if params else None
                 ordered = sorted(state["rows"], key=lambda row: row["id"])
                 selected = [row for row in ordered if row["id"] > key_value]
-                limit_match = re.search(r"\\bLIMIT\\s+(\\d+)", upper_query)
+                limit_match = re.search(r"\bLIMIT\s+(\d+)", upper_query)
                 self.rows = [
                     (row["id"], row["label"], row["quantity"])
                     for row in selected[:int(limit_match.group(1))]
@@ -1431,8 +1431,8 @@ def _editable_preview_worker(
                 ordered = list(state["rows"])
                 if state["primary_key"]:
                     ordered.sort(key=lambda row: tuple(row[name] for name in state["primary_key"]))
-                limit_match = re.search(r"\\bLIMIT\\s+(\\d+)", upper_query)
-                offset_match = re.search(r"\\bOFFSET\\s+(\\d+)", upper_query)
+                limit_match = re.search(r"\bLIMIT\s+(\d+)", upper_query)
+                offset_match = re.search(r"\bOFFSET\s+(\d+)", upper_query)
                 limit = int(limit_match.group(1)) if limit_match else len(ordered)
                 offset = int(offset_match.group(1)) if offset_match else 0
                 self.rows = [
