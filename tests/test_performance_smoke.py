@@ -385,4 +385,4 @@ def test_export_dialog_dispatches_csv_json_and_ndjson_with_matching_suffixes(
             window.deleteLater()
         repository.close()
         _APP.processEvents()
-\n
+
