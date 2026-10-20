@@ -1321,7 +1321,15 @@ def test_schema_inspector_uses_show_create_view_for_views():
         f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
     )
 
-def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), engine="InnoDB", engine_transactions="YES"):
+def _editable_preview_worker(
+    *,
+    table_type="BASE TABLE",
+    primary_key=("id",),
+    engine="InnoDB",
+    engine_transactions="YES",
+    rows=None,
+):
+    import re
     import sqlite3
 
     worker = DatabaseWorker()
@@ -1338,10 +1346,14 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
     """)
 
     state = {
-        "rows": [
-            {"id": 1, "label": "old", "quantity": 3},
-            {"id": 2, "label": "second", "quantity": 4},
-        ],
+        "rows": (
+            [dict(row) for row in rows]
+            if rows is not None
+            else [
+                {"id": 1, "label": "old", "quantity": 3},
+                {"id": 2, "label": "second", "quantity": 4},
+            ]
+        ),
         "table_type": table_type,
         "engine": engine,
         "engine_transactions": engine_transactions,
@@ -1393,12 +1405,39 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
                     dict(row) for row in state["rows"]
                 ]
                 connection.in_transaction = True
-            elif query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
+            elif (
+                query.startswith("SELECT * FROM ")
+                and " WHERE " in upper_query
+                and " > " in upper_query
+                and " LIMIT " in upper_query
+            ):
                 self.description = [(name,) for name in headers]
                 self.with_rows = True
+                key_value = params[0] if params else None
+                ordered = sorted(state["rows"], key=lambda row: row["id"])
+                selected = [row for row in ordered if row["id"] > key_value]
+                limit_match = re.search(r"\\bLIMIT\\s+(\\d+)", upper_query)
                 self.rows = [
                     (row["id"], row["label"], row["quantity"])
-                    for row in state["rows"]
+                    for row in selected[:int(limit_match.group(1))]
+                ] if limit_match else []
+            elif (
+                query.startswith("SELECT * FROM ")
+                and " LIMIT " in upper_query
+                and " WHERE " not in upper_query
+            ):
+                self.description = [(name,) for name in headers]
+                self.with_rows = True
+                ordered = list(state["rows"])
+                if state["primary_key"]:
+                    ordered.sort(key=lambda row: tuple(row[name] for name in state["primary_key"]))
+                limit_match = re.search(r"\\bLIMIT\\s+(\\d+)", upper_query)
+                offset_match = re.search(r"\\bOFFSET\\s+(\\d+)", upper_query)
+                limit = int(limit_match.group(1)) if limit_match else len(ordered)
+                offset = int(offset_match.group(1)) if offset_match else 0
+                self.rows = [
+                    (row["id"], row["label"], row["quantity"])
+                    for row in ordered[offset:offset + limit]
                 ]
             elif query.startswith("SELECT TABLE_TYPE, ENGINE FROM information_schema.TABLES"):
                 self.description = [("TABLE_TYPE",), ("ENGINE",)]
