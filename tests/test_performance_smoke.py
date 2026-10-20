@@ -309,3 +309,80 @@ def test_result_model_scroll_request_dispatches_a_spool_page(tmp_path, monkeypat
         repository.close()
         _APP.processEvents()
 
+def test_export_dialog_dispatches_csv_json_and_ndjson_with_matching_suffixes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main_window_module, "QSettings", MemorySettings)
+    repository = LocalRepository(tmp_path / "export-formats.sqlite3")
+    worker = StartupWorker()
+    profile = {
+        "id": "export-profile",
+        "name": "Export format test",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "username": "tester",
+    }
+    config = {
+        "host": "127.0.0.1",
+        "port": 3306,
+        "username": "tester",
+        "default_schema": "",
+        "tls_mode": "Automatic TLS",
+    }
+    window = None
+    try:
+        window = MainWindow(
+            worker,
+            repository,
+            object(),
+            profile,
+            config,
+            {"server_version": "MySQL test", "database": ""},
+        )
+        result_id = "export-result"
+        window._query_results = [{
+            "result_id": result_id,
+            "kind": "rows",
+            "headers": ["id", "value"],
+            "rows": [[1, "sample"]],
+            "row_count": 1,
+        }]
+        window._current_result_id = result_id
+
+        selections = [
+            (str(tmp_path / "csv-report"), "CSV files (*.csv)", "export_csv", ".csv"),
+            (str(tmp_path / "json-report.csv"), "JSON array (*.json)", "export_json", ".json"),
+            (str(tmp_path / "events.jsonl"), "NDJSON files (*.ndjson)", "export_ndjson", ".ndjson"),
+        ]
+
+        def choose_destination(*_args, **_kwargs):
+            path, selected_filter, _action, _suffix = selections.pop(0)
+            return path, selected_filter
+
+        monkeypatch.setattr(main_window_module.QFileDialog, "getSaveFileName", choose_destination)
+
+        expected = [
+            ("export_csv", tmp_path / "csv-report.csv"),
+            ("export_json", tmp_path / "json-report.json"),
+            ("export_ndjson", tmp_path / "events.ndjson"),
+        ]
+        for action, destination in expected:
+            window.export_results()
+            submissions = [
+                (submitted_action, payload)
+                for submitted_action, payload, _task_id in worker.submissions
+                if submitted_action in main_window_module.EXPORT_ACTIONS
+            ]
+            assert submissions[-1] == (
+                action,
+                {"result_id": result_id, "path": str(destination)},
+            )
+
+        assert selections == []
+    finally:
+        if window is not None:
+            window.close()
+            window.deleteLater()
+        repository.close()
+        _APP.processEvents()
+\n
