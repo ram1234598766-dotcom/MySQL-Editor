@@ -1851,11 +1851,12 @@ class MainWindow(QMainWindow):
             return
 
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        job_id = self._dispatch(
-            "fetch_result_page",
-            {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS},
-            {"result_id": result_id, "offset": offset, "direction": "next"},
-        )
+        payload = {"result_id": result_id, "offset": offset, "limit": RESULT_PAGE_ROWS}
+        context = {"result_id": result_id, "offset": offset, "direction": "next"}
+        if item.get("view_id"):
+            payload["view_id"] = str(item["view_id"])
+            context["view_id"] = str(item["view_id"])
+        job_id = self._dispatch("fetch_result_page", payload, context)
         if job_id:
             self._result_page_load_pending = {
                 "job_id": job_id,
@@ -1888,16 +1889,17 @@ class MainWindow(QMainWindow):
         if limit <= 0:
             return
         item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
-        job_id = self._dispatch(
-            "fetch_result_page",
-            {"result_id": result_id, "offset": offset, "limit": limit},
-            {
-                "result_id": result_id,
-                "offset": offset,
-                "direction": "previous",
-                "expected_end": start,
-            },
-        )
+        payload = {"result_id": result_id, "offset": offset, "limit": limit}
+        context = {
+            "result_id": result_id,
+            "offset": offset,
+            "direction": "previous",
+            "expected_end": start,
+        }
+        if item.get("view_id"):
+            payload["view_id"] = str(item["view_id"])
+            context["view_id"] = str(item["view_id"])
+        job_id = self._dispatch("fetch_result_page", payload, context)
         if job_id:
             self._result_page_load_pending = {
                 "job_id": job_id,
