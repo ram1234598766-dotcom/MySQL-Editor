@@ -2568,6 +2568,8 @@ class MainWindow(QMainWindow):
         if not 0 <= sort_column < len(item.get("headers", [])):
             return
         descending = order == Qt.SortOrder.DescendingOrder
+        previous_sort_column = item.get("sort_column")
+        previous_sort_descending = bool(item.get("sort_descending", False))
         item["sort_column"] = sort_column
         item["sort_descending"] = descending
         self._filter_generation += 1
@@ -2606,6 +2608,8 @@ class MainWindow(QMainWindow):
                 "sort_descending": descending,
                 "base_view_id": view_id if view_id and not view_query else None,
             }
+        request["previous_sort_column"] = previous_sort_column
+        request["previous_sort_descending"] = previous_sort_descending
         self._schedule_spool_view_request(request)
 
 
@@ -2855,6 +2859,12 @@ class MainWindow(QMainWindow):
         item["view_query"] = query
         item["view_row_count"] = matched_total
         item["row_count"] = source_total
+        if request.get("sort_column") is not None:
+            item["sort_column"] = int(request["sort_column"])
+            item["sort_descending"] = bool(request.get("sort_descending", False))
+        else:
+            item.pop("sort_column", None)
+            item.pop("sort_descending", None)
         item["window_start_offset"] = 0
         item["rows"] = rows
         item["source_offsets"] = source_offsets
