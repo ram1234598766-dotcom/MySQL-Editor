@@ -274,7 +274,7 @@ Exit gate:
 
 Tasks, in priority order:
 1. Improve completion using current schema metadata: databases, tables, views and columns where the schema service can fetch them safely. Separate keywords/functions from context-specific objects.
-2. Extend completion gradually to common contexts—qualified names, aliases, table names after FROM/JOIN, and column names after a known table—without pretending to parse every MySQL grammar case.
+2. [x] Extend completion to qualified names, table aliases, table names after FROM/JOIN, and columns in common clauses. A follow-up now resolves aliases in the innermost nested query first, falls back to visible correlated outer aliases, and excludes sibling-subquery columns; this remains a scoped completion heuristic, not a full MySQL grammar or semantic engine.
 3. Add clear keyboard-first completion behavior: Ctrl+Space opens it; Up/Down choose; Enter/Tab accept according to the documented rule; Esc dismisses; focus remains in the editor.
 4. Support bracket/parenthesis matching, smarter indentation and safe auto-pairing only if it can be regression-tested without disrupting strings/comments or pasted blocks.
 5. Replace simplistic Find/Replace prompts with a compact, keyboard-accessible find bar, match count, next/previous and case-sensitivity controls.
@@ -884,6 +884,16 @@ The bounded active-grid window and spool-backed full-result quick-filter portion
 
 ### Phase 3 follow-up — MySQL line-comment toggle — 20 October 2026
 
-**Status: implementation in this PR; CI validation pending.** The SQL editor supports a Ctrl+/ action to toggle MySQL line comments on the current line or selected lines. It preserves leading indentation, cursor/selection positions relative to SQL text, and the surrounding lines. The operation is grouped as one undo action and does not submit or execute SQL.
+**Status: merged to main in commit [9d558be](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/9d558be6936d6561875129a26614c42a2385cabf).** The SQL editor supports a Ctrl+/ action to toggle MySQL line comments on the current line or selected lines. It preserves leading indentation, cursor/selection positions relative to SQL text, and the surrounding lines. The operation is grouped as one undo action and does not submit or execute SQL. The feature is included in the later passing default-branch desktop and Windows CI runs.
 
 Regression tests cover current-line comment/uncomment, selected multi-line blocks with mixed indentation and blank lines, pre-existing MySQL line comments, selection/cursor restoration, single-step undo, and accessible keyboard help. The README keyboard-shortcut reference and release notes document the interaction.
+
+### Phase 3 follow-up — nested SQL completion scopes — 20 October 2026
+
+**Status: implementation in branch `feat/scoped-sql-completion`; CI validation pending.**
+
+- Qualified alias completion now scans the innermost balanced `SELECT`/`WITH`/`VALUES` query scope first. A local alias shadows an identically named alias in an outer query.
+- If no local alias matches, qualified-column completion checks enclosing query scopes so correlated outer aliases remain available.
+- Unqualified column suggestions aggregate metadata from the active scope and visible enclosing scopes, but hide nested query bodies while scanning a parent. Columns from sibling subqueries therefore cannot leak into the current suggestion list.
+- The change uses a conservative lexical scope finder on top of existing comment/string masking; it does not claim full MySQL grammar coverage or type-level semantic analysis.
+- Added regressions for nested alias shadowing, correlated outer alias resolution, and exclusion of sibling-subquery columns. Validation of these tests and all packaging gates is pending the focused PR.
