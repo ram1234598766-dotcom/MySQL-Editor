@@ -1709,6 +1709,23 @@ class MainWindow(QMainWindow):
             if isinstance(item, dict) and item.get("view_id"):
                 self._restore_initial_result_window(item)
 
+    @staticmethod
+    def _copy_table_edit_context(context: dict | None) -> dict | None:
+        """Copy the bounded mutable arrays used to validate table-preview cell edits."""
+        if not isinstance(context, dict):
+            return None
+        copied = dict(context)
+        row_keys = context.get("row_keys")
+        if isinstance(row_keys, list):
+            copied["row_keys"] = [list(row) if isinstance(row, (list, tuple)) else row for row in row_keys]
+        original_values = context.get("original_values")
+        if isinstance(original_values, dict):
+            copied["original_values"] = {
+                str(key): list(values) if isinstance(values, list) else values
+                for key, values in original_values.items()
+            }
+        return copied
+
     def _restore_initial_result_window(self, item: dict | None) -> None:
         """Restore a result's original preview and release its temporary filtered view."""
         if not isinstance(item, dict):
@@ -1730,11 +1747,17 @@ class MainWindow(QMainWindow):
         initial = item.pop("initial_rows")
         item["rows"] = [list(row) for row in initial]
         item["window_start_offset"] = 0
+        if item.get("table_preview") and "initial_table_edit" in item:
+            item["table_edit"] = self._copy_table_edit_context(item.get("initial_table_edit"))
         try:
             total = max(len(item["rows"]), int(item.get("row_count", len(item["rows"])) or 0))
         except (TypeError, ValueError, OverflowError):
             total = len(item["rows"])
-        item["preview_truncated"] = len(item["rows"]) < total
+        item["preview_truncated"] = (
+            bool(item.get("preview_has_more"))
+            or bool(item.get("preview_limit_reason"))
+            or len(item["rows"]) < total
+        )
 
     def _set_result_controls(self):
         item = self._result_item_by_id(self._current_result_id)
@@ -1913,7 +1936,10 @@ class MainWindow(QMainWindow):
             self.status.setText("Reconnect to MySQL to fetch another table-preview page.")
             return
 
-        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+        if "initial_rows" not in item:
+            item["initial_rows"] = [list(row) for row in item.get("rows", [])]
+            if item.get("table_preview"):
+                item["initial_table_edit"] = self._copy_table_edit_context(item.get("table_edit"))
         loaded_count = max(0, int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0))
         has_connected_preview = (
             item.get("table_preview")
@@ -1996,7 +2022,10 @@ class MainWindow(QMainWindow):
         limit = start - offset
         if limit <= 0:
             return
-        item.setdefault("initial_rows", [list(row) for row in item.get("rows", [])])
+        if "initial_rows" not in item:
+            item["initial_rows"] = [list(row) for row in item.get("rows", [])]
+            if item.get("table_preview"):
+                item["initial_table_edit"] = self._copy_table_edit_context(item.get("table_edit"))
         has_connected_preview = (
             item.get("table_preview")
             and item.get("preview_stable_order")
