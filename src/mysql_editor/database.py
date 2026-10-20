@@ -847,7 +847,7 @@ class DatabaseWorker(QThread):
         """Fetch a bounded keyset page or safely revalidate an evicted editable page."""
         previews = getattr(self, "_table_preview_pages", {})
         preview = previews.get(result_id)
-        if not isinstance(preview, dict) or not preview.get("enabled"):
+        if not isinstance(preview, dict) or (not preview.get("enabled") and not replay):
             return {
                 "ok": False,
                 "error": "This table preview cannot be paged safely. Refresh the table or create a SELECT preview.",
@@ -2153,6 +2153,7 @@ class DatabaseWorker(QThread):
             "session_token": self._session_token,
             "total_count": total_count,
             "loaded_count": len(raw_rows),
+            "page_start_keys": {0: None},
             "last_key_values": (
                 [raw_rows[-1][index] for index in primary_key_indices]
                 if can_page and raw_rows else None
