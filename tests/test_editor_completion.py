@@ -961,3 +961,107 @@ def test_line_number_and_current_line_preferences_preserve_bracket_feedback():
     finally:
         editor.deleteLater()
         _APP.processEvents()
+
+def test_ctrl_slash_toggles_mysql_comment_on_current_line_and_undoes_atomically():
+    editor = SqlEditor()
+    source = "  SELECT 'a/b' AS value;"
+    try:
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(len(source))
+        editor.setTextCursor(cursor)
+
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == "  -- SELECT 'a/b' AS value;"
+        assert editor.textCursor().position() == len(source) + 3
+
+        # The entire comment toggle is one undo item.
+        editor.undo()
+        assert editor.toPlainText() == source
+
+        cursor = editor.textCursor()
+        cursor.setPosition(len(source))
+        editor.setTextCursor(cursor)
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == source
+        assert editor.textCursor().position() == len(source)
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()
+
+
+def test_ctrl_slash_toggles_selected_block_preserving_indent_blank_lines_and_selection():
+    editor = SqlEditor()
+    source = "    SELECT x\\n\\tFROM t\\n\\nWHERE y = 1"
+    expected_commented = "    -- SELECT x\\n\\t-- FROM t\\n-- \\nWHERE y = 1"
+    selection_end = source.index("WHERE")
+    try:
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(0)
+        cursor.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == expected_commented
+        assert editor.textCursor().hasSelection()
+        assert editor.textCursor().anchor() == 0
+        assert editor.textCursor().position() == selection_end + 9
+        assert editor.toPlainText().endswith("WHERE y = 1")
+
+        # One undo restores every selected line, including the originally blank line.
+        editor.undo()
+        assert editor.toPlainText() == source
+
+        cursor = editor.textCursor()
+        cursor.setPosition(0)
+        cursor.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == source
+        assert editor.textCursor().hasSelection()
+        assert editor.textCursor().anchor() == 0
+        assert editor.textCursor().position() == selection_end
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()
+
+
+def test_ctrl_slash_uncomments_existing_mysql_line_comments_and_preserves_text():
+    editor = SqlEditor()
+    source = "  -- SELECT 1\\n\\t--\\tFROM t\\n-- "
+    expected = "  SELECT 1\\n\\tFROM t\\n"
+    try:
+        editor.setPlainText(source)
+        cursor = editor.textCursor()
+        cursor.setPosition(0)
+        cursor.setPosition(len(source), QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+
+        _send_key(editor, Qt.Key.Key_Slash, Qt.KeyboardModifier.ControlModifier)
+
+        assert editor.toPlainText() == expected
+        assert editor.textCursor().hasSelection()
+
+        editor.undo()
+        assert editor.toPlainText() == source
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()
+
+
+def test_sql_editor_keyboard_help_documents_comment_toggle():
+    editor = SqlEditor()
+    try:
+        assert editor.accessibleName() == "SQL query editor"
+        assert "Ctrl+/" in editor.accessibleDescription()
+    finally:
+        editor.deleteLater()
+        _APP.processEvents()
+\n
