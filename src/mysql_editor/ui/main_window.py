@@ -36,6 +36,7 @@ from mysql_editor.ui.theme import color_for_theme, normalize_theme, resolve_them
 from mysql_editor.ui.result_tools import (
     cell_copy_text, cell_detail_text, column_headers_tsv, column_width_samples,
     result_export_target, result_filter_message, result_picker_label, result_summary_message,
+    result_window_message,
     rows_tsv, selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import (
@@ -2301,24 +2302,38 @@ class MainWindow(QMainWindow):
             self.result_grid.setColumnWidth(column, min(480, max(88, measured + 28)))
 
     def _select_result(self, index: int, total_duration: int | None = None):
+        previous_item = self._result_item_by_id(self._current_result_id)
         if index < 0 or index >= len(self._query_results):
+            self._restore_initial_result_window(previous_item)
             self._current_result_id = None
             self._result_fetched_row_count = 0
             self.result_model.update([], [])
             self._set_result_controls()
             return
+
         item = self._query_results[index]
+        new_result_id = item.get("result_id")
+        if previous_item is not None and previous_item.get("result_id") != new_result_id:
+            self._restore_initial_result_window(previous_item)
+
         self.result_filter.clear()
         self._set_result_completion_words(item.get("headers", []))
         headers = item.get("headers", [])
         rows = item.get("rows", [])
-        self._current_result_id = item.get("result_id")
-        self.result_model.update(headers, rows)
+        try:
+            window_start = max(0, int(item.get("window_start_offset", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            window_start = 0
+        item["window_start_offset"] = window_start
+        self._current_result_id = new_result_id
+        self.result_model.update(headers, rows, base_offset=window_start)
         self._size_result_columns(headers, rows)
         try:
-            total = max(len(rows), int(item.get("row_count", len(rows)) or 0))
+            total = max(window_start + len(rows), int(item.get("row_count", window_start + len(rows)) or 0))
         except (TypeError, ValueError, OverflowError):
-            total = len(rows)
+            total = window_start + len(rows)
+        item["row_count"] = total
+        item["preview_truncated"] = window_start > 0 or window_start + len(rows) < total
         self.result_model.set_paging_state(
             total_rows=total,
             pending=False,
@@ -2331,7 +2346,12 @@ class MainWindow(QMainWindow):
             self.query_meta.setText(f"{total:,} row(s) · {total_duration} ms total")
         else:
             self.query_meta.setText(f"{total:,} row(s) · {duration} ms")
-        self._set_result_message(result_summary_message(item, len(rows), total))
+        if str(item.get("kind", "")).casefold() == "rows" and window_start > 0:
+            self._set_result_message(
+                result_window_message(item, window_start, len(rows), total)
+            )
+        else:
+            self._set_result_message(result_summary_message(item, len(rows), total))
         self._set_result_controls()
 
     def _on_worker_completed(self, job_id: str, action: str, result: dict):
@@ -3361,8 +3381,12 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle(f"Cell details · {column_name}")
         dialog.setMinimumSize(560, 340)
         layout = QVBoxLayout(dialog)
+        absolute_row = self.result_model.absolute_row_index(source_index.row())
+        display_row_number = (
+            absolute_row + 1 if absolute_row is not None else source_index.row() + 1
+        )
         state = QLabel(
-            f"Row {source_index.row() + 1:,} · Column {column_name} · "
+            f"Row {display_row_number:,} · Column {column_name} · "
             + ("SQL NULL (no value)" if value is None else ("Empty text value" if value == "" else "Value"))
         )
         state.setWordWrap(True)
