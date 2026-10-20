@@ -754,6 +754,7 @@ class DatabaseWorker(QThread):
             return {"ok": False, "error": "The full-result filter query cannot be empty."}
         if len(needle) > 256:
             return {"ok": False, "error": "The filter query is longer than the 256-character limit."}
+        folded_needle = needle.casefold()
         if chosen_result_id in getattr(self, "_invalid_table_previews", set()):
             return {
                 "ok": False,
@@ -801,7 +802,7 @@ class DatabaseWorker(QThread):
                     if not isinstance(values, list):
                         raise ValueError("A cached result row is not a JSON array.")
                     if any(
-                        needle.casefold() in ("(NULL)" if value is None else str(value)).casefold()
+                        folded_needle in ("(NULL)" if value is None else str(value)).casefold()
                         for value in values
                     ):
                         mappings.append((view_id, matched, int(source_idx)))
