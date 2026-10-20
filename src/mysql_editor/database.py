@@ -185,6 +185,16 @@ class DatabaseWorker(QThread):
                 result_id TEXT NOT NULL, row_idx INTEGER NOT NULL, values_json TEXT NOT NULL,
                 PRIMARY KEY(result_id,row_idx)
             );
+            CREATE TABLE result_filter_views (
+                view_id TEXT PRIMARY KEY, result_id TEXT NOT NULL,
+                query TEXT NOT NULL, row_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX result_filter_views_result_id
+                ON result_filter_views(result_id);
+            CREATE TABLE result_filter_view_rows (
+                view_id TEXT NOT NULL, view_idx INTEGER NOT NULL, source_idx INTEGER NOT NULL,
+                PRIMARY KEY(view_id,view_idx)
+            );
         """)
         self._spool.commit()
 
@@ -504,7 +514,16 @@ class DatabaseWorker(QThread):
                 str(payload.get("result_id", "") or ""),
                 payload.get("offset", 0),
                 payload.get("limit", RESULT_PAGE_ROWS),
+                view_id=str(payload.get("view_id", "") or "") or None,
             )
+        if action == "filter_result_spool":
+            return self._prepare_result_filter(
+                str(payload.get("result_id", "") or ""),
+                str(payload.get("query", "") or ""),
+                payload.get("limit", RESULT_PAGE_ROWS),
+            )
+        if action == "drop_result_filter":
+            return self._drop_result_filter(str(payload.get("view_id", "") or ""))
         if action in {
             "query", "schema", "schema_objects", "table_preview", "inspect_schema_object",
             "update_table_cell", "use_schema", "commit", "rollback",
@@ -583,7 +602,12 @@ class DatabaseWorker(QThread):
         return {"ok": False, "error": f"Unknown worker action: {action}"}
 
     def _fetch_result_page(
-        self, result_id: str, offset: Any = 0, limit: Any = RESULT_PAGE_ROWS
+        self,
+        result_id: str,
+        offset: Any = 0,
+        limit: Any = RESULT_PAGE_ROWS,
+        *,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         """Read a bounded page from a fetched result without contacting MySQL."""
         if self._spool is None:
@@ -638,22 +662,60 @@ class DatabaseWorker(QThread):
                     "offset": page_offset,
                     "rows": [],
                 }
-            total_rows = max(0, int(meta[0] or 0))
-            if page_offset > total_rows:
-                return {
-                    "ok": False,
-                    "error": "The requested result page is beyond the end of this result.",
-                    "result_id": chosen_result_id,
-                    "offset": page_offset,
-                    "rows": [],
-                    "row_count": total_rows,
-                }
-            page = self._spool.execute(
-                "SELECT values_json FROM result_rows "
-                "WHERE result_id=? ORDER BY row_idx LIMIT ? OFFSET ?",
-                (chosen_result_id, page_limit, page_offset),
-            ).fetchall()
-            rows = [json.loads(value_json) for (value_json,) in page]
+            source_row_count = max(0, int(meta[0] or 0))
+            source_offsets: list[int] = []
+            if view_id:
+                view_meta = self._spool.execute(
+                    "SELECT result_id, query, row_count FROM result_filter_views WHERE view_id=?",
+                    (view_id,),
+                ).fetchone()
+                if view_meta is None or str(view_meta[0]) != chosen_result_id:
+                    return {
+                        "ok": False,
+                        "error": "This filtered result view has expired. Apply the filter again.",
+                        "result_id": chosen_result_id,
+                        "view_id": view_id,
+                        "offset": page_offset,
+                        "rows": [],
+                    }
+                total_rows = max(0, int(view_meta[2] or 0))
+                if page_offset > total_rows:
+                    return {
+                        "ok": False,
+                        "error": "The requested filtered page is beyond the end of this result.",
+                        "result_id": chosen_result_id,
+                        "view_id": view_id,
+                        "offset": page_offset,
+                        "rows": [],
+                        "row_count": total_rows,
+                    }
+                page = self._spool.execute(
+                    "SELECT r.values_json, v.source_idx "
+                    "FROM result_filter_view_rows AS v "
+                    "JOIN result_rows AS r ON r.result_id=? AND r.row_idx=v.source_idx "
+                    "WHERE v.view_id=? ORDER BY v.view_idx LIMIT ? OFFSET ?",
+                    (chosen_result_id, view_id, page_limit, page_offset),
+                ).fetchall()
+                rows = [json.loads(value_json) for value_json, _source_idx in page]
+                source_offsets = [int(source_idx) for _value_json, source_idx in page]
+            else:
+                total_rows = source_row_count
+                if page_offset > total_rows:
+                    return {
+                        "ok": False,
+                        "error": "The requested result page is beyond the end of this result.",
+                        "result_id": chosen_result_id,
+                        "offset": page_offset,
+                        "rows": [],
+                        "row_count": total_rows,
+                    }
+                page = self._spool.execute(
+                    "SELECT values_json FROM result_rows "
+                    "WHERE result_id=? ORDER BY row_idx LIMIT ? OFFSET ?",
+                    (chosen_result_id, page_limit, page_offset),
+                ).fetchall()
+                rows = [json.loads(value_json) for (value_json,) in page]
+                source_offsets = list(range(page_offset, page_offset + len(rows)))
         except Exception as exc:
             return {
                 "ok": False,
@@ -665,12 +727,151 @@ class DatabaseWorker(QThread):
         return {
             "ok": True,
             "result_id": chosen_result_id,
+            "view_id": view_id,
             "offset": page_offset,
             "rows": rows,
+            "source_offsets": source_offsets,
             "row_count": total_rows,
+            "source_row_count": source_row_count,
             "page_size": page_limit,
             "has_more": page_offset + len(rows) < total_rows,
         }
+
+    def _prepare_result_filter(
+        self,
+        result_id: str,
+        query: str,
+        limit: Any = RESULT_PAGE_ROWS,
+    ) -> dict[str, Any]:
+        """Build a disk-backed, ordered index of rows matching a case-insensitive substring."""
+        if self._spool is None:
+            return {"ok": False, "error": "The local result cache is no longer available."}
+        chosen_result_id = str(result_id or "").strip()
+        needle = str(query or "").strip()
+        if not chosen_result_id:
+            return {"ok": False, "error": "A result identifier is required for filtering."}
+        if not needle:
+            return {"ok": False, "error": "The full-result filter query cannot be empty."}
+        if len(needle) > 256:
+            return {"ok": False, "error": "The filter query is longer than the 256-character limit."}
+        if chosen_result_id in getattr(self, "_invalid_table_previews", set()):
+            return {
+                "ok": False,
+                "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before filtering it.",
+            }
+
+        view_id = uuid.uuid4().hex
+        try:
+            meta = self._spool.execute(
+                "SELECT row_count FROM result_meta WHERE result_id=?",
+                (chosen_result_id,),
+            ).fetchone()
+            if meta is None:
+                return {
+                    "ok": False,
+                    "error": "This query result has expired. Run the query again.",
+                    "result_id": chosen_result_id,
+                    "query": needle,
+                }
+            source_row_count = max(0, int(meta[0] or 0))
+            self._spool.execute(
+                "INSERT INTO result_filter_views(view_id,result_id,query,row_count) VALUES(?,?,?,0)",
+                (view_id, chosen_result_id, needle),
+            )
+            cursor = self._spool.execute(
+                "SELECT row_idx, values_json FROM result_rows WHERE result_id=? ORDER BY row_idx",
+                (chosen_result_id,),
+            )
+            scanned = 0
+            matched = 0
+            page_rows = max(1, min(RESULT_PAGE_ROWS, int(limit or RESULT_PAGE_ROWS)))
+            self._spool.execute("BEGIN")
+            while True:
+                batch = cursor.fetchmany(RESULT_PAGE_ROWS)
+                if not batch:
+                    break
+                mappings = []
+                for source_idx, values_json in batch:
+                    values = json.loads(values_json)
+                    if not isinstance(values, list):
+                        raise ValueError("A cached result row is not a JSON array.")
+                    if any(
+                        needle.casefold() in ("(NULL)" if value is None else str(value)).casefold()
+                        for value in values
+                    ):
+                        mappings.append((view_id, matched, int(source_idx)))
+                        matched += 1
+                if mappings:
+                    self._spool.executemany(
+                        "INSERT INTO result_filter_view_rows(view_id,view_idx,source_idx) VALUES(?,?,?)",
+                        mappings,
+                    )
+                scanned += len(batch)
+                if scanned and scanned % 5000 < len(batch):
+                    self._report_activity(
+                        f"Searching the local result cache · scanned {scanned:,} of {source_row_count:,} rows; "
+                        f"{matched:,} match(es)…"
+                    )
+            self._spool.execute(
+                "UPDATE result_filter_views SET row_count=? WHERE view_id=?",
+                (matched, view_id),
+            )
+            self._spool.commit()
+            first_page = self._spool.execute(
+                "SELECT r.values_json, v.source_idx "
+                "FROM result_filter_view_rows AS v "
+                "JOIN result_rows AS r ON r.result_id=? AND r.row_idx=v.source_idx "
+                "WHERE v.view_id=? ORDER BY v.view_idx LIMIT ? OFFSET 0",
+                (chosen_result_id, view_id, page_rows),
+            ).fetchall()
+            return {
+                "ok": True,
+                "result_id": chosen_result_id,
+                "view_id": view_id,
+                "query": needle,
+                "offset": 0,
+                "rows": [json.loads(value_json) for value_json, _source_idx in first_page],
+                "source_offsets": [int(source_idx) for _value_json, source_idx in first_page],
+                "row_count": matched,
+                "source_row_count": source_row_count,
+                "page_size": page_rows,
+                "has_more": len(first_page) < matched,
+            }
+        except Exception as exc:
+            try:
+                self._spool.rollback()
+                self._spool.execute("DELETE FROM result_filter_view_rows WHERE view_id=?", (view_id,))
+                self._spool.execute("DELETE FROM result_filter_views WHERE view_id=?", (view_id,))
+                self._spool.commit()
+            except Exception:
+                pass
+            return {
+                "ok": False,
+                "error": safe_db_error(exc),
+                "result_id": chosen_result_id,
+                "query": needle,
+            }
+
+    def _drop_result_filter(self, view_id: str) -> dict[str, Any]:
+        """Remove one temporary disk-backed filter view from the session spool."""
+        if self._spool is None:
+            return {"ok": False, "error": "The local result cache is no longer available."}
+        chosen_view_id = str(view_id or "").strip()
+        if not chosen_view_id:
+            return {"ok": False, "error": "A filter view identifier is required."}
+        try:
+            self._spool.execute(
+                "DELETE FROM result_filter_view_rows WHERE view_id=?",
+                (chosen_view_id,),
+            )
+            self._spool.execute(
+                "DELETE FROM result_filter_views WHERE view_id=?",
+                (chosen_view_id,),
+            )
+            self._spool.commit()
+        except Exception as exc:
+            return {"ok": False, "error": safe_db_error(exc)}
+        return {"ok": True, "view_id": chosen_view_id}
 
     def _save_rows(self, result_id: str, headers: list[str], statement: str, rows: list[list[Any]]) -> None:
         assert self._spool is not None
