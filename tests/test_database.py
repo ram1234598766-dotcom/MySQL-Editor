@@ -2079,7 +2079,7 @@ def test_prepare_result_filter_uses_displayed_null_marker_and_rejects_bad_reques
         assert missing["ok"] is False
         assert "expired" in missing["error"].casefold()
 
-        dropped = DatabaseWorker._drop_result_filter(null_result["view_id"])
+        dropped = DatabaseWorker._drop_result_filter(worker, null_result["view_id"])
         assert dropped["ok"] is True
         expired_page = DatabaseWorker._fetch_result_page(
             worker, result_id, offset=0, limit=10, view_id=null_result["view_id"]
