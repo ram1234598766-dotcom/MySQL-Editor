@@ -1869,6 +1869,16 @@ class MainWindow(QMainWindow):
                 "Load earlier rows from the local SQLite result cache without rerunning SQL."
             )
             self.fetch_more_button.setEnabled(True)
+        elif (
+            item
+            and item.get("table_preview")
+            and item.get("preview_truncated")
+            and not item.get("preview_has_more")
+            and item.get("preview_limit_reason")
+        ):
+            self.fetch_more_button.setText("Preview Capped at 1,000")
+            self.fetch_more_button.setToolTip(str(item.get("preview_limit_reason")))
+            self.fetch_more_button.setEnabled(False)
         elif is_row_result and not item.get("page_load_unavailable"):
             self.fetch_more_button.setText("All Rows Loaded")
             self.fetch_more_button.setToolTip(
@@ -3292,7 +3302,12 @@ class MainWindow(QMainWindow):
         if is_filtered_view:
             item["source_offsets"] = list(self.result_model._row_offsets)
         self._size_result_columns(headers, rows)
-        item["preview_truncated"] = window_start > 0 or window_start + len(rows) < window_total
+        item["preview_truncated"] = (
+            bool(item.get("preview_limit_reason"))
+            or bool(item.get("preview_has_more"))
+            or window_start > 0
+            or window_start + len(rows) < window_total
+        )
         self.result_model.set_paging_state(
             total_rows=window_total,
             pending=False,
@@ -3312,6 +3327,13 @@ class MainWindow(QMainWindow):
         elif str(item.get("kind", "")).casefold() == "rows" and window_start > 0:
             self._set_result_message(
                 result_window_message(item, window_start, len(rows), window_total)
+            )
+        elif item.get("table_preview") and item.get("preview_limit_reason"):
+            self._set_result_message(str(item["preview_limit_reason"]))
+        elif item.get("table_preview") and item.get("preview_has_more"):
+            self._set_result_message(
+                f"Table preview · {source_total:,} row(s) cached so far. "
+                "Fetch Next Preview Page to load another bounded set from MySQL."
             )
         else:
             self._set_result_message(result_summary_message(item, len(rows), source_total))
