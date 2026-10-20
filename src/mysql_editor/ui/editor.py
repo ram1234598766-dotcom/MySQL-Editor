@@ -136,6 +136,81 @@ def _sql_code_mask(text: str, *, preserve_backtick_identifiers: bool = False) ->
     return mask
 
 
+def _completion_query_scope_texts(text: str, cursor_position: int) -> tuple[str, ...]:
+    """Return current-query and enclosing-query SQL with child subqueries hidden.
+
+    This is intentionally a small lexical scope finder, not a MySQL parser. Query
+    blocks are recognized only when a balanced parenthesis begins with SELECT,
+    WITH, or VALUES. A table alias from a sibling subquery is therefore not visible,
+    while correlated outer aliases remain available as the lookup walks outward.
+    """
+    bounded_cursor = max(0, min(int(cursor_position), len(text)))
+    structure_mask = _sql_code_mask(text)
+    open_stack: list[int] = []
+    pairs: list[tuple[int, int]] = []
+    statement_terminators: list[int] = []
+
+    for index, character in enumerate(text):
+        if not structure_mask[index]:
+            continue
+        if character == "(":
+            open_stack.append(index)
+        elif character == ")" and open_stack:
+            pairs.append((open_stack.pop(), index))
+        elif character == ";" and not open_stack:
+            statement_terminators.append(index)
+
+    statement_start = 0
+    statement_end = len(text)
+    for terminator in statement_terminators:
+        if terminator < bounded_cursor:
+            statement_start = terminator + 1
+        elif terminator >= bounded_cursor:
+            statement_end = terminator
+            break
+
+    def starts_query_block(opening: int, closing: int) -> bool:
+        body = "".join(
+            text[position] if structure_mask[position] else " "
+            for position in range(opening + 1, closing)
+        ).lstrip()
+        return re.match(r"(?:SELECT|WITH|VALUES)\b", body, re.IGNORECASE) is not None
+
+    enclosing_queries = [
+        (opening, closing)
+        for opening, closing in pairs
+        if statement_start <= opening < bounded_cursor <= closing < statement_end
+        and starts_query_block(opening, closing)
+    ]
+    enclosing_queries.sort(key=lambda pair: pair[0], reverse=True)
+
+    ranges: list[tuple[int, int]] = []
+    for opening, closing in enclosing_queries:
+        candidate = (opening + 1, closing)
+        if candidate not in ranges:
+            ranges.append(candidate)
+    outer_statement = (statement_start, statement_end)
+    if outer_statement not in ranges:
+        ranges.append(outer_statement)
+
+    text_mask = _sql_code_mask(text, preserve_backtick_identifiers=True)
+    scopes: list[str] = []
+    for start, end in ranges:
+        characters = [
+            text[position] if text_mask[position] else " "
+            for position in range(start, end)
+        ]
+        # Keep each scope local: hide nested SELECT/WITH/VALUES blocks and their
+        # delimiters so aliases from child or sibling subqueries cannot leak out.
+        for opening, closing in pairs:
+            if start <= opening < closing < end and starts_query_block(opening, closing):
+                left = opening - start
+                right = closing - start + 1
+                characters[left:right] = [" "] * (right - left)
+        scopes.append("".join(characters))
+    return tuple(scopes)
+
+
 def _python_index_from_utf16(text: str, utf16_position: int) -> int:
     """Translate a Qt cursor offset (UTF-16 code units) to a Python string index."""
     units = 0
