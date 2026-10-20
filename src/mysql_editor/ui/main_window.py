@@ -3558,6 +3558,13 @@ class MainWindow(QMainWindow):
                     item["preview_has_more"] = False
                     item["preview_stable_order"] = False
                     item["preview_page_error"] = True
+                    edit_context = item.get("table_edit")
+                    if isinstance(edit_context, dict):
+                        edit_context["enabled"] = False
+                        edit_context["reason"] = (
+                            "MySQL could not verify this preview page against the cached source rows. "
+                            "Refresh the table preview before editing again."
+                        )
                     try:
                         paging_total = max(
                             0,
@@ -3767,6 +3774,7 @@ class MainWindow(QMainWindow):
                 start, end, _ = self._result_window_bounds(item)
                 if action == "table_preview_page":
                     preview_loaded = int(item.get("preview_loaded_count", item.get("row_count", total)) or 0)
+                    self.query_meta.setText(f"{preview_loaded:,} table-preview row(s) cached")
                     more_notice = " More rows remain in MySQL." if item.get("preview_has_more") else " End of table reached."
                     self.status.setText(
                         f"Loaded {page_count:,} table-preview row(s) from MySQL · "
