@@ -1724,7 +1724,11 @@ class MainWindow(QMainWindow):
             self._set_result_controls()
             return
         start, offset, total = self._result_window_bounds(item)
-        if offset >= total or item.get("page_load_unavailable"):
+        if offset >= total:
+            self.result_model.set_paging_state(pending=False)
+            self._set_result_controls()
+            return
+        if item.get("page_load_unavailable"):
             self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
             return
@@ -2314,6 +2318,13 @@ class MainWindow(QMainWindow):
         item = self._query_results[index]
         new_result_id = item.get("result_id")
         if previous_item is not None and previous_item.get("result_id") != new_result_id:
+            if (
+                self._result_page_load_pending is not None
+                and self._result_page_load_pending.get("result_id") == previous_item.get("result_id")
+            ):
+                # The in-flight spool page belongs to an old selection. Do not let its
+                # completion repopulate a window that has already been reset.
+                self._result_page_load_pending["discard_on_completion"] = True
             self._restore_initial_result_window(previous_item)
 
         self.result_filter.clear()
