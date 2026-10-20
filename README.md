@@ -53,7 +53,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Switch between results returned by different statements in a script.
 - Sortable result grid, numeric-aware sorting, NULL display, and clipboard actions for selected cells/rows, headers, and the full untruncated cell value.
 - Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
-- Each query initially loads up to 2,000 rows into the grid. Scrolling to the end requests the next page from the local SQLite result spool asynchronously; **Fetch +1,000** remains a manual fallback. Paging never reruns or modifies SQL. All fetched rows remain available for CSV export. Loaded grid rows accumulate as pages are viewed; a bounded row-cache eviction policy is not implemented yet.
+- Each query initially loads up to 2,000 rows into the grid. Scrolling to the end requests the next page from the local SQLite result spool asynchronously; **Fetch +1,000** remains a manual fallback. Paging never reruns or modifies SQL. CSV, JSON and NDJSON exports use every row in the result spool. Loaded grid rows accumulate as pages are viewed; a bounded row-cache eviction policy is not implemented yet.
 - Atomic CSV export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - Release gating includes lint, compilation and unit/UI tests across Python 3.12–3.14, disposable MySQL integration, dependency audits, Windows UI/launch checks, silent install/uninstall verification, a per-artifact provenance manifest, SBOM/license records, and SHA-256 checksums.
@@ -172,21 +172,21 @@ Commit and Rollback act on the active connection. Some MySQL statements, particu
 
 **Stop** sends a best-effort KILL QUERY request through a separate control connection. Permissions, network conditions, and server state affect whether it succeeds promptly. A request to cancel is not proof that the server stopped immediately; check the final state before retrying a mutation. The status strip separates queued/running/fetching states from completion. The UI reports “cancelled” only when MySQL returns an explicit interruption signal after a cancellation request. If a multi-statement script completes earlier statements before a later one fails, it is marked as a partial failure and retains the earlier result sets.
 
-## Results and CSV export
+## Results and data export
 
 A multi-statement script can create several result entries. Use the result picker to switch among them. The grid displays column headers and rows along with row-count and duration information where available.
 
-- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. CSV export preserves the original server-fetch order, not the grid's current sort order.
+- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. All export formats preserve the original server-fetch order, not the grid's current sort order.
 - If the database session drops during a query, the connection badge changes to **Connection lost**, includes a reconnect hint, and the worker discards the dead session. Reconnect before sending more SQL; query tabs and buffers remain in place.
 - **Quick filter** searches visible row cells case-insensitively. Clear the filter to show all rows in the current preview.
 - **Copy selected cells** copies a tab-separated rectangular selection; tabs and newlines inside values are quoted so copied data stays parseable.
 - **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.
 - **Cell details** opens a read-only view for long values, showing the column, row, and whether the value is SQL NULL, empty text, or non-empty text.
 - **Result paging** loads up to 1,000 more rows from the local result spool when the grid reaches its end, or when **Fetch +1,000** is activated. It does not rerun the query or change submitted SQL. Sorting and quick filtering continue to apply to the loaded preview, including newly appended rows.
-- **CSV export** uses every row fetched into the current session result spool, not only the rows currently loaded in the grid or matched by the filter. It preserves original server-fetch order even after sorting, filtering, or paging.
+- **CSV export** uses every row fetched into the current session result spool, not only the rows currently loaded in the grid or matched by the filter. It preserves original server-fetch order even after sorting, filtering, or paging. SQL NULL uses the documented unquoted `\\N` token; empty text remains an empty field, and backslash-leading strings are escaped so they can be distinguished from NULL.
 - **NULL vs empty text:** the grid displays SQL NULL as **(NULL)**; clipboard copy uses the marker **NULL** while empty text remains blank. CSV writes SQL NULL as the unquoted token `\N` and leaves empty text as an empty field. Text values beginning with a backslash are escaped by adding one leading backslash, so a literal text value `\N` exports as `\\N`. Consumers importing these files should decode this documented convention to restore SQL NULL and the original backslash-leading text.
 
-The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
+The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV/JSON/NDJSON exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
 
 ## Schema, history, and snippets
 
