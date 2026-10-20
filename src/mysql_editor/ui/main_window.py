@@ -3799,6 +3799,20 @@ class MainWindow(QMainWindow):
                 if isinstance(values_for_column, list) and local_row_index < len(values_for_column):
                     values_for_column[local_row_index] = raw_value
 
+            # If this row belongs to the preserved initial table-preview snapshot, keep
+            # that snapshot consistent for result switching and later rollback.
+            if item.get("table_preview") and row_index >= 0:
+                initial_rows = item.get("initial_rows")
+                if isinstance(initial_rows, list) and row_index < len(initial_rows):
+                    initial_rows[row_index] = list(display_row)
+                initial_edit = item.get("initial_table_edit")
+                if isinstance(initial_edit, dict) and initial_edit.get("enabled"):
+                    initial_originals = initial_edit.get("original_values") or {}
+                    for index, raw_value in enumerate(raw_row):
+                        initial_values = initial_originals.get(str(index))
+                        if isinstance(initial_values, list) and row_index < len(initial_values):
+                            initial_values[row_index] = raw_value
+
             if self._current_result_id == result_id:
                 self.result_model.update_cell_row(local_row_index, display_row)
                 filter_text = self.result_filter.text().strip()
@@ -4317,17 +4331,41 @@ class MainWindow(QMainWindow):
             edit_context = item.get("table_edit")
             if disable_editing:
                 item["export_unavailable"] = True
+                for edit_snapshot in (
+                    edit_context,
+                    item.get("initial_table_edit"),
+                ):
+                    if isinstance(edit_snapshot, dict):
+                        edit_snapshot["enabled"] = False
+                        edit_snapshot["reason"] = (
+                            "The preview cache could not be restored reliably; refresh before editing or exporting."
+                        )
+
+            if not isinstance(baseline, list) or len(baseline) != len(item.get("headers", [])):
                 if isinstance(edit_context, dict):
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
-                        "The preview cache could not be restored reliably; refresh before editing or exporting."
+                        "This preview was restored after rollback; refresh it before editing again."
                     )
+                continue
 
-            # The row may have been evicted from the 5,000-row visible window. The
-            # worker already restored its SQLite snapshot; do not index it as a UI row.
+            # A row may have been evicted from the visible window. Restore its preserved
+            # initial snapshot too; the worker already restored the authoritative SQLite row.
+            initial_rows = item.get("initial_rows")
+            if isinstance(initial_rows, list) and row_index < len(initial_rows):
+                initial_rows[row_index] = list(baseline)
+            if isinstance(undo, dict) and not disable_editing:
+                initial_edit = item.get("initial_table_edit")
+                if isinstance(initial_edit, dict):
+                    initial_originals = initial_edit.get("original_values") or {}
+                    for column_key, raw_value in (undo.get("original_values") or {}).items():
+                        initial_values = initial_originals.get(str(column_key))
+                        if isinstance(initial_values, list) and row_index < len(initial_values):
+                            initial_values[row_index] = raw_value
+
+            # Do not index an absolute spool row as a UI row if it was evicted.
             if not 0 <= local_row_index < len(item.get("rows", [])):
                 continue
-            if not isinstance(baseline, list) or len(baseline) != len(item.get("headers", [])):
                 if isinstance(edit_context, dict):
                     edit_context["enabled"] = False
                     edit_context["reason"] = (
