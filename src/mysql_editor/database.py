@@ -781,6 +781,250 @@ class DatabaseWorker(QThread):
             "has_more": page_offset + len(rows) < total_rows,
         }
 
+    def _incomplete_table_preview_error(self, result_id: str, operation: str) -> str | None:
+        """Prevent whole-result operations from silently processing a partial table preview."""
+        if self._spool is None:
+            return None
+        try:
+            meta = self._spool.execute(
+                "SELECT statement, row_count FROM result_meta WHERE result_id=?",
+                (str(result_id or ""),),
+            ).fetchone()
+            if meta is None or not str(meta[0] or "").startswith("Preview "):
+                return None
+            expected = max(0, int(meta[1] or 0))
+            cached = int(self._spool.execute(
+                "SELECT COUNT(*) FROM result_rows WHERE result_id=?",
+                (str(result_id or ""),),
+            ).fetchone()[0])
+        except Exception:
+            return "The Schema Explorer preview cache could not be verified. Refresh the table before continuing."
+        if cached >= expected:
+            return None
+        action = {"filter": "filtering", "sort": "sorting", "export": "exporting"}.get(
+            operation, "processing"
+        )
+        return (
+            f"The Schema Explorer preview has cached {cached:,} of {expected:,} row(s). "
+            f"Load the remaining pages before {action}, or use Create SELECT preview for a full query result."
+        )
+
+    def _fetch_table_preview_page(
+        self, result_id: str, offset: int, limit: int
+    ) -> dict[str, Any]:
+        """Fetch the next bounded primary-key page from MySQL and append it to the local spool."""
+        previews = getattr(self, "_table_preview_pages", {})
+        preview = previews.get(result_id)
+        if not isinstance(preview, dict) or not preview.get("enabled"):
+            return {
+                "ok": False,
+                "error": "This table preview cannot be paged safely. Refresh the table or create a SELECT preview.",
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+        if self._connection is None or str(preview.get("session_token") or "") != self._session_token:
+            return {
+                "ok": False,
+                "error": "The MySQL connection changed after this preview was loaded. Refresh the table before loading more rows.",
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+        try:
+            loaded_count = max(0, int(preview.get("loaded_count", 0) or 0))
+            expected_count = max(0, int(preview.get("total_count", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            loaded_count = expected_count = 0
+        if offset != loaded_count:
+            return {
+                "ok": False,
+                "error": "Table preview pages must be loaded in order. Refresh the table if its cached page boundary is inconsistent.",
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+        if loaded_count >= expected_count:
+            preview["enabled"] = False
+            return {
+                "ok": True, "result_id": result_id, "offset": offset, "rows": [],
+                "row_count": expected_count, "source_row_count": expected_count,
+                "page_size": min(RESULT_PAGE_ROWS, max(1, int(limit or RESULT_PAGE_ROWS))),
+                "has_more": False, "table_preview_page": True,
+                "cached_rows": loaded_count, "cache_complete": True,
+            }
+
+        schema = str(preview.get("schema") or "")
+        table = str(preview.get("table") or "")
+        key_columns = [str(name) for name in (preview.get("primary_key_columns") or [])]
+        headers = [str(name) for name in (preview.get("headers") or [])]
+        last_key = preview.get("last_key_values")
+        try:
+            key_indices = [int(value) for value in (preview.get("primary_key_indices") or [])]
+        except (TypeError, ValueError, OverflowError):
+            key_indices = []
+        if (
+            not schema or not table or not key_columns
+            or len(key_columns) != len(key_indices)
+            or not isinstance(last_key, (list, tuple))
+            or len(last_key) != len(key_columns)
+            or any(index < 0 or index >= len(headers) for index in key_indices)
+        ):
+            return {
+                "ok": False,
+                "error": "The primary-key cursor is incomplete. Refresh the table before loading more rows.",
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+
+        qualified = f"{safe_identifier(schema)}.{safe_identifier(table)}"
+        page_limit = min(RESULT_PAGE_ROWS, max(1, int(limit or RESULT_PAGE_ROWS)))
+        cursor = None
+        try:
+            cursor = self._connection.cursor()
+            # Recheck row count before each page. A concurrent INSERT/DELETE invalidates
+            # the old count and must cause a refresh rather than a misleading complete view.
+            cursor.execute(f"SELECT COUNT(*) FROM {qualified}")
+            count_row = cursor.fetchone()
+            current_count = max(0, int(count_row[0] or 0)) if count_row else 0
+            if current_count != expected_count:
+                return {
+                    "ok": False,
+                    "error": (
+                        "The table row count changed while its preview was being paged. "
+                        "Refresh the table to avoid mixing inconsistent rows."
+                    ),
+                    "result_id": result_id,
+                    "offset": offset,
+                    "rows": [],
+                }
+
+            terms: list[str] = []
+            parameters: list[Any] = []
+            for index, column in enumerate(key_columns):
+                comparisons = [
+                    f"{safe_identifier(key_columns[previous])} = %s"
+                    for previous in range(index)
+                ]
+                parameters.extend(last_key[:index])
+                comparisons.append(f"{safe_identifier(column)} > %s")
+                parameters.append(last_key[index])
+                terms.append("(" + " AND ".join(comparisons) + ")")
+            order_by = ", ".join(safe_identifier(name) for name in key_columns)
+            query = (
+                f"SELECT * FROM {qualified} WHERE {' OR '.join(terms)} "
+                f"ORDER BY {order_by} LIMIT %s"
+            )
+            parameters.append(page_limit)
+            cursor.execute(query, tuple(parameters))
+            page_headers = [str(desc[0]) for desc in (cursor.description or [])]
+            if [name.casefold() for name in page_headers] != [name.casefold() for name in headers]:
+                return {
+                    "ok": False,
+                    "error": "The table structure changed while paging. Refresh the table before continuing.",
+                    "result_id": result_id,
+                    "offset": offset,
+                    "rows": [],
+                }
+            raw_rows = [tuple(row) for row in cursor.fetchall()]
+        except Exception as exc:
+            return {
+                "ok": False, "error": safe_db_error(exc),
+                "result_id": result_id, "offset": offset, "rows": [],
+            }
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+        if any(len(row) != len(headers) for row in raw_rows):
+            return {
+                "ok": False,
+                "error": "MySQL returned a row with a different column shape while paging. Refresh the table.",
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+        if len(raw_rows) < page_limit and offset + len(raw_rows) < expected_count:
+            return {
+                "ok": False,
+                "error": (
+                    "Rows changed while the preview was being paged. Refresh the preview before continuing."
+                ),
+                "result_id": result_id,
+                "offset": offset,
+                "rows": [],
+            }
+
+        rows = [[json_value(value) for value in row] for row in raw_rows]
+        if self._spool is None:
+            return {
+                "ok": False, "error": "The result cache is no longer available.",
+                "result_id": result_id, "offset": offset, "rows": [],
+            }
+        try:
+            if raw_rows:
+                self._spool.executemany(
+                    "INSERT INTO result_rows(result_id,row_idx,values_json) VALUES(?,?,?)",
+                    [
+                        (result_id, offset + index, json.dumps(row, ensure_ascii=False))
+                        for index, row in enumerate(rows)
+                    ],
+                )
+            loaded_count = offset + len(rows)
+            current_total = loaded_count if loaded_count == expected_count or len(raw_rows) < page_limit else expected_count
+            self._spool.execute(
+                "UPDATE result_meta SET row_count=? WHERE result_id=?",
+                (current_total, result_id),
+            )
+            self._spool.commit()
+        except Exception as exc:
+            try:
+                self._spool.rollback()
+            except Exception:
+                pass
+            return {
+                "ok": False, "error": safe_db_error(exc),
+                "result_id": result_id, "offset": offset, "rows": [],
+            }
+
+        preview["loaded_count"] = loaded_count
+        preview["total_count"] = current_total
+        if raw_rows:
+            preview["last_key_values"] = [raw_rows[-1][index] for index in key_indices]
+        if loaded_count >= current_total:
+            preview["enabled"] = False
+
+        table_edit_page = None
+        edit_context = preview.get("table_edit")
+        if isinstance(edit_context, dict) and edit_context.get("enabled"):
+            editable_indices = [int(value) for value in (edit_context.get("editable_column_indices") or [])]
+            table_edit_page = {
+                "row_keys": [[row[index] for index in key_indices] for row in raw_rows],
+                "original_values": {
+                    str(index): [row[index] for row in raw_rows]
+                    for index in editable_indices
+                },
+            }
+        return {
+            "ok": True,
+            "result_id": result_id,
+            "offset": offset,
+            "rows": rows,
+            "source_offsets": list(range(offset, offset + len(rows))),
+            "row_count": current_total,
+            "source_row_count": current_total,
+            "page_size": page_limit,
+            "has_more": loaded_count < current_total,
+            "table_preview_page": True,
+            "cached_rows": loaded_count,
+            "cache_complete": loaded_count >= current_total,
+            "table_edit_page": table_edit_page,
+        }
+
     def _prepare_result_filter(
         self,
         result_id: str,
