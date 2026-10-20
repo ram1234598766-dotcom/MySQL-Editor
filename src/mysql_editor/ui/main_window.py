@@ -2476,7 +2476,7 @@ class MainWindow(QMainWindow):
         self._schedule_spool_view_request(request)
 
     def _dispatch_spool_filter(self) -> None:
-        """Dispatch one debounced full-spool scan at a time."""
+        """Dispatch one debounced filter/sort view operation at a time."""
         pending = self._pending_spool_filter
         if pending is None:
             return
@@ -2499,28 +2499,115 @@ class MainWindow(QMainWindow):
             return
 
         self._pending_spool_filter = None
-        job_id = self._dispatch(
-            "filter_result_spool",
-            {
+        operation = str(pending.get("operation") or "filter")
+        if operation == "sort":
+            action = "sort_result_spool"
+            payload = {
+                "result_id": pending["result_id"],
+                "column": pending.get("sort_column", 0),
+                "descending": bool(pending.get("sort_descending", False)),
+                "base_view_id": pending.get("base_view_id"),
+                "limit": RESULT_PAGE_ROWS,
+            }
+        else:
+            action = "filter_result_spool"
+            payload = {
                 "result_id": pending["result_id"],
                 "query": pending["query"],
                 "limit": RESULT_PAGE_ROWS,
-            },
-            dict(pending),
-        )
+            }
+            if pending.get("sort_column") is not None:
+                payload["sort_column"] = int(pending["sort_column"])
+                payload["sort_descending"] = bool(pending.get("sort_descending", False))
+        job_id = self._dispatch(action, payload, dict(pending))
         if job_id:
-            self._spool_filter_request = {**pending, "job_id": job_id}
+            self._spool_filter_request = {**pending, "job_id": job_id, "action": action}
             self.result_model.set_paging_state(pending=True)
         else:
             self.result_model.set_paging_state(pending=False)
-            self.status.setText(
-                "Full-result filter did not start. Retry the search or clear the filter."
-            )
-            self.result_message.setText(
-                "The full result could not be searched. The current grid remains available; "
-                "exports still include all fetched rows."
-            )
+            if operation == "sort":
+                self.status.setText("Full-result sort did not start. The current result view remains available.")
+                self.result_message.setText(
+                    "The full result could not be sorted. The loaded grid window is still available; "
+                    "exports keep the original MySQL fetch order."
+                )
+            else:
+                self.status.setText(
+                    "Full-result filter did not start. Retry the search or clear the filter."
+                )
+                self.result_message.setText(
+                    "The full result could not be searched. The current grid remains available; "
+                    "exports still include all fetched rows."
+                )
         self._set_result_controls()
+
+    def _on_result_sort_indicator_changed(self, column: int, order: Qt.SortOrder) -> None:
+        """Sort all fetched rows for spooled query results; keep small/preview sorts local."""
+        item = self._result_item_by_id(self._current_result_id)
+        if (
+            item is None
+            or str(item.get("kind", "")).casefold() != "rows"
+            or bool(item.get("table_edit"))
+            or not str(item.get("result_id") or "").strip()
+        ):
+            return
+        original_rows = item.get("initial_rows", item.get("rows", []))
+        try:
+            source_total = max(
+                len(original_rows), int(item.get("row_count", len(original_rows)) or 0)
+            )
+        except (TypeError, ValueError, OverflowError):
+            source_total = len(original_rows)
+        if not item.get("view_id") and source_total <= len(original_rows):
+            return
+
+        try:
+            sort_column = int(column)
+        except (TypeError, ValueError, OverflowError):
+            return
+        if not 0 <= sort_column < len(item.get("headers", [])):
+            return
+        descending = order == Qt.SortOrder.DescendingOrder
+        item["sort_column"] = sort_column
+        item["sort_descending"] = descending
+        self._filter_generation += 1
+        generation = self._filter_generation
+        query = self.result_filter.text().strip()
+        view_id = str(item.get("view_id") or "")
+        view_query = str(item.get("view_query") or "")
+        if query and view_id and view_query == query:
+            request = {
+                "generation": generation,
+                "result_id": str(item.get("result_id") or ""),
+                "query": query,
+                "operation": "sort",
+                "sort_column": sort_column,
+                "sort_descending": descending,
+                "base_view_id": view_id,
+            }
+        elif query:
+            # Compose a new full-result filter with this sort in the same worker request;
+            # scanning the source spool prevents a prior filter from narrowing the query.
+            request = {
+                "generation": generation,
+                "result_id": str(item.get("result_id") or ""),
+                "query": query,
+                "operation": "filter",
+                "sort_column": sort_column,
+                "sort_descending": descending,
+            }
+        else:
+            request = {
+                "generation": generation,
+                "result_id": str(item.get("result_id") or ""),
+                "query": "",
+                "operation": "sort",
+                "sort_column": sort_column,
+                "sort_descending": descending,
+                "base_view_id": view_id if view_id and not view_query else None,
+            }
+        self._schedule_spool_view_request(request)
+
 
     def _set_spool_filter_message(self, item: dict) -> None:
         query = str(item.get("view_query") or "")
