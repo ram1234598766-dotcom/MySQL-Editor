@@ -42,7 +42,7 @@ The interface should feel considered and quick on an ordinary Windows laptop as 
 
 ## 2. Current baseline and recent work
 
-The repository is already a native PySide6 application with horizontal workspace navigation, query tabs, a SQL editor, results grid, schema/history/snippet panels, background database worker, connection profiles, a local master-password gate, Windows Credential Manager storage, CSV export, a guided tour, and Windows installer/portable packaging.
+The repository is already a native PySide6 application with horizontal workspace navigation, query tabs, a SQL editor, results grid, schema/history/snippet panels, background database worker, connection profiles, a local master-password gate, Windows Credential Manager storage, CSV/JSON/NDJSON export, a guided tour, and Windows installer/portable packaging.
 
 The recent advanced-workbench change adds:
 
@@ -326,8 +326,8 @@ Tasks:
 - Add column-width behavior that balances readable values and speed; do not auto-size thousands of cells on every load.
 - Add a cell detail view for wide/long values, plus copy cell/row/selected cells/headers. Respect NULL versus empty text in copy/export documentation.
 - [x] Add guarded single-cell editing for verified Schema Explorer base-table previews: exclude primary keys/generated and unsupported types; require a transactional engine; parameterize writes; re-read and lock the row to reject stale changes; do not auto-commit; restore edited rows in the local cache after full rollback.
-- [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and CSV export of invalidated previews until re-preview.
-- Ensure result sorting does not reorder the underlying result spool or corrupt CSV order unexpectedly. Define whether export preserves server fetch order or current sorted-grid order and communicate that clearly.
+- [x] Invalidate cached table previews after `ROLLBACK TO SAVEPOINT`, since we do not keep per-savepoint snapshots; block further edit, paging, and result export of invalidated previews until re-preview.
+- Ensure result sorting does not reorder the underlying result spool. CSV, JSON, and NDJSON exports preserve server-fetch order rather than the current sorted-grid order, and quick filtering never reduces the exported row set.
 - [x] Add JSON-array and NDJSON export alongside CSV without adding a runtime dependency; tests cover type preservation, duplicate column labels, fetch order, and atomic-failure cleanup.
 - Keep XLSX export deferred until a streaming writer is evaluated for Python/Qt/PyInstaller compatibility, dependency size, licence, and large-file behavior.
 - [x] Replace the raw `EXPLAIN` grid action with `EXPLAIN FORMAT=JSON`, a structured expandable plan tree, an optimizer-estimate summary, and a copyable raw JSON tab. Invalid/unsupported responses are surfaced without running the original SELECT.
@@ -566,7 +566,7 @@ The Settings menu now groups Appearance, Editor, Results, and Query History. Edi
 
 ### Query lifecycle feedback — 17 October 2026
 
-The worker now emits running/fetch progress and CSV export progress; the UI distinguishes a cancellation request from a confirmed MySQL interruption, recognizes partial script failure, and keeps earlier result sets available. A pure outcome classifier and database interruption tests cover completion, cancellation, interruption, partial failure, and ordinary failures.
+The worker now emits running/fetch and export progress; the UI distinguishes a cancellation request from a confirmed MySQL interruption, recognizes partial script failure, and keeps earlier result sets available. A pure outcome classifier and database interruption tests cover completion, cancellation, interruption, partial failure, and ordinary failures.
 
 
 ### Appearance preference work — 17 October 2026
@@ -694,7 +694,7 @@ Automated status is determined by the release workflow run on the exact candidat
 
 The result grid now has a **Fetch +1,000** action. It requests the next bounded page from the worker-owned SQLite result spool; it never reruns, rewrites, or appends a LIMIT/OFFSET clause to the user's SQL. The initial preview remains capped at 2,000 rows, and the additional page size is clamped to 1,000 rows. Paging remains available after disconnect while the current worker cache exists, because it is a local cache read rather than a MySQL action.
 
-The result model appends rows incrementally without resetting the model. Sorting remains a proxy-model operation, the active quick filter continues to apply to appended rows, and each result retains its own loaded-page state when switching between statement results. CSV export remains independent of the UI preview and reads the complete spooled result in server-fetch order.
+The result model appends rows incrementally without resetting the model. Sorting remains a proxy-model operation, the active quick filter continues to apply to appended rows, and each result retains its own loaded-page state when switching between statement results. All export formats remain independent of the UI preview and read the complete spooled result in server-fetch order.
 
 Automated acceptance added:
 - Worker tests for ordered page boundaries, a clamped page size, invalid/expired results and negative offsets.
@@ -852,7 +852,7 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 
 ### Phase 5 follow-up — scroll-triggered result paging — 20 October 2026
 
-**Status: implementation branch ready for CI; not yet merged.** This increment builds on the existing SQLite result spool and preserves the existing **Fetch +1,000** control as a fallback.
+**Status: merged to `main` in PR #79 (commit `5100b428a5b0beced8e53535b5d0aa1caedcb8a8`).** This increment builds on the existing SQLite result spool and preserves the existing **Fetch +1,000** control as a fallback.
 
 - The result table model now exposes Qt's `canFetchMore()`/`fetchMore()` contract and emits a request when the grid reaches the end of its loaded rows.
 - The request is routed to the existing database worker's `fetch_result_page` action. It reads the local spool rather than issuing SQL to MySQL; one request can be active at a time, duplicate requests are blocked, and rows are inserted incrementally without resetting the model.
@@ -867,11 +867,11 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 - Sorting and quick filtering still operate on the loaded preview rather than query the full SQLite spool. Full spool-backed sort/filter belongs to the remaining results workstream.
 - The one-million-row responsiveness and bounded-memory target has **not been measured** by this increment. CI model tests and simulated Windows UI checks are not proof of performance on a physical target PC.
 
-The exact branch/PR checks must pass before merge. Afterward, continue with the bounded result-window and spool-backed sort/filter work before marking the large-results exit gate closed.
+Next: continue with the bounded result-window and spool-backed sort/filter work before marking the large-results exit gate closed.
 
 ### Phase 5 follow-up — JSON and NDJSON result export — 20 October 2026
 
-**Status: implementation branch ready for CI; not yet merged.** The export dialog can select CSV, JSON array, or newline-delimited JSON without adding a runtime dependency.
+**Status: PR #80 open; CI validation in progress.** The export dialog can select CSV, JSON array, or newline-delimited JSON without adding a runtime dependency.
 
 - JSON/NDJSON writers stream ordered rows directly from the SQLite result spool on the database worker; they do not rely on the grid's loaded rows, sort order, or quick filter.
 - JSON is a conventional array of row objects; NDJSON is one row object per line. SQL NULL maps to JSON `null`; empty text remains an empty string. Duplicate or blank column labels receive stable unique names so duplicate-column values are not overwritten by object-key collisions.
