@@ -4221,6 +4221,111 @@ class MainWindow(QMainWindow):
                     )
         self._set_result_controls()
 
+    def _merge_table_preview_edit_page(
+        self,
+        item: dict,
+        page_edit: dict | None,
+        *,
+        direction: str,
+        page_count: int,
+        evicted: int,
+    ) -> None:
+        """Keep raw key/value snapshots aligned with the bounded source-row window."""
+        if not item.get("table_preview"):
+            return
+        current = item.get("table_edit")
+        if not isinstance(current, dict):
+            item["table_edit"] = {
+                "enabled": False,
+                "reason": "Refresh this table preview before editing.",
+            }
+            return
+
+        def disable(reason: str) -> None:
+            current["enabled"] = False
+            current["reason"] = reason
+            current["row_keys"] = []
+            current["original_values"] = {}
+
+        if not current.get("enabled"):
+            return
+        if not isinstance(page_edit, dict) or not page_edit.get("enabled"):
+            disable(
+                str((page_edit or {}).get("reason")
+                    or "The source metadata could not be verified for this page. Refresh before editing.")
+            )
+            return
+
+        identity_keys = (
+            "schema", "table", "session_token", "primary_key_columns",
+            "primary_key_indices", "editable_column_indices",
+        )
+        if any(current.get(key) != page_edit.get(key) for key in identity_keys):
+            disable("The table metadata changed while paging. Refresh before editing.")
+            return
+
+        displayed_rows = item.get("rows") or []
+        page_count = max(0, int(page_count))
+        evicted = max(0, int(evicted))
+        old_count = len(displayed_rows) - page_count + evicted
+        if old_count < 0:
+            disable("The preview row window changed while paging. Refresh before editing.")
+            return
+
+        old_keys = current.get("row_keys")
+        new_keys = page_edit.get("row_keys")
+        if (
+            not isinstance(old_keys, list)
+            or not isinstance(new_keys, list)
+            or len(old_keys) != old_count
+            or len(new_keys) != page_count
+        ):
+            disable("The primary-key snapshot does not match the visible preview rows. Refresh before editing.")
+            return
+
+        old_originals = current.get("original_values")
+        new_originals = page_edit.get("original_values")
+        if not isinstance(old_originals, dict) or not isinstance(new_originals, dict):
+            disable("The cell-value snapshot is unavailable. Refresh before editing.")
+            return
+
+        merged_originals: dict[str, list[Any]] = {}
+        editable_indices = [int(value) for value in current.get("editable_column_indices", [])]
+        for column_index in editable_indices:
+            key = str(column_index)
+            old_values = old_originals.get(key)
+            page_values = new_originals.get(key)
+            if (
+                not isinstance(old_values, list)
+                or len(old_values) != old_count
+                or not isinstance(page_values, list)
+                or len(page_values) != page_count
+            ):
+                disable("The raw cell-value snapshot does not match the visible preview rows. Refresh before editing.")
+                return
+            if direction == "previous":
+                kept_old = old_values[:max(0, old_count - evicted)]
+                merged = list(page_values) + list(kept_old)
+            else:
+                merged = list(old_values[evicted:]) + list(page_values)
+            merged_originals[key] = merged
+
+        if direction == "previous":
+            kept_old_keys = old_keys[:max(0, old_count - evicted)]
+            merged_keys = list(new_keys) + list(kept_old_keys)
+        else:
+            merged_keys = list(old_keys[evicted:]) + list(new_keys)
+
+        expected_count = len(displayed_rows)
+        if len(merged_keys) != expected_count or any(
+            len(values) != expected_count for values in merged_originals.values()
+        ):
+            disable("The edit snapshot no longer matches the bounded result window. Refresh before editing.")
+            return
+        current["row_keys"] = merged_keys
+        current["original_values"] = merged_originals
+        current["reason"] = ""
+
     def _table_cell_edit_entry(self, index):
         """Return a verified local preview target for a single-cell edit action."""
         if not index.isValid() or not self._current_result_id or self._cell_edit_pending:
@@ -4232,7 +4337,14 @@ class MainWindow(QMainWindow):
         table_edit = item.get("table_edit")
         if not isinstance(table_edit, dict) or not table_edit.get("enabled"):
             return None
-        row_index, column_index = source_index.row(), source_index.column()
+        if item.get("view_id"):
+            # Filtering/sorting creates a different row order. Keep table editing disabled
+            # on any materialized view until a primary-key-aligned view is implemented.
+            return None
+        local_row_index, column_index = source_index.row(), source_index.column()
+        absolute_row_index = self.result_model.absolute_row_index(local_row_index)
+        if absolute_row_index is None:
+            return None
         editable_columns = table_edit.get("editable_column_indices") or []
         if column_index not in editable_columns:
             return None
@@ -4241,10 +4353,10 @@ class MainWindow(QMainWindow):
         old_values = original_values.get(str(column_index))
         primary_key_columns = table_edit.get("primary_key_columns") or []
         if (
-            not 0 <= row_index < len(row_keys)
+            not 0 <= local_row_index < len(row_keys)
             or not isinstance(old_values, list)
-            or not 0 <= row_index < len(old_values)
-            or len(row_keys[row_index]) != len(primary_key_columns)
+            or not 0 <= local_row_index < len(old_values)
+            or len(row_keys[local_row_index]) != len(primary_key_columns)
         ):
             return None
         headers = item.get("headers") or []
@@ -4253,11 +4365,12 @@ class MainWindow(QMainWindow):
         return {
             "item": item,
             "table_edit": table_edit,
-            "row_index": row_index,
+            "row_index": absolute_row_index,
+            "local_row_index": local_row_index,
             "column_index": column_index,
             "column_name": str(headers[column_index]),
-            "old_value": old_values[row_index],
-            "primary_key_values": list(row_keys[row_index]),
+            "old_value": old_values[local_row_index],
+            "primary_key_values": list(row_keys[local_row_index]),
             "primary_key_columns": list(primary_key_columns),
         }
 
