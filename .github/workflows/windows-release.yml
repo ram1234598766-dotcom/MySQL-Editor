@@ -433,7 +433,10 @@ jobs:
           )
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             releaseArgs+=(--target "$GITHUB_SHA" --prerelease)
-          elif [[ "$releaseTag" =~ -(alpha|beta|rc|preview) ]]; then
-            releaseArgs+=(--prerelease)
+          else
+            lowerReleaseTag="${releaseTag,,}"
+            if [[ "$lowerReleaseTag" =~ -(alpha|beta|rc|preview)([.-]|$) ]]; then
+              releaseArgs+=(--prerelease)
+            fi
           fi
           gh "${releaseArgs[@]}"
