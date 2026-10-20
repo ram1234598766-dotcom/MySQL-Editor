@@ -2007,6 +2007,12 @@ def _make_filter_spool(rows):
             view_id TEXT NOT NULL, view_idx INTEGER NOT NULL, source_idx INTEGER NOT NULL,
             PRIMARY KEY(view_id,view_idx)
         );
+        CREATE TABLE result_view_sort_keys (
+            view_id TEXT NOT NULL, ordinal INTEGER NOT NULL, source_idx INTEGER NOT NULL,
+            null_rank INTEGER NOT NULL, type_rank INTEGER NOT NULL,
+            numeric_key TEXT NOT NULL, text_key TEXT NOT NULL,
+            PRIMARY KEY(view_id,ordinal)
+        );
         """
     )
     result_id = "large-filter-fixture"
