@@ -620,7 +620,13 @@ def test_table_preview_edit_metadata_stays_aligned_when_window_evicts_rows(tmp_p
         window.result_model.update(headers, old_rows, base_offset=1000, total_rows=6001)
         item["rows"] = window.result_model.rows
         item["initial_rows"] = [list(row) for row in old_rows[:1000]]
-        item["initial_table_edit"] = window._copy_table_edit_context(edit)
+        initial_edit = window._copy_table_edit_context(edit)
+        initial_edit["row_keys"] = list(initial_edit["row_keys"][:1000])
+        initial_edit["original_values"] = {
+            key: list(values[:1000])
+            for key, values in initial_edit["original_values"].items()
+        }
+        item["initial_table_edit"] = initial_edit
 
         next_rows = [[index, f"row-{index}", index % 9] for index in range(6000, 7000)]
         page_edit = {
