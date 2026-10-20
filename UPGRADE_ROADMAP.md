@@ -339,6 +339,7 @@ Exit gate:
 - Row counts and completion states agree with the worker's result data.
 - [x] Table-edit tests cover eligibility, non-transactional engine rejection, parameterized update and no implicit commit, stale same-cell and other-column conflict detection, session invalidation, full rollback restoration, savepoint rollback invalidation, and UI consistency.
 - [x] Explain-plan tests cover JSON row extraction, malformed/empty/error responses, nested plan rendering, raw JSON copy, asynchronous request dispatch, and graceful unsupported-server failures.
+- [x] Bound remote EXPLAIN JSON to 2 MiB, reject malformed/excessively nested JSON, limit the visual tree to 3,000 nodes and 32 levels, and cap the summary traversal; the raw JSON remains available when visual details are truncated.
 
 ### Phase 6 — Professional polish, accessibility and preferences
 

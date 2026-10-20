@@ -26,8 +26,47 @@ class ExplainPlanError(ValueError):
     """An EXPLAIN response did not contain a valid MySQL JSON plan."""
 
 
+# EXPLAIN plans come from a remote server. Bound parsing and widget construction so
+# an unexpectedly large or deeply nested response cannot stall the desktop UI.
+MAX_EXPLAIN_JSON_CHARS = 2 * 1024 * 1024
+MAX_EXPLAIN_JSON_DEPTH = 64
+MAX_PLAN_TREE_NODES = 3000
+MAX_PLAN_TREE_DEPTH = 32
+MAX_PLAN_SUMMARY_NODES = 10000
+
+
+def _validate_json_depth(raw: str) -> None:
+    """Reject over-deep JSON containers before the standard decoder builds objects.
+
+    Braces and brackets inside JSON strings are ignored. Structural correctness is
+    still validated by json.loads after this resource-limit precheck.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_EXPLAIN_JSON_DEPTH:
+                raise ExplainPlanError(
+                    f"MySQL returned JSON nested deeper than the {MAX_EXPLAIN_JSON_DEPTH}-level limit."
+                )
+        elif character in "]}":
+            depth = max(0, depth - 1)
+
+
 def extract_explain_json(result: Mapping[str, Any]) -> dict[str, Any] | list[Any]:
-    """Extract and parse the JSON payload from a successful EXPLAIN query result."""
+    """Extract a bounded JSON payload from a successful EXPLAIN query result."""
     if not result.get("ok"):
         detail = str(result.get("error") or "MySQL could not produce an execution plan.")
         raise ExplainPlanError(detail)
@@ -57,8 +96,16 @@ def extract_explain_json(result: Mapping[str, Any]) -> dict[str, Any] | list[Any
             raw = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise ExplainPlanError("MySQL returned non-text execution-plan data.") from exc
+    raw_text = str(raw)
+    if len(raw_text) > MAX_EXPLAIN_JSON_CHARS:
+        raise ExplainPlanError(
+            f"MySQL returned an execution plan larger than the {MAX_EXPLAIN_JSON_CHARS:,}-character limit."
+        )
+    _validate_json_depth(raw_text)
     try:
-        plan = json.loads(str(raw))
+        plan = json.loads(raw_text)
+    except RecursionError as exc:
+        raise ExplainPlanError("MySQL returned excessively nested JSON execution-plan data.") from exc
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ExplainPlanError("MySQL returned malformed JSON execution-plan data.") from exc
     if not isinstance(plan, (dict, list)):
@@ -106,43 +153,116 @@ def _node_label(key: str, value: Any) -> str:
     return f"{_humanize(key)}: {_compact(value)}"
 
 
-def _append_plan_value(parent: QTreeWidgetItem, key: str, value: Any) -> None:
+def _add_tree_limit_notice(
+    parent: QTreeWidgetItem, budget: dict[str, Any], message: str
+) -> None:
+    if budget["notice_added"]:
+        return
+    notice = QTreeWidgetItem(parent, [message])
+    notice.setToolTip(0, message)
+    budget["notice_added"] = True
+    budget["nodes"] += 1
+
+
+def _append_scalar_item(
+    parent: QTreeWidgetItem, label: str, value: Any, budget: dict[str, Any]
+) -> bool:
+    if budget["nodes"] >= MAX_PLAN_TREE_NODES:
+        _add_tree_limit_notice(
+            parent, budget, "Additional plan details omitted (tree size limit reached)."
+        )
+        return False
+    item = QTreeWidgetItem(parent, [label])
+    item.setToolTip(0, str(value))
+    budget["nodes"] += 1
+    return True
+
+
+def _append_plan_value(
+    parent: QTreeWidgetItem,
+    key: str,
+    value: Any,
+    *,
+    depth: int = 0,
+    budget: dict[str, Any] | None = None,
+) -> bool:
+    """Append a plan subtree under explicit depth/node budgets.
+
+    Return False when the global node budget is exhausted so sibling loops can stop
+    promptly instead of iterating over an arbitrarily large server-provided object.
+    """
+    if budget is None:
+        budget = {"nodes": 0, "notice_added": False}
+    if budget["nodes"] >= MAX_PLAN_TREE_NODES:
+        _add_tree_limit_notice(
+            parent, budget, "Additional plan details omitted (tree size limit reached)."
+        )
+        return False
+
     item = QTreeWidgetItem(parent, [_node_label(key, value)])
+    budget["nodes"] += 1
+    if isinstance(value, (Mapping, list)) and depth >= MAX_PLAN_TREE_DEPTH:
+        if value:
+            _add_tree_limit_notice(
+                item, budget, "Nested details omitted (maximum plan depth reached)."
+            )
+        return True
+
     if isinstance(value, Mapping):
+        # Keep a bounded tooltip summary; individual scalar values remain accessible
+        # as tree leaves and tooltips.
         details = []
         for name, child_value in value.items():
-            if not isinstance(child_value, (Mapping, list)):
-                details.append(f"{_humanize(str(name))}: {_compact(child_value)}")
+            if isinstance(child_value, (Mapping, list)):
+                continue
+            details.append(f"{_humanize(str(name))}: {_compact(child_value, 96)}")
+            if len(details) >= 20:
+                details.append("Additional scalar values are listed in child rows.")
+                break
         if details:
             item.setToolTip(0, "\n".join(details))
+
         for child_key, child_value in value.items():
             if isinstance(child_value, (Mapping, list)):
-                _append_plan_value(item, str(child_key), child_value)
-            else:
-                detail = QTreeWidgetItem(
-                    item, [f"{_humanize(str(child_key))}: {_compact(child_value)}"]
-                )
-                detail.setToolTip(0, str(child_value))
+                if not _append_plan_value(
+                    item, str(child_key), child_value, depth=depth + 1, budget=budget
+                ):
+                    break
+            elif not _append_scalar_item(
+                item,
+                f"{_humanize(str(child_key))}: {_compact(child_value)}",
+                child_value,
+                budget,
+            ):
+                break
     elif isinstance(value, list):
         item.setToolTip(0, f"{len(value)} item(s)")
         for index, child_value in enumerate(value, start=1):
             if isinstance(child_value, (Mapping, list)):
-                _append_plan_value(item, f"Step {index}", child_value)
-            else:
-                child = QTreeWidgetItem(item, [f"Step {index}: {_compact(child_value)}"])
-                child.setToolTip(0, str(child_value))
+                if not _append_plan_value(
+                    item, f"Step {index}", child_value, depth=depth + 1, budget=budget
+                ):
+                    break
+            elif not _append_scalar_item(item, f"Step {index}: {_compact(child_value)}", child_value, budget):
+                break
     else:
         item.setToolTip(0, str(value))
+    return True
 
 
 def _walk_mappings(value: Any):
-    if isinstance(value, Mapping):
-        yield value
-        for child in value.values():
-            yield from _walk_mappings(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _walk_mappings(child)
+    """Iterate plan mappings without recursion and with a strict visit budget."""
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    visited = 0
+    while stack and visited < MAX_PLAN_SUMMARY_NODES:
+        current, depth = stack.pop()
+        visited += 1
+        if isinstance(current, Mapping):
+            yield current
+            if depth < MAX_PLAN_TREE_DEPTH:
+                stack.extend((child, depth + 1) for child in reversed(tuple(current.values())))
+        elif isinstance(current, list) and depth < MAX_PLAN_TREE_DEPTH:
+            stack.extend((child, depth + 1) for child in reversed(current))
 
 
 def summarize_explain_plan(plan: dict[str, Any] | list[Any]) -> str:
@@ -172,7 +292,8 @@ def summarize_explain_plan(plan: dict[str, Any] | list[Any]) -> str:
     if not parts:
         parts.append("Plan details are shown in the tree below.")
     parts.append("Row counts and costs are estimates, not actual execution measurements.")
-    return "  ·  ".join(parts)
+    summary = "  ·  ".join(parts)
+    return summary if len(summary) <= 6000 else summary[:5999] + "…"
 
 
 class ExplainPlanDialog(QDialog):
@@ -224,12 +345,15 @@ class ExplainPlanDialog(QDialog):
         self.plan_tree.setHeaderHidden(True)
         self.plan_tree.setUniformRowHeights(True)
         root = QTreeWidgetItem(self.plan_tree, ["JSON execution plan"])
+        budget: dict[str, Any] = {"nodes": 1, "notice_added": False}
         if isinstance(plan, Mapping):
             for key, value in plan.items():
-                _append_plan_value(root, str(key), value)
+                if not _append_plan_value(root, str(key), value, budget=budget):
+                    break
         else:
             for index, value in enumerate(plan, start=1):
-                _append_plan_value(root, f"Step {index}", value)
+                if not _append_plan_value(root, f"Step {index}", value, budget=budget):
+                    break
         root.setExpanded(True)
         self.plan_tree.expandToDepth(2)
         tree_layout.addWidget(self.plan_tree, 1)
