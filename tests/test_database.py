@@ -354,12 +354,12 @@ def test_xlsx_export_streams_rows_and_keeps_untrusted_text_literal(tmp_path):
                 return "" if text is None else text.text or ""
 
             assert inline_text("A1") == "id"
-            assert inline_text("A2") == "" if cells["A2"].get("t") == "inlineStr" else True
+            assert cells["A2"].get("t") not in {"inlineStr", "s", "b"}
             assert cells["A2"].find("x:v", ns).text == "1"
-            assert cells["B2"].get("t") == "inlineStr"
-            assert inline_text("B2") == ""
-            # SQL NULL is a blank cell; an explicit empty string is stored as inline text.
-            assert "C2" not in cells
+            # Excel cells cannot visibly distinguish an empty string from SQL NULL;
+            # both must remain blank instead of being changed to a misleading marker.
+            assert not cells.get("B2") or cells["B2"].find("x:v", ns) is None
+            assert not cells.get("C2") or cells["C2"].find("x:v", ns) is None
             assert inline_text("D2") == rows[0][3]
             assert "x:f" not in {element.tag.split("}")[-1] for element in cells["D2"].iter()}
             assert inline_text("E2") == "https://example.org/path"
