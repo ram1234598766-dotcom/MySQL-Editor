@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from mysql_editor.storage import LocalRepository
 from mysql_editor.ui.main_window import MainWindow
 from mysql_editor.ui.editor import SqlEditor
+from mysql_editor.ui.theme import stylesheet_for_theme
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -159,6 +160,7 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
         worker, repository, object(), profile, config, {"database": "app_db"}
     )
     original_stylesheet = _APP.styleSheet()
+    original_window_stylesheet = window.styleSheet()
     try:
         window.resize(1280, 820)
         window.show()
@@ -208,6 +210,8 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
         _APP.processEvents()
 
         assert settings.values["ui/theme"] == "light"
+        assert _APP.styleSheet() == original_stylesheet
+        assert window.styleSheet() == stylesheet_for_theme("light")
         assert window.editors.count() == 2
         assert window.editors.currentIndex() == before_tab
         assert first_editor.toPlainText() == before_buffer
@@ -226,6 +230,7 @@ def test_theme_switch_preserves_tabs_editor_selection_results_filter_and_splitte
             window.connection_details.text(),
         ) == before_connection
     finally:
+        window.setStyleSheet(original_window_stylesheet)
         window.close()
         repository.close()
         _APP.setStyleSheet(original_stylesheet)

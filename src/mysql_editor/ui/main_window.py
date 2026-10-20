@@ -12,7 +12,7 @@ from typing import Any
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Signal, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -1044,16 +1044,18 @@ class MainWindow(QMainWindow):
         theme = normalize_theme(value)
         resolved_theme = resolve_theme(theme)
         self._settings.setValue("ui/theme", theme)
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(stylesheet_for_theme(resolved_theme))
+        # Scope repolishing to this workspace and its child dialogs/menus. Updating
+        # QApplication globally forces Qt to restyle every live top-level widget,
+        # including unrelated/hidden windows; window-local inheritance is sufficient
+        # because application dialogs are parented to this main window.
+        self.setStyleSheet(stylesheet_for_theme(resolved_theme))
         result_model = getattr(self, "result_model", None)
         if result_model is not None:
             result_model.set_theme(resolved_theme)
         for index in range(self.editors.count()):
             editor = self.editors.widget(index)
             if isinstance(editor, SqlEditor):
-                # QApplication stylesheet changes can repolish fonts; restore the explicit
+                # A theme stylesheet change can repolish fonts; restore the explicit
                 # SQL editor preferences so appearance switches never reset readability.
                 font = editor.font()
                 font.setFamily(self._editor_font_family)
