@@ -6,6 +6,7 @@ from mysql_editor.ui.result_tools import (
     cell_copy_text,
     cell_detail_text,
     column_headers_tsv,
+    result_export_target,
     rows_tsv,
     selected_cells_tsv,
 )
@@ -185,3 +186,13 @@ def test_cell_copy_text_preserves_scalar_values_and_marks_sql_null():
     assert cell_copy_text(" ") == " "
     assert cell_copy_text(0) == "0"
     assert cell_copy_text("line\nnext") == "line\nnext"
+
+def test_result_export_target_uses_selected_filter_and_canonical_suffix():
+    assert result_export_target("report", "JSON array (*.json)") == ("report.json", "json")
+    assert result_export_target("report.csv", "NDJSON files (*.ndjson)") == (
+        "report.ndjson", "ndjson"
+    )
+    assert result_export_target("events.jsonl", "") == ("events.ndjson", "ndjson")
+    assert result_export_target("report.txt", "CSV files (*.csv)") == ("report.csv", "csv")
+    assert result_export_target("", "JSON array (*.json)") == ("", "")
+\n
