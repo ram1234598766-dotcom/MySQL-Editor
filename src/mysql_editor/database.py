@@ -2605,6 +2605,218 @@ class DatabaseWorker(QThread):
 
         return {"ok": True, "path": str(destination), "row_count": count, "format": "csv"}
 
+    @staticmethod
+    def _xlsx_string_length(value: str) -> int:
+        """Count Excel's UTF-16 cell units, including supplementary Unicode characters."""
+        return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+    @classmethod
+    def _write_xlsx_string(
+        cls,
+        worksheet: Any,
+        row: int,
+        column: int,
+        value: str,
+        cell_format: Any | None = None,
+    ) -> None:
+        if cls._xlsx_string_length(value) > EXCEL_MAX_CELL_UTF16_UNITS:
+            raise ValueError(
+                "An XLSX cell exceeds Excel's 32,767-character limit. "
+                "Use JSON or NDJSON to export this value without Excel cell limits."
+            )
+        if cell_format is None:
+            result = worksheet.write_string(row, column, value)
+        else:
+            result = worksheet.write_string(row, column, value, cell_format)
+        if result == -2:
+            raise ValueError(
+                "An XLSX cell exceeded Excel's 32,767-character limit. "
+                "Use JSON or NDJSON to export this value without Excel cell limits."
+            )
+        if result != 0:
+            raise ValueError(
+                f"Excel rejected the value at row {row + 1:,}, column {column + 1:,}."
+            )
+
+    @classmethod
+    def _write_xlsx_value(
+        cls,
+        worksheet: Any,
+        row: int,
+        column: int,
+        value: Any,
+    ) -> None:
+        """Write untrusted query text as literal cells and avoid Excel numeric precision loss."""
+        if value is None:
+            result = worksheet.write_blank(row, column, None)
+        elif isinstance(value, bool):
+            result = worksheet.write_boolean(row, column, value)
+        elif isinstance(value, int):
+            # Excel keeps only 15 significant decimal digits in numeric cells. Preserve
+            # larger integer identifiers as text rather than silently changing their value.
+            if len(str(abs(value))) > 15:
+                cls._write_xlsx_string(worksheet, row, column, str(value))
+                return
+            result = worksheet.write_number(row, column, value)
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                cls._write_xlsx_string(worksheet, row, column, str(value))
+                return
+            result = worksheet.write_number(row, column, value)
+        else:
+            # Explicit write_string is critical: SQL values beginning with "=" or URL-like
+            # text must not become formulas or hyperlinks in the workbook.
+            cls._write_xlsx_string(worksheet, row, column, str(value))
+            return
+        if result != 0:
+            raise ValueError(
+                f"Excel rejected the value at row {row + 1:,}, column {column + 1:,}."
+            )
+
+    def _export_xlsx(self, result_id: str, path: str) -> dict[str, Any]:
+        """Stream every fetched row into an atomic, constant-memory Excel workbook."""
+        if result_id in getattr(self, "_invalid_table_previews", set()):
+            return {
+                "ok": False,
+                "error": (
+                    "This table preview may be stale after ROLLBACK TO SAVEPOINT. "
+                    "Refresh the table before exporting."
+                ),
+            }
+        if self._spool is None:
+            return {"ok": False, "error": "The result cache is no longer available."}
+        meta = self._spool.execute(
+            "SELECT headers FROM result_meta WHERE result_id=?",
+            (result_id,),
+        ).fetchone()
+        if not meta:
+            return {"ok": False, "error": "This query result has expired. Run the query again."}
+        headers = json.loads(meta[0])
+        if not isinstance(headers, list):
+            return {"ok": False, "error": "The cached result column metadata is invalid."}
+        if not headers:
+            return {"ok": False, "error": "This result has no columns to export to Excel."}
+        if len(headers) > EXCEL_MAX_COLUMNS:
+            return {
+                "ok": False,
+                "error": (
+                    f"This result has {len(headers):,} columns, exceeding Excel's "
+                    f"{EXCEL_MAX_COLUMNS:,}-column worksheet limit."
+                ),
+            }
+
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        count = 0
+        next_progress_row = 5000
+        workbook = None
+        worksheet = None
+        sheet_number = 0
+        rows_on_sheet = 0
+
+        def report_activity(message: str) -> None:
+            reporter = getattr(self, "_report_activity", None)
+            if callable(reporter):
+                reporter(message)
+            else:
+                activity = getattr(self, "activity", None)
+                if activity is not None:
+                    activity.emit(message)
+
+        def add_sheet():
+            nonlocal sheet_number, rows_on_sheet
+            if sheet_number >= EXCEL_MAX_SHEETS:
+                raise ValueError(
+                    "The result exceeds Excel's 255-worksheet limit. "
+                    "Use JSON or NDJSON to export the complete result."
+                )
+            sheet_number += 1
+            rows_on_sheet = 0
+            name = "Results" if sheet_number == 1 else f"Results {sheet_number}"
+            sheet = workbook.add_worksheet(name)
+            sheet.freeze_panes(1, 0)
+            sheet.set_column(0, len(headers) - 1, 18)
+            for column, header in enumerate(headers):
+                self._write_xlsx_string(
+                    sheet,
+                    0,
+                    column,
+                    "" if header is None else str(header),
+                    header_format,
+                )
+            return sheet
+
+        report_activity("Exporting XLSX rows…")
+        try:
+            workbook = xlsxwriter.Workbook(
+                str(temporary),
+                {
+                    "constant_memory": True,
+                    "strings_to_formulas": False,
+                    "strings_to_urls": False,
+                    "strings_to_numbers": False,
+                },
+            )
+            header_format = workbook.add_format(
+                {"bold": True, "bg_color": "#203044", "font_color": "#FFFFFF"}
+            )
+            worksheet = add_sheet()
+            cursor = self._spool.execute(
+                "SELECT row_idx, values_json FROM result_rows "
+                "WHERE result_id=? ORDER BY row_idx",
+                (result_id,),
+            )
+            for row_idx, value_json in cursor:
+                values = json.loads(value_json)
+                if not isinstance(values, list) or len(values) != len(headers):
+                    raise ValueError(
+                        f"Cached result row {int(row_idx) + 1:,} does not match its column metadata."
+                    )
+                if rows_on_sheet >= EXCEL_MAX_DATA_ROWS_PER_SHEET:
+                    worksheet.autofilter(0, 0, rows_on_sheet, len(headers) - 1)
+                    worksheet = add_sheet()
+                excel_row = rows_on_sheet + 1
+                try:
+                    for column, value in enumerate(values):
+                        self._write_xlsx_value(worksheet, excel_row, column, value)
+                except (TypeError, ValueError, UnicodeError) as exc:
+                    raise ValueError(
+                        f"Could not export source row {int(row_idx) + 1:,} to XLSX: {exc}"
+                    ) from exc
+                rows_on_sheet += 1
+                count += 1
+                if count >= next_progress_row:
+                    report_activity(f"Exported {count:,} XLSX row(s)…")
+                    next_progress_row = ((count // 5000) + 1) * 5000
+
+            worksheet.autofilter(0, 0, rows_on_sheet, len(headers) - 1)
+            workbook.close()
+            workbook = None
+            # Flush the finished archive before replacing an existing user file.
+            with temporary.open("rb+") as handle:
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            if workbook is not None:
+                try:
+                    workbook.close()
+                except Exception:
+                    pass
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+        return {
+            "ok": True,
+            "path": str(destination),
+            "row_count": count,
+            "format": "xlsx",
+        }
+
     def _export_json(self, result_id: str, path: str) -> dict[str, Any]:
         """Atomically export every spooled result row as a JSON array of row objects."""
         return self._export_structured(result_id, path, export_format="json")
