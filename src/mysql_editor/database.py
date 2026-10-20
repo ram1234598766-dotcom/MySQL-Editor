@@ -193,7 +193,6 @@ class DatabaseWorker(QThread):
     def _initialize_result_spool(self) -> None:
         """Create the worker-owned on-disk result cache."""
         self._spool = sqlite3.connect(self._spool_path)
-        self._spool.create_collation("DECIMAL", _decimal_sort_collation)
         # Large view sorts must spill to disk instead of building a million-row
         # in-memory temporary B-tree alongside the bounded Qt model.
         self._spool.execute("PRAGMA temp_store=FILE")
