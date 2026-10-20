@@ -16,10 +16,11 @@ dependencies = [
   "sqlglot>=26,<31",
   "platformdirs>=4.3,<5",
   "Pillow>=11,<14",
+  "XlsxWriter>=3.2.9,<4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1.1,<10", "ruff>=0.17.1,<1", "pip-audit>=2.7,<3"]
+dev = ["pytest>=9.1.1,<10", "ruff>=0.17.1,<1", "pip-audit>=2.7,<3", "defusedxml>=0.7.1,<1"]
 
 [project.scripts]
 mysql-editor = "mysql_editor.app:main"

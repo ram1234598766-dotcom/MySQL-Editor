@@ -7,6 +7,8 @@
 
 ## Unreleased
 
+- **Streaming XLSX export:** Export the complete fetched result to an Excel workbook using XlsxWriter constant-memory row writes and numbered worksheets for results too large for one sheet. Text is written literally rather than as formulas or automatic hyperlinks. Excel cell/workbook limits and atomic-write cleanup are enforced; a failed export preserves an existing destination. SQL NULL and empty text both appear blank in Excel, and integers with more than 15 digits are written as text to avoid Excel precision loss. Use JSON/NDJSON when distinguishing NULL from empty text is important.
+
 - **SQL editor line comments:** Press Ctrl+/ to comment or uncomment the current line or selected block with MySQL `-- ` line comments. Indentation and selection are preserved; the edit is a single undo step.
 - **Scoped SQL completion:** Qualified-column completion resolves the innermost nested query's aliases before checking visible correlated outer scopes. It does not mix in table columns from unrelated sibling subqueries; the feature remains a context heuristic rather than full MySQL semantic analysis.
 

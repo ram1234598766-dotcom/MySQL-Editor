@@ -295,6 +295,187 @@ def test_structured_export_failure_preserves_existing_destination_and_cleans_tem
         worker._spool = None
 
 
+def test_xlsx_export_streams_rows_and_keeps_untrusted_text_literal(tmp_path):
+    import json
+    from defusedxml import ElementTree as ET
+    import zipfile
+
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    result_id = "xlsx-literal-result"
+    headers = ["id", "empty", "nullable", "formula", "url", "flag", "large_integer"]
+    rows = [
+        [1, "", None, "=HYPERLINK(\"https://evil.example\",\"click\")",
+         "https://example.org/path", True, 12345678901234567],
+        [2, "βeta", "present", "+SUM(1,2)", "http://example.org", False, 42],
+    ]
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(headers), "SELECT", len(rows)),
+    )
+    # Store rows out of order to verify that XLSX uses the original spool order.
+    worker._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [
+            (result_id, 1, json.dumps(rows[1], ensure_ascii=False)),
+            (result_id, 0, json.dumps(rows[0], ensure_ascii=False)),
+        ],
+    )
+    worker._spool.commit()
+    destination = tmp_path / "report.xlsx"
+    try:
+        result = worker._dispatch(
+            "export_xlsx", {"result_id": result_id, "path": str(destination)}
+        )
+
+        assert result == {
+            "ok": True,
+            "path": str(destination),
+            "row_count": 2,
+            "format": "xlsx",
+        }
+        assert list(tmp_path.glob(".report.xlsx.*.tmp")) == []
+        with zipfile.ZipFile(destination) as archive:
+            assert archive.testzip() is None
+            workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+            ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            names = [sheet.get("name") for sheet in workbook_xml.findall("x:sheets/x:sheet", ns)]
+            assert names == ["Results"]
+            sheet_xml = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            cells = {
+                cell.get("r"): cell
+                for cell in sheet_xml.findall(".//x:sheetData/x:row/x:c", ns)
+            }
+
+            def inline_text(cell_ref):
+                cell = cells[cell_ref]
+                text = cell.find("x:is/x:t", ns)
+                return "" if text is None else text.text or ""
+
+            assert inline_text("A1") == "id"
+            assert cells["A2"].get("t") not in {"inlineStr", "s", "b"}
+            assert cells["A2"].find("x:v", ns).text == "1"
+            # Excel cells cannot visibly distinguish an empty string from SQL NULL;
+            # both must remain blank instead of being changed to a misleading marker.
+            assert not cells.get("B2") or cells["B2"].find("x:v", ns) is None
+            assert not cells.get("C2") or cells["C2"].find("x:v", ns) is None
+            assert inline_text("D2") == rows[0][3]
+            assert "f" not in {element.tag.split("}")[-1] for element in cells["D2"].iter()}
+            assert inline_text("E2") == "https://example.org/path"
+            assert not sheet_xml.findall(".//x:hyperlinks/x:hyperlink", ns)
+            assert cells["F2"].get("t") == "b"
+            assert cells["F2"].find("x:v", ns).text == "1"
+            assert inline_text("G2") == "12345678901234567"
+            assert cells["G2"].get("t") == "inlineStr"
+            assert cells["A3"].find("x:v", ns).text == "2"
+            assert inline_text("B3") == "βeta"
+    finally:
+        worker._spool.close()
+        worker._spool = None
+
+
+def test_xlsx_export_rolls_over_to_numbered_sheets_in_spool_order(tmp_path, monkeypatch):
+    import json
+    from defusedxml import ElementTree as ET
+    import zipfile
+
+    import mysql_editor.database as database_module
+
+    monkeypatch.setattr(database_module, "EXCEL_MAX_DATA_ROWS_PER_SHEET", 2)
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    result_id = "xlsx-multiple-sheets"
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["value"]), "SELECT", 3),
+    )
+    worker._spool.executemany(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        [
+            (result_id, 2, json.dumps(["third"])),
+            (result_id, 0, json.dumps(["first"])),
+            (result_id, 1, json.dumps(["second"])),
+        ],
+    )
+    worker._spool.commit()
+    destination = tmp_path / "split.xlsx"
+    try:
+        result = worker._dispatch(
+            "export_xlsx", {"result_id": result_id, "path": str(destination)}
+        )
+        assert result["ok"] is True
+        assert result["row_count"] == 3
+
+        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        with zipfile.ZipFile(destination) as archive:
+            workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+            names = [
+                sheet.get("name")
+                for sheet in workbook_xml.findall("x:sheets/x:sheet", ns)
+            ]
+            assert names == ["Results", "Results 2"]
+            values = []
+            for sheet_file in ("xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"):
+                sheet_xml = ET.fromstring(archive.read(sheet_file))
+                for cell in sheet_xml.findall(".//x:sheetData/x:row/x:c", ns):
+                    if cell.get("r", "").startswith("A") and cell.find("x:v", ns) is not None:
+                        values.append(cell.find("x:v", ns).text)
+                    elif cell.get("r", "").startswith("A") and cell.find("x:is/x:t", ns) is not None:
+                        values.append(cell.find("x:is/x:t", ns).text)
+            assert values == ["value", "first", "second", "value", "third"]
+    finally:
+        worker._spool.close()
+        worker._spool = None
+
+
+def test_xlsx_export_failure_preserves_existing_destination_and_cleans_temp_file(tmp_path):
+    import json
+
+    import pytest
+
+    spool_owner = _csv_spool()
+    worker = DatabaseWorker()
+    worker._spool = spool_owner._spool
+    destination = tmp_path / "report.xlsx"
+    previous_content = b"previous workbook must survive"
+    destination.write_bytes(previous_content)
+    result_id = "xlsx-too-long-cell"
+    worker._spool.execute(
+        "INSERT INTO result_meta VALUES(?,?,?,?)",
+        (result_id, json.dumps(["long text"]), "SELECT", 1),
+    )
+    worker._spool.execute(
+        "INSERT INTO result_rows VALUES(?,?,?)",
+        (result_id, 0, json.dumps(["x" * (DatabaseWorker._xlsx_string_length("x") + 32767)])),
+    )
+    worker._spool.commit()
+    try:
+        with pytest.raises(ValueError, match="32,767-character limit"):
+            worker._dispatch(
+                "export_xlsx", {"result_id": result_id, "path": str(destination)}
+            )
+        assert destination.read_bytes() == previous_content
+        assert list(tmp_path.glob(".report.xlsx.*.tmp")) == []
+
+        worker._spool.execute("DELETE FROM result_rows WHERE result_id=?", (result_id,))
+        worker._spool.execute(
+            "INSERT INTO result_rows VALUES(?,?,?)",
+            (result_id, 0, "{not valid JSON"),
+        )
+        worker._spool.commit()
+        with pytest.raises(json.JSONDecodeError):
+            worker._dispatch(
+                "export_xlsx", {"result_id": result_id, "path": str(destination)}
+            )
+        assert destination.read_bytes() == previous_content
+        assert list(tmp_path.glob(".report.xlsx.*.tmp")) == []
+    finally:
+        worker._spool.close()
+        worker._spool = None
+
+
 def test_only_explicit_mysql_interruption_errors_are_classified_as_interrupted():
     class MysqlException(Exception):
         def __init__(self, message, errno=None, sqlstate=None):

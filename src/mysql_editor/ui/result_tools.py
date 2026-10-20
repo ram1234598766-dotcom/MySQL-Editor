@@ -20,6 +20,7 @@ def result_export_target(path: str, selected_filter: str) -> tuple[str, str]:
         "CSV files (*.csv)": ("csv", ".csv"),
         "JSON array (*.json)": ("json", ".json"),
         "NDJSON files (*.ndjson)": ("ndjson", ".ndjson"),
+        "Excel workbook (*.xlsx)": ("xlsx", ".xlsx"),
     }
     selected = filters.get(str(selected_filter or "").strip())
     if selected is None:
@@ -27,6 +28,7 @@ def result_export_target(path: str, selected_filter: str) -> tuple[str, str]:
             ".csv": ("csv", ".csv"),
             ".json": ("json", ".json"),
             ".ndjson": ("ndjson", ".ndjson"),
+            ".xlsx": ("xlsx", ".xlsx"),
             ".jsonl": ("ndjson", ".ndjson"),
         }
         selected = suffix_to_format.get(Path(raw_path).suffix.casefold(), ("csv", ".csv"))
