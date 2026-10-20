@@ -164,6 +164,8 @@ class DatabaseWorker(QThread):
         self._table_preview_undo: dict[tuple[str, int], list[Any]] = {}
         # Rollback-to-savepoint can invalidate a cached preview without ending the transaction.
         self._invalid_table_previews: set[str] = set()
+        # Keyset paging state for active Schema Explorer table previews.
+        self._table_preview_pages: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._active_query = False
         self._active_query_task_id: str | None = None
@@ -686,6 +688,11 @@ class DatabaseWorker(QThread):
                 "offset": page_offset,
                 "rows": [],
             }
+        preview_context = getattr(self, "_table_preview_pages", {}).get(chosen_result_id)
+        if preview_context is not None and not view_id:
+            loaded_count = max(0, int(preview_context.get("loaded_count", 0) or 0))
+            if page_offset >= loaded_count:
+                return self._fetch_table_preview_page(chosen_result_id, page_offset, page_limit)
         try:
             meta = self._spool.execute(
                 "SELECT row_count FROM result_meta WHERE result_id=?",
@@ -800,6 +807,9 @@ class DatabaseWorker(QThread):
                 "ok": False,
                 "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh the table before filtering it.",
             }
+        incomplete_preview = self._incomplete_table_preview_error(chosen_result_id, "filter")
+        if incomplete_preview:
+            return {"ok": False, "error": incomplete_preview, "result_id": chosen_result_id, "query": needle}
 
         view_id = uuid.uuid4().hex
         try:
@@ -1071,6 +1081,9 @@ class DatabaseWorker(QThread):
                 "error": "This table preview may be stale after ROLLBACK TO SAVEPOINT. Refresh it before sorting.",
                 "result_id": chosen_result_id,
             }
+        incomplete_preview = self._incomplete_table_preview_error(chosen_result_id, "sort")
+        if incomplete_preview:
+            return {"ok": False, "error": incomplete_preview, "result_id": chosen_result_id}
 
         view_id = uuid.uuid4().hex
         try:
