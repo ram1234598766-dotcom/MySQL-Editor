@@ -97,12 +97,12 @@ def result_filter_message(
     if visible_count == 0:
         return (
             f"No rows in the visible preview match {term!r}. "
-            f"{preview_count:,} preview row(s) checked; CSV export still includes "
+            f"{preview_count:,} preview row(s) checked; data export includes "
             f"all {fetched_count:,} fetched row(s)."
         )
     return (
         f"Quick filter: {visible_count:,} of {preview_count:,} preview row(s) match. "
-        f"CSV export still includes all {fetched_count:,} fetched row(s)."
+        f"Data export includes all {fetched_count:,} fetched row(s)."
     )
 
 
@@ -183,7 +183,7 @@ def result_summary_message(item: dict, preview_rows: int, fetched_rows: int) -> 
         message = f"Rows result · {fetched_count:,} row(s) fetched."
         if item.get("preview_truncated") or fetched_count > preview_count:
             message += (
-                f" Showing first {preview_count:,}; CSV export includes all "
+                f" Showing first {preview_count:,}; data export includes all "
                 f"{fetched_count:,} fetched row(s)."
             )
         return message
