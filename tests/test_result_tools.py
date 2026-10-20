@@ -6,6 +6,7 @@ from mysql_editor.ui.result_tools import (
     cell_copy_text,
     cell_detail_text,
     column_headers_tsv,
+    result_export_target,
     rows_tsv,
     selected_cells_tsv,
 )
@@ -55,11 +56,11 @@ def test_result_filter_message_distinguishes_preview_rows_from_fetched_rows():
 
     assert result_filter_message("missing", 0, 2000, 4127) == (
         "No rows in the visible preview match 'missing'. "
-        "2,000 preview row(s) checked; CSV export still includes all 4,127 fetched row(s)."
+        "2,000 preview row(s) checked; data export includes all 4,127 fetched row(s)."
     )
     assert result_filter_message("alice", 3, 20, 20) == (
         "Quick filter: 3 of 20 preview row(s) match. "
-        "CSV export still includes all 20 fetched row(s)."
+        "Data export includes all 20 fetched row(s)."
     )
     assert result_filter_message("  ", 0, 20, 20) == ""
 
@@ -125,7 +126,7 @@ def test_result_summary_explains_preview_truncation_and_failure():
         "kind": "rows", "row_count": 4321, "preview_truncated": True,
     }, 2000, 4321) == (
         "Rows result · 4,321 row(s) fetched. Showing first 2,000; "
-        "CSV export includes all 4,321 fetched row(s)."
+        "data export includes all 4,321 fetched row(s)."
     )
     assert result_summary_message({"kind": "error", "row_count": 1}, 1, 1) == (
         "Statement failed. Review the error details in this result."
@@ -185,3 +186,13 @@ def test_cell_copy_text_preserves_scalar_values_and_marks_sql_null():
     assert cell_copy_text(" ") == " "
     assert cell_copy_text(0) == "0"
     assert cell_copy_text("line\nnext") == "line\nnext"
+
+def test_result_export_target_uses_selected_filter_and_canonical_suffix():
+    assert result_export_target("report", "JSON array (*.json)") == ("report.json", "json")
+    assert result_export_target("report.csv", "NDJSON files (*.ndjson)") == (
+        "report.ndjson", "ndjson"
+    )
+    assert result_export_target("events.jsonl", "") == ("events.ndjson", "ndjson")
+    assert result_export_target("report.txt", "CSV files (*.csv)") == ("report.csv", "csv")
+    assert result_export_target("", "JSON array (*.json)") == ("", "")
+

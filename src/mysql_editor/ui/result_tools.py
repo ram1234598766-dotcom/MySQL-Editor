@@ -4,9 +4,37 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 NULL_COPY_MARKER = "NULL"
+
+
+def result_export_target(path: str, selected_filter: str) -> tuple[str, str]:
+    """Resolve the chosen export filter and ensure the destination has its matching suffix."""
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        return "", ""
+
+    filters = {
+        "CSV files (*.csv)": ("csv", ".csv"),
+        "JSON array (*.json)": ("json", ".json"),
+        "NDJSON files (*.ndjson)": ("ndjson", ".ndjson"),
+    }
+    selected = filters.get(str(selected_filter or "").strip())
+    if selected is None:
+        suffix_to_format = {
+            ".csv": ("csv", ".csv"),
+            ".json": ("json", ".json"),
+            ".ndjson": ("ndjson", ".ndjson"),
+            ".jsonl": ("ndjson", ".ndjson"),
+        }
+        selected = suffix_to_format.get(Path(raw_path).suffix.casefold(), ("csv", ".csv"))
+    export_format, expected_suffix = selected
+    destination = Path(raw_path)
+    if destination.suffix.casefold() != expected_suffix:
+        destination = destination.with_suffix(expected_suffix)
+    return str(destination), export_format
 
 
 def _tsv_text(rows: Sequence[Sequence[Any]]) -> str:
@@ -69,12 +97,12 @@ def result_filter_message(
     if visible_count == 0:
         return (
             f"No rows in the visible preview match {term!r}. "
-            f"{preview_count:,} preview row(s) checked; CSV export still includes "
+            f"{preview_count:,} preview row(s) checked; data export includes "
             f"all {fetched_count:,} fetched row(s)."
         )
     return (
         f"Quick filter: {visible_count:,} of {preview_count:,} preview row(s) match. "
-        f"CSV export still includes all {fetched_count:,} fetched row(s)."
+        f"Data export includes all {fetched_count:,} fetched row(s)."
     )
 
 
@@ -155,7 +183,7 @@ def result_summary_message(item: dict, preview_rows: int, fetched_rows: int) -> 
         message = f"Rows result · {fetched_count:,} row(s) fetched."
         if item.get("preview_truncated") or fetched_count > preview_count:
             message += (
-                f" Showing first {preview_count:,}; CSV export includes all "
+                f" Showing first {preview_count:,}; data export includes all "
                 f"{fetched_count:,} fetched row(s)."
             )
         return message

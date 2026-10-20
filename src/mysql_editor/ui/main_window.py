@@ -35,8 +35,8 @@ from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.theme import color_for_theme, normalize_theme, resolve_theme, stylesheet_for_theme
 from mysql_editor.ui.result_tools import (
     cell_copy_text, cell_detail_text, column_headers_tsv, column_width_samples,
-    result_filter_message, result_picker_label, result_summary_message, rows_tsv,
-    selected_cells_tsv,
+    result_export_target, result_filter_message, result_picker_label, result_summary_message,
+    rows_tsv, selected_cells_tsv,
 )
 from mysql_editor.ui.preferences import (
     normalize_boolean_preference, normalize_editor_font_family,
@@ -61,6 +61,12 @@ CSV_EXPORT_SEMANTICS = (
     "CSV export preserves MySQL fetch order and includes every fetched row; "
     "it ignores grid sorting and the visible-row filter. " + CSV_EXPORT_NULL_SEMANTICS
 )
+RESULT_EXPORT_SEMANTICS = (
+    "Exports include every fetched row in MySQL fetch order, independent of grid sorting "
+    "and the visible-row filter."
+)
+EXPORT_ACTIONS = frozenset({"export_csv", "export_json", "export_ndjson"})
+EXPORT_FORMAT_LABELS = {"csv": "CSV", "json": "JSON", "ndjson": "NDJSON"}
 
 
 class ResultsModel(QAbstractTableModel):
@@ -527,7 +533,7 @@ class MainWindow(QMainWindow):
         self.result_filter.setMinimumWidth(150)
         self.result_filter.setMaximumWidth(250)
         self.result_filter.setToolTip(
-            "Filters the visible preview only. " + CSV_EXPORT_SEMANTICS
+            "Filters the visible preview only. " + RESULT_EXPORT_SEMANTICS
         )
         self.result_filter.textChanged.connect(self._filter_results)
         self.query_meta = QLabel("Ready")
@@ -554,13 +560,18 @@ class MainWindow(QMainWindow):
         self.fetch_more_button.setToolTip(
             "Scroll to the end of the visible rows to load the next page automatically, "
             "or use this button to append up to 1,000 already-fetched rows. SQL is not rerun; "
-            "CSV export still includes every fetched row."
+            "CSV, JSON and NDJSON exports include every fetched row."
         )
         self.fetch_more_button.setEnabled(False)
         self.fetch_more_button.clicked.connect(self.fetch_more_result_rows)
-        self.export_button = QPushButton("↓  Export CSV")
-        self.export_button.setAccessibleName("Export fetched result rows to CSV")
-        self.export_button.setAccessibleDescription(CSV_EXPORT_SEMANTICS)
+        self.export_button = QPushButton("↓  Export…")
+        self.export_button.setAccessibleName("Export fetched result rows")
+        self.export_button.setAccessibleDescription(
+            "Choose CSV, JSON array, or newline-delimited JSON. " + RESULT_EXPORT_SEMANTICS
+        )
+        self.export_button.setToolTip(
+            "Export all fetched result rows as CSV, JSON, or NDJSON. The current grid sort and filter do not exclude rows."
+        )
         self.export_button.clicked.connect(self.export_results)
         toolbar.addWidget(self.results_title)
         toolbar.addWidget(self.result_picker)
@@ -616,9 +627,9 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.result_message)
         self.export_feedback = QLabel("")
         self.export_feedback.setObjectName("statusSuccess")
-        self.export_feedback.setAccessibleName("CSV export status")
+        self.export_feedback.setAccessibleName("Result export status")
         self.export_feedback.setAccessibleDescription(
-            "Persistent feedback for the most recent CSV export; errors remain visible until replaced."
+            "Persistent feedback for the most recent result export; errors remain visible until replaced."
         )
         self.export_feedback.setWordWrap(True)
         self.export_feedback.setTextInteractionFlags(
@@ -1220,8 +1231,9 @@ class MainWindow(QMainWindow):
             self.rollback_button.setEnabled(False)
             self.query_meta.setText("Queued…")
             self.status.setText("Query queued…")
-        elif action == "export_csv":
-            self.status.setText("CSV export queued…")
+        elif action in EXPORT_ACTIONS:
+            format_name = EXPORT_FORMAT_LABELS[action.removeprefix("export_")]
+            self.status.setText(f"{format_name} export queued…")
         elif action == "fetch_result_page":
             self.status.setText("Loading additional rows from the local result cache…")
         return job_id
@@ -1553,13 +1565,13 @@ class MainWindow(QMainWindow):
             self.fetch_more_button.setToolTip(
                 f"Append the next {next_count:,} row(s) from the local result cache, "
                 "or scroll to the end to load a page automatically. "
-                "This does not rerun SQL; CSV export still includes every fetched row."
+                "This does not rerun SQL; CSV, JSON, and NDJSON exports include every fetched row."
             )
             self.fetch_more_button.setEnabled(True)
         elif item and str(item.get("kind", "")).casefold() == "rows" and not item.get("page_load_unavailable"):
             self.fetch_more_button.setText("All Rows Loaded")
             self.fetch_more_button.setToolTip(
-                "All fetched rows are already loaded in the grid. CSV export keeps server-fetch order."
+                "All fetched rows are already loaded in the grid. Exports keep server-fetch order."
             )
             self.fetch_more_button.setEnabled(False)
         elif item and item.get("page_load_unavailable"):
@@ -2646,21 +2658,27 @@ class MainWindow(QMainWindow):
                 self.status.setText(detail)
                 QMessageBox.warning(self, action.title(), detail)
             return
-        if action == "export_csv":
+        if action in EXPORT_ACTIONS:
+            export_result = dict(result or {})
+            export_format = action.removeprefix("export_")
+            export_result.setdefault("format", export_format)
             if self._query_running:
                 # A newer query owns the status area. Defer modal feedback until it completes.
                 self._deferred_export_notifications.append({
-                    "ok": bool(result.get("ok")),
-                    "row_count": result.get("row_count", 0),
-                    "path": str(result.get("path") or ""),
-                    "error": sanitize_error_message(result.get("error"), fallback="Export failed."),
+                    "ok": bool(export_result.get("ok")),
+                    "format": export_format,
+                    "row_count": export_result.get("row_count", 0),
+                    "path": str(export_result.get("path") or ""),
+                    "error": sanitize_error_message(
+                        export_result.get("error"), fallback="Export failed."
+                    ),
                 })
                 return
             query_submitted_after_export = (
                 task_sequence is not None and self._latest_query_sequence > task_sequence
             )
             self._show_export_notification(
-                result, update_status=not query_submitted_after_export
+                export_result, update_status=not query_submitted_after_export
             )
 
     def _handle_explain_plan_completed(self, result: dict, context: dict) -> None:
@@ -2752,41 +2770,53 @@ class MainWindow(QMainWindow):
 
     def _show_export_notification(self, result: dict, *, update_status: bool = True) -> None:
         """Show persistent, non-modal feedback without interrupting query work."""
+        export_format = str(result.get("format") or "csv").casefold()
+        format_name = EXPORT_FORMAT_LABELS.get(export_format, "CSV")
         if result.get("ok"):
             try:
                 row_count = max(0, int(result.get("row_count", 0) or 0))
             except (TypeError, ValueError):
                 row_count = 0
             path = str(result.get("path") or "the chosen destination")
+            if export_format == "csv":
+                detail = CSV_EXPORT_SEMANTICS
+            elif export_format == "json":
+                detail = (
+                    RESULT_EXPORT_SEMANTICS + " Each JSON object represents one row; "
+                    "SQL NULL is JSON null and empty text is an empty string. Duplicate column "
+                    "labels receive numbered suffixes so no values are lost."
+                )
+            else:
+                detail = (
+                    RESULT_EXPORT_SEMANTICS + " Each line is one JSON row object; SQL NULL is "
+                    "JSON null and empty text is an empty string. Duplicate column labels receive "
+                    "numbered suffixes so no values are lost."
+                )
             self.export_feedback.setObjectName("statusSuccess")
             self.export_feedback.setText(
-                f"CSV export complete · {row_count:,} row(s) saved to {path}. "
-                "Export preserves MySQL fetch order; grid sorting and the visible-row filter "
-                "do not change which rows are included."
+                f"{format_name} export complete · {row_count:,} row(s) saved to {path}. {detail}"
             )
-            self.export_feedback.setToolTip(
-                f"CSV saved to: {path}\n{CSV_EXPORT_NULL_SEMANTICS}"
-            )
+            self.export_feedback.setToolTip(f"{format_name} saved to: {path}\n{detail}")
             self.export_feedback.setAccessibleDescription(
-                f"CSV export completed successfully. {row_count:,} row(s). "
-                f"Saved to {path}. {CSV_EXPORT_SEMANTICS}"
+                f"{format_name} export completed successfully. {row_count:,} row(s). "
+                f"Saved to {path}. {detail}"
             )
             if update_status:
                 self.status.setText(
-                    f"CSV exported · {row_count:,} row(s); saved path shown in Results."
+                    f"{format_name} exported · {row_count:,} row(s); saved path shown in Results."
                 )
         else:
             error = sanitize_error_message(result.get("error"), fallback="Export failed.")
             if not error:
                 error = "Export failed."
             self.export_feedback.setObjectName("statusDanger")
-            self.export_feedback.setText(f"CSV export failed · {error}")
+            self.export_feedback.setText(f"{format_name} export failed · {error}")
             self.export_feedback.setToolTip(error)
             self.export_feedback.setAccessibleDescription(
-                f"CSV export failed. Error details: {error}"
+                f"{format_name} export failed. Error details: {error}"
             )
             if update_status:
-                self.status.setText("CSV export failed · see details in Results.")
+                self.status.setText(f"{format_name} export failed · see details in Results.")
 
         style = self.export_feedback.style()
         style.unpolish(self.export_feedback)
@@ -2809,9 +2839,9 @@ class MainWindow(QMainWindow):
         if pending is None:
             return
         action, _context = pending
-        if action not in {"query", "export_csv"}:
+        if action != "query" and action not in EXPORT_ACTIONS:
             return
-        if action == "export_csv":
+        if action in EXPORT_ACTIONS:
             task_sequence = self._task_sequences.get(job_id)
             if (
                 task_sequence is not None
@@ -2823,7 +2853,7 @@ class MainWindow(QMainWindow):
         self._on_activity(message)
 
     def _on_activity(self, message: str):
-        if self._query_running and message.startswith(("Exporting CSV", "Exported ")):
+        if self._query_running and message.startswith(("Exporting ", "Exported ")):
             # Progress from an earlier export must not overwrite the queued/running query.
             return
         self.status.setText(message)
@@ -2837,33 +2867,41 @@ class MainWindow(QMainWindow):
             self.query_meta.setText("Cancellation request sent…")
         elif message.startswith("Cancellation could not be confirmed"):
             self.query_meta.setText("Cancellation not confirmed")
-        elif message.startswith("Exporting CSV"):
+        elif message.startswith("Exporting "):
             self.status.setText(message)
         elif message.startswith("Exported "):
             self.status.setText(message)
 
     def export_results(self):
-        if not self._current_result_id:
+        result_id = self._current_result_id
+        if not result_id:
             return
-        item = self._result_item_by_id(self._current_result_id)
+        item = self._result_item_by_id(result_id)
         if item is not None and item.get("export_unavailable"):
             self.status.setText(
-                "CSV export is disabled because the preview cache could not be restored after rollback. "
+                "Result export is disabled because the preview cache could not be restored after rollback. "
                 "Reload the table preview before exporting."
             )
             return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export result grid", "mysql-query-results.csv", "CSV files (*.csv)"
+        filters = "CSV files (*.csv);;JSON array (*.json);;NDJSON files (*.ndjson)"
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export result grid",
+            "mysql-query-results.csv",
+            filters,
+            "CSV files (*.csv)",
         )
+        path, export_format = result_export_target(path, selected_filter)
         if path:
             # Clear stale feedback only once the user has committed to a new export.
             self.export_feedback.clear()
             self.export_feedback.hide()
             self.export_feedback.setToolTip("")
             self.export_feedback.setAccessibleDescription(
-                "CSV export status. Results will appear here when the export finishes."
+                "Result export status. CSV, JSON, and NDJSON export results will appear here."
             )
-            self._dispatch("export_csv", {"result_id": self._current_result_id, "path": path})
+            action = f"export_{export_format}"
+            self._dispatch(action, {"result_id": result_id, "path": path})
 
     def _show_result_context(self, point):
         if self._cell_edit_pending:
@@ -2896,7 +2934,7 @@ class MainWindow(QMainWindow):
         copy_rows_action = menu.addAction("Copy selected rows")
         copy_headers_action = menu.addAction("Copy column headers")
         menu.addSeparator()
-        export_action = menu.addAction("Export fetched result to CSV (MySQL fetch order)")
+        export_action = menu.addAction("Export fetched result… (CSV, JSON, or NDJSON)")
         chosen = menu.exec(self.result_grid.viewport().mapToGlobal(point))
         if chosen == details_action:
             self.show_cell_details(clicked)

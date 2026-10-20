@@ -15,7 +15,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - [Quick start](#quick-start)
 - [Connect to MySQL](#connect-to-mysql)
 - [Work with SQL](#work-with-sql)
-- [Results and CSV export](#results-and-csv-export)
+- [Results and data export](#results-and-data-export)
 - [Settings and preferences](#settings-and-preferences)
 - [Schema, history, and snippets](#schema-history-and-snippets)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -52,9 +52,9 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 ### Results and release engineering
 - Switch between results returned by different statements in a script.
 - Sortable result grid, numeric-aware sorting, NULL display, and clipboard actions for selected cells/rows, headers, and the full untruncated cell value.
-- Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
-- Each query initially loads up to 2,000 rows into the grid. Scrolling to the end requests the next page from the local SQLite result spool asynchronously; **Fetch +1,000** remains a manual fallback. Paging never reruns or modifies SQL. All fetched rows remain available for CSV export. Loaded grid rows accumulate as pages are viewed; a bounded row-cache eviction policy is not implemented yet.
-- Atomic CSV export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
+- Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV, JSON, or NDJSON export.
+- Each query initially loads up to 2,000 rows into the grid. Scrolling to the end requests the next page from the local SQLite result spool asynchronously; **Fetch +1,000** remains a manual fallback. Paging never reruns or modifies SQL. CSV, JSON and NDJSON exports use every row in the result spool. Loaded grid rows accumulate as pages are viewed; a bounded row-cache eviction policy is not implemented yet.
+- Atomic CSV, JSON-array, and NDJSON export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - Release gating includes lint, compilation and unit/UI tests across Python 3.12–3.14, disposable MySQL integration, dependency audits, Windows UI/launch checks, silent install/uninstall verification, a per-artifact provenance manifest, SBOM/license records, and SHA-256 checksums.
 - Release workflow can include SHA-256 checksums, CycloneDX SBOM, third-party license inventory, release notes, and an explicit Windows signing-status note.
@@ -62,7 +62,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 
 ## UX and upgrade roadmap
 
-The implementation history and remaining phases are documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. Completed work spans the shared design system, Reduce Motion, Find/Replace, contextual SQL completion, persisted editor/result preferences, connection/schema recovery, CSV export semantics, Phase 6 accessibility and visual-QA improvements, Phase 7 reliability/security hardening, and Phase 8 release provenance and gated Windows packaging.
+The implementation history and remaining phases are documented in **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)**. Completed work spans the shared design system, Reduce Motion, Find/Replace, contextual SQL completion, persisted editor/result preferences, connection/schema recovery, result-export semantics, Phase 6 accessibility and visual-QA improvements, Phase 7 reliability/security hardening, and Phase 8 release provenance and gated Windows packaging.
 
 The intended visual direction remains a calm, modern database workspace: crisp logo rendering, consistent surfaces and spacing, one primary accent colour, readable SQL syntax colours, restrained gradients, and transitions that never block work.
 
@@ -172,21 +172,22 @@ Commit and Rollback act on the active connection. Some MySQL statements, particu
 
 **Stop** sends a best-effort KILL QUERY request through a separate control connection. Permissions, network conditions, and server state affect whether it succeeds promptly. A request to cancel is not proof that the server stopped immediately; check the final state before retrying a mutation. The status strip separates queued/running/fetching states from completion. The UI reports “cancelled” only when MySQL returns an explicit interruption signal after a cancellation request. If a multi-statement script completes earlier statements before a later one fails, it is marked as a partial failure and retains the earlier result sets.
 
-## Results and CSV export
+## Results and data export
 
 A multi-statement script can create several result entries. Use the result picker to switch among them. The grid displays column headers and rows along with row-count and duration information where available.
 
-- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. CSV export preserves the original server-fetch order, not the grid's current sort order.
+- **Sorting** changes the order of the visible grid rows. Common numeric values use numeric-aware comparison. All export formats preserve the original server-fetch order, not the grid's current sort order.
 - If the database session drops during a query, the connection badge changes to **Connection lost**, includes a reconnect hint, and the worker discards the dead session. Reconnect before sending more SQL; query tabs and buffers remain in place.
 - **Quick filter** searches visible row cells case-insensitively. Clear the filter to show all rows in the current preview.
 - **Copy selected cells** copies a tab-separated rectangular selection; tabs and newlines inside values are quoted so copied data stays parseable.
 - **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.
 - **Cell details** opens a read-only view for long values, showing the column, row, and whether the value is SQL NULL, empty text, or non-empty text.
 - **Result paging** loads up to 1,000 more rows from the local result spool when the grid reaches its end, or when **Fetch +1,000** is activated. It does not rerun the query or change submitted SQL. Sorting and quick filtering continue to apply to the loaded preview, including newly appended rows.
-- **CSV export** uses every row fetched into the current session result spool, not only the rows currently loaded in the grid or matched by the filter. It preserves original server-fetch order even after sorting, filtering, or paging.
+- **CSV export** uses every row fetched into the current session result spool, not only the rows currently loaded in the grid or matched by the filter. It preserves original server-fetch order even after sorting, filtering, or paging. SQL NULL uses the documented unquoted `\\N` token; empty text remains an empty field, and backslash-leading strings are escaped so they can be distinguished from NULL.
+- **JSON export** writes a streaming JSON array of row objects. **NDJSON export** writes one JSON row object per line for line-oriented processing. Both formats export every fetched row directly from the local result spool in original fetch order; grid sorting, filtering, and loaded-page count do not reduce the export. SQL NULL becomes JSON `null`, empty text remains an empty string, and duplicate or blank column names are made unique so no values are overwritten. They use a same-directory temporary file and replace the destination only after a successful export.
 - **NULL vs empty text:** the grid displays SQL NULL as **(NULL)**; clipboard copy uses the marker **NULL** while empty text remains blank. CSV writes SQL NULL as the unquoted token `\N` and leaves empty text as an empty field. Text values beginning with a backslash are escaped by adding one leading backslash, so a literal text value `\N` exports as `\\N`. Consumers importing these files should decode this documented convention to restore SQL NULL and the original backslash-leading text.
 
-The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
+The local result cache may contain sensitive database contents. Treat it, copied clipboard values, and CSV/JSON/NDJSON exports as sensitive. The temporary spool is intended for the current worker session and is removed during shutdown on a best-effort basis.
 
 ## Schema, history, and snippets
 
@@ -337,7 +338,7 @@ python -m pip_audit
 
 The requirements-file audit checks the declared runtime dependency constraints. The no-argument audit checks the installed environment, including development, test, and packaging tools. GitHub Actions runs both. The release CycloneDX SBOM intentionally describes runtime dependencies only; packaging tools are covered by the separate installed-environment audit.
 
-GitHub Actions runs lint, compilation, and unit tests across Python 3.12–3.14. A separate integration job starts a disposable MySQL 8.4 service and exercises query execution, schema inspection, transaction rollback, and CSV export. Windows CI checks Qt imports/UI behavior, builds the application-folder and portable packages plus installer, audits the installed packaging environment, launches the packaged apps, and exercises silent install/uninstall behavior. Consult the Actions page for the exact commit you intend to use.
+GitHub Actions runs lint, compilation, and unit tests across Python 3.12–3.14. A separate integration job starts a disposable MySQL 8.4 service and exercises query execution, schema inspection, transaction rollback, and CSV/JSON/NDJSON export. Windows CI checks Qt imports/UI behavior, builds the application-folder and portable packages plus installer, audits the installed packaging environment, launches the packaged apps, and exercises silent install/uninstall behavior. Consult the Actions page for the exact commit you intend to use.
 
 A successful automated run is evidence only for the checks that actually ran. It does not prove all display scales, upgrade paths, credential-vault states, external server configurations, or end-user PCs were manually tested.
 
@@ -347,7 +348,7 @@ A successful automated run is evidence only for the checks that actually ran. It
 |---|---|
 | **src/mysql_editor/app.py** | Startup, local master-password unlock/reconnect flow, and shared theme |
 | **src/mysql_editor/core.py** | SQL boundaries, risk advisories, formatting integration, and secret-redaction helpers |
-| **src/mysql_editor/database.py** | Background MySQL worker, query execution, schema inspection, result spool, cancellation request, CSV export |
+| **src/mysql_editor/database.py** | Background MySQL worker, query execution, schema inspection, result spool, cancellation request, and streaming CSV/JSON/NDJSON exports |
 | **src/mysql_editor/storage.py** | Local SQLite metadata, history/preferences, Argon2id verifier, Credential Manager adapter |
 | **src/mysql_editor/ui/editor.py** | SQL editor, highlighting, line numbers, indentation, and completion |
 | **src/mysql_editor/ui/find_replace_bar.py** | Inline literal Find/Replace controls and match counting |
@@ -377,7 +378,7 @@ If **Verify server identity** is selected, check the hostname, certificate valid
 Confirm that Remember this connection was selected and Windows Credential Manager is available for the current Windows user. If the credential is missing or rejected by MySQL, open the connection form and enter it again. The app intentionally has no plaintext fallback.
 
 ### Query results look incomplete
-The grid initially loads up to 2,000 rows per query result. Scroll to the bottom to request additional pages from the local result cache; **Fetch +1,000** remains available as a manual fallback. Paging does not rerun SQL. Table preview remains capped at 1,000 rows. CSV export includes every row fetched into the result spool and is not reduced by the loaded-page count or quick filter. Ensure the query completed and the correct result entry is selected.
+The grid initially loads up to 2,000 rows per query result. Scroll to the bottom to request additional pages from the local result cache; **Fetch +1,000** remains available as a manual fallback. Paging does not rerun SQL. Table preview remains capped at 1,000 rows. CSV, JSON, and NDJSON exports include every row fetched into the result spool and are not reduced by the loaded-page count or quick filter. Ensure the query completed and the correct result entry is selected.
 
 ### Stored procedures and DELIMITER
 MySQL Editor recognizes standalone MySQL-client `DELIMITER` directives at statement boundaries, uses the active delimiter to keep compound routine bodies together, and removes the client-only directive lines before sending SQL to MySQL. You can switch delimiters (for example, to `//` or `$$`) and restore `;` later in the same script. Malformed delimiter commands fail before the script is queued, so earlier statements are not submitted accidentally. This is a statement-boundary parser, not a full MySQL grammar or semantic validator; the server remains authoritative for SQL validity and permissions.
@@ -391,7 +392,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 ## Known limitations
 
 - Script splitting supports standalone MySQL-client DELIMITER changes and compound stored-program boundaries, but it is not a full MySQL grammar or semantic validator. Malformed directives fail closed before submission.
-- Table preview is limited to 1,000 rows. Large query results initially load 2,000 rows and request additional spool pages as the grid scrolls; **Fetch +1,000** remains the fallback. CSV export retains the complete fetched result. Rows already loaded into the grid accumulate during a session; bounded cache eviction for a million-row grid is not implemented yet.
+- Table preview is limited to 1,000 rows. Large query results initially load 2,000 rows and request additional spool pages as the grid scrolls; **Fetch +1,000** remains the fallback. CSV, JSON, and NDJSON exports retain the complete fetched result. Rows already loaded into the grid accumulate during a session; bounded cache eviction for a million-row grid is not implemented yet.
 - Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
 - Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.
 - SQL risk classification uses SQLGlot's MySQL AST for parseable UPDATE/DELETE outer-WHERE checks and keeps a heuristic fallback for unsupported syntax and executable comments. It can still miss destructive or expensive queries and is not an authorization boundary.
