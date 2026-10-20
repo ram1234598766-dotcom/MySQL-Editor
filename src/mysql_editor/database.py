@@ -33,6 +33,24 @@ def _csv_export_value(value: Any) -> Any:
         return "\\" + value
     return value
 
+def unique_json_export_headers(headers: list[Any]) -> list[str]:
+    """Make result-column names unique without silently dropping duplicate-column values."""
+    used: set[str] = set()
+    result: list[str] = []
+    for index, header in enumerate(headers, start=1):
+        base = str(header) if header is not None else ""
+        if not base:
+            base = f"column_{index}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base} ({suffix})"
+            suffix += 1
+        used.add(candidate)
+        result.append(candidate)
+    return result
+
+
 def json_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -558,6 +576,10 @@ class DatabaseWorker(QThread):
             }
         if action == "export_csv":
             return self._export_csv(str(payload["result_id"]), str(payload["path"]))
+        if action == "export_json":
+            return self._export_json(str(payload["result_id"]), str(payload["path"]))
+        if action == "export_ndjson":
+            return self._export_ndjson(str(payload["result_id"]), str(payload["path"]))
         return {"ok": False, "error": f"Unknown worker action: {action}"}
 
     def _fetch_result_page(
@@ -1715,4 +1737,113 @@ class DatabaseWorker(QThread):
             except OSError:
                 pass
             raise
-        return {"ok": True, "path": str(destination), "row_count": count}
+
+        return {"ok": True, "path": str(destination), "row_count": count, "format": "csv"}
+
+    def _export_json(self, result_id: str, path: str) -> dict[str, Any]:
+        """Atomically export every spooled result row as a JSON array of row objects."""
+        return self._export_structured(result_id, path, export_format="json")
+
+    def _export_ndjson(self, result_id: str, path: str) -> dict[str, Any]:
+        """Atomically export every spooled result row as newline-delimited JSON objects."""
+        return self._export_structured(result_id, path, export_format="ndjson")
+
+    def _export_structured(
+        self, result_id: str, path: str, *, export_format: str
+    ) -> dict[str, Any]:
+        if export_format not in {"json", "ndjson"}:
+            return {"ok": False, "error": "The requested structured export format is unsupported."}
+        if result_id in getattr(self, "_invalid_table_previews", set()):
+            return {
+                "ok": False,
+                "error": (
+                    "This table preview may be stale after ROLLBACK TO SAVEPOINT. "
+                    "Refresh the table before exporting."
+                ),
+            }
+        if self._spool is None:
+            return {"ok": False, "error": "The result cache is no longer available."}
+        meta = self._spool.execute(
+            "SELECT headers FROM result_meta WHERE result_id=?",
+            (result_id,),
+        ).fetchone()
+        if not meta:
+            return {"ok": False, "error": "This query result has expired. Run the query again."}
+        headers = json.loads(meta[0])
+        if not isinstance(headers, list):
+            return {"ok": False, "error": "The cached result column metadata is invalid."}
+        column_names = unique_json_export_headers(headers)
+
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        count = 0
+        next_progress_row = 5000
+        label = "JSON" if export_format == "json" else "NDJSON"
+
+        def report_activity(message: str) -> None:
+            reporter = getattr(self, "_report_activity", None)
+            if callable(reporter):
+                reporter(message)
+            else:
+                activity = getattr(self, "activity", None)
+                if activity is not None:
+                    activity.emit(message)
+
+        report_activity(f"Exporting {label} rows…")
+        try:
+            with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+                if export_format == "json":
+                    handle.write("[")
+                cursor = self._spool.execute(
+                    "SELECT row_idx, values_json FROM result_rows "
+                    "WHERE result_id=? ORDER BY row_idx",
+                    (result_id,),
+                )
+                for row_idx, value_json in cursor:
+                    values = json.loads(value_json)
+                    if not isinstance(values, list) or len(values) != len(column_names):
+                        raise ValueError(
+                            f"Cached result row {int(row_idx) + 1:,} does not match its column metadata."
+                        )
+                    record = dict(zip(column_names, values, strict=True))
+                    if export_format == "json":
+                        handle.write("\\n" if count == 0 else ",\\n")
+                        json.dump(
+                            record,
+                            handle,
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            separators=(",", ":"),
+                        )
+                    else:
+                        handle.write(json.dumps(
+                            record,
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            separators=(",", ":"),
+                        ))
+                        handle.write("\\n")
+                    count += 1
+                    if count >= next_progress_row:
+                        report_activity(f"Exported {count:,} {label} row(s)…")
+                        next_progress_row = ((count // 5000) + 1) * 5000
+                if export_format == "json":
+                    if count:
+                        handle.write("\\n")
+                    handle.write("]\\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        return {
+            "ok": True,
+            "path": str(destination),
+            "row_count": count,
+            "format": export_format,
+        }
