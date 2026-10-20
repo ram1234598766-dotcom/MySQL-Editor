@@ -4,7 +4,7 @@ import mysql_editor.core as core_module
 
 from mysql_editor.core import (
     ScriptParseError, classify_statement, current_statement, current_statement_source,
-    iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
+    format_sql, iter_statement_spans, redact_secrets, sanitize_error_message, split_sql_statements,
 )
 
 def test_split_semicolons_respects_strings_and_comments():
@@ -415,3 +415,17 @@ def test_parseable_mutations_use_sqlglot_ast_before_heuristic_fallback(monkeypat
 
     assert classify_statement("DELETE FROM users")[0] == "high"
     assert classify_statement("UPDATE users SET active = 0 WHERE id = 5")[0] == "medium"
+
+
+def test_sqlglot_formatter_formats_multiple_statements_without_dropping_them():
+    formatted = format_sql("select id,name from users where id=1; select count(*) from orders;")
+
+    assert "SELECT" in formatted
+    assert "FROM users" in formatted
+    assert "COUNT(*)" in formatted
+    assert formatted.count(";") == 2
+    assert "\n\n" in formatted
+
+
+def test_sqlglot_formatter_returns_empty_for_whitespace_only():
+    assert format_sql("  \n\t ") == ""
