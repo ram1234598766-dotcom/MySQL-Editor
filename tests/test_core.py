@@ -429,3 +429,10 @@ def test_sqlglot_formatter_formats_multiple_statements_without_dropping_them():
 
 def test_sqlglot_formatter_returns_empty_for_whitespace_only():
     assert format_sql("  \n\t ") == ""
+
+
+def test_sqlglot_formatter_refuses_delimiter_scripts_without_changing_source():
+    source = "DELIMITER //\nCREATE PROCEDURE demo() BEGIN SELECT 1; END//\nDELIMITER ;"
+
+    with pytest.raises(ValueError, match="DELIMITER directives"):
+        format_sql(source)
