@@ -71,6 +71,7 @@ def test_fetch_more_rows_uses_local_cache_and_preserves_active_filter(tmp_path):
         "rows": [["Alpha"], ["Bravo"]],
         "row_count": 4,
         "preview_truncated": True,
+        "table_edit": {"enabled": False, "reason": "read-only table preview"},
         "duration_ms": 7,
     }
     window._query_results = [item]
