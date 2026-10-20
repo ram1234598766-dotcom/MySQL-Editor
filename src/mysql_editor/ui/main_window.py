@@ -2445,37 +2445,59 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError, OverflowError):
             window_start = 0
         item["window_start_offset"] = window_start
-        self._current_result_id = new_result_id
-        self.result_model.update(headers, rows, base_offset=window_start)
-        # The selected result and the Qt model share one bounded cache list. Only
-        # the first-page recovery snapshot is retained separately while this result
-        # is active, so browsing does not keep two copies of every loaded page.
-        item["rows"] = self.result_model.rows
-        self._size_result_columns(headers, rows)
         try:
-            total = max(window_start + len(rows), int(item.get("row_count", window_start + len(rows)) or 0))
+            source_total = max(
+                window_start + len(rows),
+                int(item.get("row_count", window_start + len(rows)) or 0),
+            )
         except (TypeError, ValueError, OverflowError):
-            total = window_start + len(rows)
-        item["row_count"] = total
-        item["preview_truncated"] = window_start > 0 or window_start + len(rows) < total
+            source_total = window_start + len(rows)
+        item["row_count"] = source_total
+        is_filtered_view = bool(item.get("view_id"))
+        try:
+            window_total = max(
+                window_start + len(rows),
+                int(item.get("view_row_count", source_total) if is_filtered_view else source_total),
+            )
+        except (TypeError, ValueError, OverflowError):
+            window_total = window_start + len(rows)
+        self._current_result_id = new_result_id
+        self.result_model.update(
+            headers,
+            rows,
+            base_offset=window_start,
+            source_offsets=item.get("source_offsets") if is_filtered_view else None,
+            total_rows=window_total,
+        )
+        # The selected result and the Qt model share one bounded cache list. A
+        # filtered model uses source offsets for absolute labels and view offsets for paging.
+        item["rows"] = self.result_model.rows
+        if is_filtered_view:
+            item["source_offsets"] = list(self.result_model._row_offsets)
+        self._size_result_columns(headers, rows)
+        item["preview_truncated"] = window_start > 0 or window_start + len(rows) < window_total
         self.result_model.set_paging_state(
-            total_rows=total,
+            total_rows=window_total,
             pending=False,
             available=not bool(item.get("page_load_unavailable")),
         )
-        self._result_fetched_row_count = total
+        self._result_fetched_row_count = source_total
         duration = item.get("duration_ms", 0)
         self._last_duration = duration
-        if total_duration is not None:
-            self.query_meta.setText(f"{total:,} row(s) · {total_duration} ms total")
+        if is_filtered_view:
+            self.query_meta.setText(f"{window_total:,} match(es) · {source_total:,} fetched row(s)")
+        elif total_duration is not None:
+            self.query_meta.setText(f"{source_total:,} row(s) · {total_duration} ms total")
         else:
-            self.query_meta.setText(f"{total:,} row(s) · {duration} ms")
-        if str(item.get("kind", "")).casefold() == "rows" and window_start > 0:
+            self.query_meta.setText(f"{source_total:,} row(s) · {duration} ms")
+        if is_filtered_view:
+            self._set_spool_filter_message(item)
+        elif str(item.get("kind", "")).casefold() == "rows" and window_start > 0:
             self._set_result_message(
-                result_window_message(item, window_start, len(rows), total)
+                result_window_message(item, window_start, len(rows), window_total)
             )
         else:
-            self._set_result_message(result_summary_message(item, len(rows), total))
+            self._set_result_message(result_summary_message(item, len(rows), source_total))
         self._set_result_controls()
 
     def _on_worker_completed(self, job_id: str, action: str, result: dict):
