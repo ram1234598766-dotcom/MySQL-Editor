@@ -774,6 +774,8 @@ class DatabaseWorker(QThread):
                     "query": needle,
                 }
             source_row_count = max(0, int(meta[0] or 0))
+            self._spool.commit()
+            self._spool.execute("BEGIN")
             self._spool.execute(
                 "INSERT INTO result_filter_views(view_id,result_id,query,row_count) VALUES(?,?,?,0)",
                 (view_id, chosen_result_id, needle),
@@ -784,8 +786,11 @@ class DatabaseWorker(QThread):
             )
             scanned = 0
             matched = 0
-            page_rows = max(1, min(RESULT_PAGE_ROWS, int(limit or RESULT_PAGE_ROWS)))
-            self._spool.execute("BEGIN")
+            try:
+                page_rows = int(limit or RESULT_PAGE_ROWS)
+            except (TypeError, ValueError, OverflowError):
+                page_rows = RESULT_PAGE_ROWS
+            page_rows = max(1, min(RESULT_PAGE_ROWS, page_rows))
             while True:
                 batch = cursor.fetchmany(RESULT_PAGE_ROWS)
                 if not batch:
