@@ -86,23 +86,23 @@ def result_filter_message(
     preview_rows: int,
     fetched_rows: int,
 ) -> str:
-    """Describe quick-filter matches without confusing the visible preview with CSV rows."""
+    """Describe quick-filter matches within the bounded grid window, not the full spool."""
     term = str(query or "").strip()
     if not term:
         return ""
 
-    preview_count = max(0, int(preview_rows))
-    fetched_count = max(preview_count, int(fetched_rows))
-    visible_count = max(0, min(int(visible_rows), preview_count))
+    window_count = max(0, int(preview_rows))
+    fetched_count = max(window_count, int(fetched_rows))
+    visible_count = max(0, min(int(visible_rows), window_count))
     if visible_count == 0:
         return (
-            f"No rows in the visible preview match {term!r}. "
-            f"{preview_count:,} preview row(s) checked; data export includes "
-            f"all {fetched_count:,} fetched row(s)."
+            f"No rows in the current grid window match {term!r}. "
+            f"{window_count:,} window row(s) checked; data export includes "
+            f"all {fetched_count:,} result row(s)."
         )
     return (
-        f"Quick filter: {visible_count:,} of {preview_count:,} preview row(s) match. "
-        f"Data export includes all {fetched_count:,} fetched row(s)."
+        f"Quick filter: {visible_count:,} of {window_count:,} current-window row(s) match. "
+        f"Data export includes all {fetched_count:,} result row(s)."
     )
 
 
@@ -200,3 +200,43 @@ def result_summary_message(item: dict, preview_rows: int, fetched_rows: int) -> 
     if kind == "error":
         return "Statement failed. Review the error details in this result."
     return f"{kind.title()} result · {fetched_count:,} row(s) received."
+
+
+def result_window_message(
+    item: dict,
+    window_start: int,
+    window_rows: int,
+    total_rows: int,
+    *,
+    max_retained_rows: int = 5000,
+) -> str:
+    """Describe the active in-memory row window while keeping export scope explicit."""
+    kind = str(item.get("kind", "result")).casefold()
+    start = max(0, int(window_start))
+    count = max(0, int(window_rows))
+    total = max(start + count, max(0, int(total_rows)))
+    if kind != "rows":
+        return result_summary_message(item, count, total)
+    if total == 0:
+        return "Query completed successfully. No rows were returned."
+    if count == 0:
+        return (
+            f"Rows result · {total:,} row(s) are available in the local result spool. "
+            "The current grid window is empty; scroll to browse or run the query again."
+        )
+
+    end = min(total, start + count)
+    message = f"Rows result · showing rows {start + 1:,}–{end:,} of {total:,}."
+    message += (
+        f" The grid retains at most {max(1, int(max_retained_rows)):,} row(s) in memory; "
+        f"the local spool and data exports keep the full {total:,}-row result."
+    )
+    if start > 0 and end < total:
+        message += " Scroll to the top for earlier rows or to the bottom for later rows."
+    elif start > 0:
+        message += " Scroll to the top to return to earlier rows."
+    elif end < total:
+        message += " Scroll to the bottom to load later rows."
+    else:
+        message += " All rows fit in the current grid window."
+    return message
