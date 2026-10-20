@@ -665,7 +665,7 @@ class MainWindow(QMainWindow):
             "CSV, JSON and NDJSON exports include every fetched row."
         )
         self.fetch_more_button.setEnabled(False)
-        self.fetch_more_button.clicked.connect(self.fetch_more_result_rows)
+        self.fetch_more_button.clicked.connect(self.fetch_result_page_manually)
         self.export_button = QPushButton("↓  Export…")
         self.export_button.setAccessibleName("Export fetched result rows")
         self.export_button.setAccessibleDescription(
@@ -1691,6 +1691,17 @@ class MainWindow(QMainWindow):
                 "Cached result paging is paused until the active SQL operation completes."
             )
             self.fetch_more_button.setEnabled(False)
+        elif has_previous and (
+            not has_more or self.result_grid.verticalScrollBar().maximum() <= 0
+        ):
+            earlier_count = min(RESULT_PAGE_ROWS, start)
+            self.fetch_more_button.setText(f"Fetch Earlier {earlier_count:,}")
+            self.fetch_more_button.setToolTip(
+                f"Load rows {max(1, start - earlier_count + 1):,}–{start:,} "
+                "from the local SQLite result cache. This is useful when a filter leaves "
+                "too few rows to scroll the grid. The full result remains in the spool."
+            )
+            self.fetch_more_button.setEnabled(True)
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
@@ -1701,12 +1712,12 @@ class MainWindow(QMainWindow):
             )
             self.fetch_more_button.setEnabled(True)
         elif has_previous:
-            self.fetch_more_button.setText("Earlier Rows Available")
+            earlier_count = min(RESULT_PAGE_ROWS, start)
+            self.fetch_more_button.setText(f"Fetch Earlier {earlier_count:,}")
             self.fetch_more_button.setToolTip(
-                "Scroll to the top of the grid to load earlier rows. "
-                "The active grid window is bounded; exports use the full result spool."
+                "Load earlier rows from the local SQLite result cache without rerunning SQL."
             )
-            self.fetch_more_button.setEnabled(False)
+            self.fetch_more_button.setEnabled(True)
         elif is_row_result and not item.get("page_load_unavailable"):
             self.fetch_more_button.setText("All Rows Fetched")
             self.fetch_more_button.setToolTip(
@@ -1726,6 +1737,16 @@ class MainWindow(QMainWindow):
                 "Load another page from the local result cache when a result contains more than the displayed rows."
             )
             self.fetch_more_button.setEnabled(False)
+
+    def fetch_result_page_manually(self) -> None:
+        """Choose a direction for a manual page request when scrolling cannot expose it."""
+        item = self._result_item_by_id(self._current_result_id)
+        start, end, total = self._result_window_bounds(item)
+        scrollbar = self.result_grid.verticalScrollBar()
+        if start > 0 and (end >= total or scrollbar.maximum() <= 0):
+            self.fetch_previous_result_rows()
+            return
+        self.fetch_more_result_rows()
 
     def fetch_more_result_rows(self) -> None:
         """Append the next spool page without re-executing the SQL statement."""
