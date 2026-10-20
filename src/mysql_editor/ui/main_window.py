@@ -1768,6 +1768,12 @@ class MainWindow(QMainWindow):
                 self.fetch_more_button.setToolTip(
                     "Sorting every row in the local SQLite result view. The active grid remains bounded."
                 )
+            elif request.get("sort_column") is not None:
+                self.fetch_more_button.setText("Filtering + sorting…")
+                self.fetch_more_button.setToolTip(
+                    "Filtering all fetched rows and sorting matching rows in the local SQLite cache. "
+                    "The active grid remains bounded."
+                )
             else:
                 self.fetch_more_button.setText("Filtering…")
                 self.fetch_more_button.setToolTip(
@@ -2606,7 +2612,7 @@ class MainWindow(QMainWindow):
                 "operation": "sort",
                 "sort_column": sort_column,
                 "sort_descending": descending,
-                "base_view_id": view_id if view_id and not view_query else None,
+                "base_view_id": None,
             }
         request["previous_sort_column"] = previous_sort_column
         request["previous_sort_descending"] = previous_sort_descending
