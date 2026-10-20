@@ -559,6 +559,93 @@ def test_completion_does_not_mix_columns_when_table_aliases_collide():
     assert editor.toPlainText() == source
 
 
+def test_qualified_completion_prefers_the_innermost_alias_when_outer_alias_collides():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={
+            "orders": ["order_id", "order_total"],
+            "customers": ["customer_id", "display_name"],
+        },
+        active_schema="app_db",
+    )
+    source = (
+        "SELECT o.order_i FROM orders AS o "
+        "WHERE EXISTS (SELECT 1 FROM customers AS o WHERE o.customer_i)"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    column_prefix = "customer_i"
+    cursor.setPosition(source.index(column_prefix, source.index("WHERE EXISTS")) + len(column_prefix))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"customer_id", "display_name"} <= candidates
+    assert "order_id" not in candidates
+    assert "order_total" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_qualified_completion_can_resolve_a_correlated_outer_alias():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"orders", "customers"},
+        columns_by_table={
+            "orders": ["order_id", "order_total"],
+            "customers": ["customer_id", "display_name"],
+        },
+        active_schema="app_db",
+    )
+    source = (
+        "SELECT * FROM orders AS o WHERE EXISTS "
+        "(SELECT 1 FROM customers AS c WHERE c.customer_id = o.order_i)"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    column_prefix = "order_i"
+    cursor.setPosition(source.index(column_prefix) + len(column_prefix))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    assert {"order_id", "order_total"} <= candidates
+    assert "customer_id" not in candidates
+    assert "display_name" not in candidates
+    assert editor.toPlainText() == source
+
+
+def test_unqualified_completion_excludes_tables_from_sibling_subqueries():
+    editor = SqlEditor()
+    editor.set_completion_context(
+        tables={"customers", "orders", "inventory"},
+        columns_by_table={
+            "customers": ["customer_id", "display_name"],
+            "orders": ["order_id", "order_total"],
+            "inventory": ["sku", "warehouse_code"],
+        },
+        active_schema="app_db",
+    )
+    source = (
+        "SELECT * FROM customers AS c "
+        "WHERE EXISTS (SELECT 1 FROM orders AS o WHERE o.order_id = 1) "
+        "AND EXISTS (SELECT 1 FROM inventory AS i WHERE ware)"
+    )
+    editor.setPlainText(source)
+    cursor = editor.textCursor()
+    cursor.setPosition(source.index("ware") + len("ware"))
+    editor.setTextCursor(cursor)
+
+    candidates = set(editor._context_completion_words())
+
+    # Local tables and correlated outer-scope tables are visible. The unrelated
+    # table inside the first EXISTS subquery is not in the current scope.
+    assert {"warehouse_code", "sku", "customer_id", "display_name"} <= candidates
+    assert "order_id" not in candidates
+    assert "order_total" not in candidates
+    assert editor.toPlainText() == source
+
+
 def test_pasted_multiline_sql_is_preserved_without_auto_pairing():
     editor = SqlEditor()
     original_clipboard = QApplication.clipboard().text()

@@ -8,6 +8,7 @@
 ## Unreleased
 
 - **SQL editor line comments:** Press Ctrl+/ to comment or uncomment the current line or selected block with MySQL `-- ` line comments. Indentation and selection are preserved; the edit is a single undo step.
+- **Scoped SQL completion:** Qualified-column completion resolves the innermost nested query's aliases before checking visible correlated outer scopes. It does not mix in table columns from unrelated sibling subqueries; the feature remains a context heuristic rather than full MySQL semantic analysis.
 
 ## What's new in this preview
 
