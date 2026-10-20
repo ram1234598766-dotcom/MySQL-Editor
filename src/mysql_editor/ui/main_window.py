@@ -1697,6 +1697,10 @@ class MainWindow(QMainWindow):
             total = max(end, int(item.get(total_key, end) or 0))
         except (TypeError, ValueError, OverflowError):
             total = end
+        # One sentinel slot lets the bounded model request another source page without
+        # claiming that rows not yet fetched already exist in the local SQLite cache.
+        if item.get("table_preview") and item.get("preview_has_more") and not item.get("view_id"):
+            total = max(total, end) + 1
         return start, end, total
 
     def _release_result_filter_views(self, items) -> None:
@@ -1782,8 +1786,11 @@ class MainWindow(QMainWindow):
             self.fetch_more_button.setEnabled(False)
         elif pending:
             self.fetch_more_button.setText("Loading…")
+            pending_action = (self._result_page_load_pending or {}).get("action")
             self.fetch_more_button.setToolTip(
-                "Loading a page from the local result cache. SQL is not rerun."
+                "Loading another bounded page from the MySQL table preview."
+                if pending_action == "table_preview_page"
+                else "Loading a page from the local result cache. SQL is not rerun."
             )
             self.fetch_more_button.setEnabled(False)
         elif self._query_running and (has_more or has_previous):
@@ -1803,6 +1810,19 @@ class MainWindow(QMainWindow):
                 "too few rows to scroll the grid. The full result remains in the spool."
             )
             self.fetch_more_button.setEnabled(True)
+        elif (
+            item
+            and item.get("table_preview")
+            and not item.get("view_id")
+            and item.get("preview_has_more")
+            and end >= int(item.get("preview_loaded_count", item.get("row_count", 0)) or 0)
+        ):
+            self.fetch_more_button.setText("Fetch Next Preview Page")
+            self.fetch_more_button.setToolTip(
+                "Read up to 1,000 additional rows from MySQL in primary-key order. "
+                "The preview remains bounded in memory and keeps cell-edit metadata aligned with visible rows."
+            )
+            self.fetch_more_button.setEnabled(not self._query_running)
         elif has_more:
             next_count = min(RESULT_PAGE_ROWS, total - end)
             self.fetch_more_button.setText(f"Fetch +{next_count:,}")
@@ -3304,10 +3324,17 @@ class MainWindow(QMainWindow):
             if action == "table_preview":
                 preview_item = self._result_item_by_id(self._current_result_id)
                 edit_context = preview_item.get("table_edit", {}) if preview_item else {}
+                preview_count = len(preview_item.get("rows", [])) if preview_item else 0
                 if edit_context.get("enabled"):
+                    suffix = (
+                        " More rows are available through Fetch Next Preview Page."
+                        if preview_item and preview_item.get("preview_has_more")
+                        else ""
+                    )
                     self.status.setText(
-                        "Table preview loaded · right-click a non-key cell to edit it. "
-                        "Any UPDATE remains under MySQL's Commit/Rollback transaction controls."
+                        f"Table preview loaded · {preview_count:,} row(s) shown.{suffix} "
+                        "Right-click a non-key cell to edit it. Any UPDATE remains under "
+                        "MySQL's Commit/Rollback transaction controls."
                     )
                 else:
                     reason = str(edit_context.get("reason") or "this preview is read-only.")
