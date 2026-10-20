@@ -282,3 +282,128 @@ def test_repeated_page_appends_keep_the_row_window_bounded_to_five_thousand():
         model.deleteLater()
         _APP.processEvents()
 
+def test_previous_window_page_dispatches_bounded_local_spool_request():
+    class Model:
+        def __init__(self):
+            self.paging = []
+
+        def canFetchPrevious(self):
+            return True
+
+        def set_paging_state(self, **kwargs):
+            self.paging.append(kwargs)
+
+    class Window:
+        _query_running = False
+        _result_page_load_pending = None
+        _current_result_id = "result-id"
+
+        def __init__(self):
+            self.item = {
+                "result_id": "result-id",
+                "kind": "rows",
+                "window_start_offset": 2_500,
+                "row_count": 20_000,
+                "rows": [[row] for row in range(2_500, 7_500)],
+            }
+            self.result_model = Model()
+            self.dispatched = []
+            self.controls_updated = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result-id" else None
+
+        def _result_window_bounds(self, item):
+            start = item["window_start_offset"]
+            end = start + len(item["rows"])
+            return start, end, item["row_count"]
+
+        def _dispatch(self, action, payload, context):
+            self.dispatched.append((action, payload, context))
+            return "previous-job"
+
+        def _set_result_controls(self):
+            self.controls_updated += 1
+
+    window = Window()
+    MainWindow.fetch_previous_result_rows(window)
+
+    assert window.dispatched == [(
+        "fetch_result_page",
+        {"result_id": "result-id", "offset": 1_500, "limit": 1_000},
+        {
+            "result_id": "result-id",
+            "offset": 1_500,
+            "direction": "previous",
+            "expected_end": 2_500,
+        },
+    )]
+    assert window._result_page_load_pending == {
+        "job_id": "previous-job",
+        "result_id": "result-id",
+        "offset": 1_500,
+        "direction": "previous",
+        "expected_end": 2_500,
+    }
+    assert window.result_model.paging == [{"pending": True}]
+    assert window.controls_updated == 1
+
+
+def test_next_window_page_dispatch_starts_at_absolute_window_end():
+    class Model:
+        def __init__(self):
+            self.paging = []
+
+        def set_paging_state(self, **kwargs):
+            self.paging.append(kwargs)
+
+    class Window:
+        _query_running = False
+        _result_page_load_pending = None
+        _current_result_id = "result-id"
+
+        def __init__(self):
+            self.item = {
+                "result_id": "result-id",
+                "kind": "rows",
+                "window_start_offset": 2_500,
+                "row_count": 20_000,
+                "rows": [[row] for row in range(2_500, 7_500)],
+            }
+            self.result_model = Model()
+            self.dispatched = []
+            self.controls_updated = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result-id" else None
+
+        def _result_window_bounds(self, item):
+            start = item["window_start_offset"]
+            end = start + len(item["rows"])
+            return start, end, item["row_count"]
+
+        def _dispatch(self, action, payload, context):
+            self.dispatched.append((action, payload, context))
+            return "next-job"
+
+        def _set_result_controls(self):
+            self.controls_updated += 1
+
+    window = Window()
+    MainWindow.fetch_more_result_rows(window)
+
+    assert window.dispatched == [(
+        "fetch_result_page",
+        {"result_id": "result-id", "offset": 7_500, "limit": 1_000},
+        {"result_id": "result-id", "offset": 7_500, "direction": "next"},
+    )]
+    assert window.item["initial_rows"] == window.item["rows"]
+    assert window._result_page_load_pending == {
+        "job_id": "next-job",
+        "result_id": "result-id",
+        "offset": 7_500,
+        "direction": "next",
+    }
+    assert window.result_model.paging == [{"pending": True}]
+    assert window.controls_updated == 1
+
