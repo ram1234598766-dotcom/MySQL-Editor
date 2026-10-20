@@ -1135,15 +1135,22 @@ class SqlEditor(QPlainTextEdit):
             edits.append((line_block, changed_line))
             position_changes.append((threshold, delta))
 
-        def map_position(original_position: int) -> int:
+        def map_position(
+            original_position: int, *, keep_left_edge: bool = False
+        ) -> int:
             mapped = original_position
             for threshold, change in position_changes:
-                if original_position >= threshold:
+                at_boundary = original_position == threshold
+                if original_position > threshold or (
+                    at_boundary and (change < 0 or not keep_left_edge)
+                ):
                     mapped += change
             return max(0, min(mapped, document.characterCount() - 1))
 
         anchor = cursor.anchor()
         position = cursor.position()
+        anchor_is_left_edge = has_selection and anchor == selection_start
+        position_is_left_edge = has_selection and position == selection_start
         edit_cursor = QTextCursor(document)
         edit_cursor.beginEditBlock()
         try:
@@ -1158,9 +1165,11 @@ class SqlEditor(QPlainTextEdit):
             edit_cursor.endEditBlock()
 
         restored = QTextCursor(document)
-        restored.setPosition(map_position(anchor))
         restored.setPosition(
-            map_position(position),
+            map_position(anchor, keep_left_edge=anchor_is_left_edge)
+        )
+        restored.setPosition(
+            map_position(position, keep_left_edge=position_is_left_edge),
             QTextCursor.MoveMode.KeepAnchor,
         )
         self.setTextCursor(restored)
