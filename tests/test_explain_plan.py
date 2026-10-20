@@ -321,7 +321,7 @@ def test_explain_tree_enforces_node_budget_for_large_plan(monkeypatch):
         root = dialog.plan_tree.topLevelItem(0)
         assert _tree_count(root) <= explain_plan_module.MAX_PLAN_TREE_NODES + 1
         assert _tree_contains(root, "tree size limit reached")
-        assert "omitted" in dialog.json_view.toPlainText() or len(dialog.raw_json) > 0
+        assert json.loads(dialog.json_view.toPlainText()) == plan
     finally:
         dialog.close()
         dialog.deleteLater()
