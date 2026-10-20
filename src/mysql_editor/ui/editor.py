@@ -384,8 +384,9 @@ class SqlEditor(QPlainTextEdit):
         self.setObjectName("sqlEditor")
         self.setAccessibleName("SQL query editor")
         self.setAccessibleDescription(
-            "Write MySQL queries here. Press Ctrl+Space to open completion; Enter preserves "
-            "indentation, and matching brackets are highlighted."
+            "Write MySQL queries here. Press Ctrl+Space to open completion, Ctrl+/ to toggle "
+            "MySQL line comments on the current line or selected lines, Enter to preserve "
+            "indentation, and use matching-bracket feedback."
         )
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         font = QFont("Cascadia Code")
@@ -1079,10 +1080,109 @@ class SqlEditor(QPlainTextEdit):
                 return True
         return False
 
+    def _toggle_line_comments(self) -> bool:
+        """Toggle MySQL line comments on the current line or selected block.
+
+        The edit is a single undo operation. Original indentation, selection direction,
+        and cursor positions relative to the SQL text are preserved.
+        """
+        cursor = self.textCursor()
+        document = self.document()
+        selection_start = cursor.selectionStart()
+        selection_end = cursor.selectionEnd()
+        has_selection = cursor.hasSelection()
+        last_position = max(selection_start, selection_end - 1) if has_selection else cursor.position()
+
+        probe = QTextCursor(document)
+        probe.setPosition(selection_start)
+        first_block = probe.block()
+        probe.setPosition(last_position)
+        last_block = probe.block()
+
+        blocks = []
+        block = first_block
+        while block.isValid():
+            blocks.append(block)
+            if block == last_block:
+                break
+            block = block.next()
+        if not blocks:
+            return False
+
+        source_lines = [block.text() for block in blocks]
+        indentation = [len(line) - len(line.lstrip(" \t")) for line in source_lines]
+        bodies = [line[offset:] for line, offset in zip(source_lines, indentation, strict=True)]
+        already_commented = all(
+            body.startswith("-- ") or body.startswith("--\t")
+            for body in bodies
+        )
+        delta = -3 if already_commented else 3
+
+        edits = []
+        position_changes = []
+        for line_block, line, offset, body in zip(
+            blocks, source_lines, indentation, bodies, strict=True
+        ):
+            marker_position = line_block.position() + offset
+            if already_commented:
+                changed_line = line[:offset] + body[3:]
+                # Positions at or after the original SQL text shift left with the removed prefix.
+                threshold = marker_position + 3
+            else:
+                changed_line = line[:offset] + "-- " + body
+                # A cursor at the first SQL character follows that character after insertion.
+                threshold = marker_position
+            edits.append((line_block, line, changed_line))
+            position_changes.append((threshold, delta))
+
+        def map_position(original_position: int) -> int:
+            mapped = original_position
+            for threshold, change in position_changes:
+                if original_position >= threshold:
+                    mapped += change
+            return max(0, min(mapped, document.characterCount() - 1 + sum(
+                change for _threshold, change in position_changes
+            )))
+
+        anchor = cursor.anchor()
+        position = cursor.position()
+        edit_cursor = QTextCursor(document)
+        edit_cursor.beginEditBlock()
+        try:
+            for line_block, original_line, changed_line in reversed(edits):
+                edit_cursor.setPosition(line_block.position())
+                edit_cursor.setPosition(
+                    line_block.position() + line_block.length() - 1,
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+                edit_cursor.insertText(changed_line)
+        finally:
+            edit_cursor.endEditBlock()
+
+        restored = QTextCursor(document)
+        restored.setPosition(map_position(anchor))
+        restored.setPosition(
+            map_position(position),
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        self.setTextCursor(restored)
+        self.ensureCursorVisible()
+        self.highlight_current_line()
+        return True
+
     def keyPressEvent(self, event):
         key = event.key()
         popup = self._completer.popup()
-        if key == Qt.Key.Key_Space and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        modifiers = event.modifiers()
+        if (
+            key in (Qt.Key.Key_Slash, Qt.Key.Key_Question)
+            and modifiers & Qt.KeyboardModifier.ControlModifier
+        ):
+            popup.hide()
+            self._toggle_line_comments()
+            event.accept()
+            return
+        if key == Qt.Key.Key_Space and modifiers & Qt.KeyboardModifier.ControlModifier:
             self._show_completion(force=True)
             event.accept()
             return
