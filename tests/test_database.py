@@ -1321,7 +1321,7 @@ def test_schema_inspector_uses_show_create_view_for_views():
         f"SHOW CREATE VIEW {safe_identifier('analytics')}.{safe_identifier('team_view')}"
     )
 
-def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), engine="InnoDB", engine_transactions="YES"):
+def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), engine="InnoDB", engine_transactions="YES", row_count=2):
     import sqlite3
 
     worker = DatabaseWorker()
@@ -1339,8 +1339,12 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
 
     state = {
         "rows": [
-            {"id": 1, "label": "old", "quantity": 3},
-            {"id": 2, "label": "second", "quantity": 4},
+            {
+                "id": index,
+                "label": "old" if index == 1 else "second" if index == 2 else f"row-{index}",
+                "quantity": index + 2,
+            }
+            for index in range(1, max(0, int(row_count)) + 1)
         ],
         "table_type": table_type,
         "engine": engine,
@@ -1393,12 +1397,46 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
                     dict(row) for row in state["rows"]
                 ]
                 connection.in_transaction = True
-            elif query.startswith("SELECT * FROM ") and " LIMIT 1000" in query:
+            elif query.startswith("SELECT * FROM ") and upper_query.endswith("LIMIT 0"):
                 self.description = [(name,) for name in headers]
                 self.with_rows = True
+                self.rows = []
+            elif query.startswith("SELECT COUNT(*) FROM "):
+                self.description = [("COUNT(*)",)]
+                self.rows = [(len(state["rows"]),)]
+            elif query.startswith("SELECT * FROM ") and "ORDER BY" in upper_query and "LIMIT %S" in upper_query and " WHERE " not in upper_query:
+                self.description = [(name,) for name in headers]
+                self.with_rows = True
+                keys = list(state["primary_key"]) or ["id"]
+                ordered_rows = sorted(
+                    state["rows"],
+                    key=lambda row: tuple(row[name] for name in keys),
+                )
+                try:
+                    limit_value = int(params[-1])
+                except (TypeError, ValueError, IndexError):
+                    limit_value = 1000
                 self.rows = [
                     (row["id"], row["label"], row["quantity"])
-                    for row in state["rows"]
+                    for row in ordered_rows[:limit_value]
+                ]
+            elif query.startswith("SELECT * FROM ") and " WHERE " in upper_query and "ORDER BY" in upper_query and "LIMIT %S" in upper_query and " FOR UPDATE" not in upper_query:
+                self.description = [(name,) for name in headers]
+                self.with_rows = True
+                keys = list(state["primary_key"]) or ["id"]
+                try:
+                    cursor_key = tuple(params[-1 - len(keys):-1])
+                    limit_value = max(1, int(params[-1]))
+                except (TypeError, ValueError, IndexError):
+                    cursor_key = ()
+                    limit_value = 1000
+                ordered_rows = sorted(
+                    (row for row in state["rows"] if tuple(row[name] for name in keys) > cursor_key),
+                    key=lambda row: tuple(row[name] for name in keys),
+                )
+                self.rows = [
+                    (row["id"], row["label"], row["quantity"])
+                    for row in ordered_rows[:limit_value]
                 ]
             elif query.startswith("SELECT TABLE_TYPE, ENGINE FROM information_schema.TABLES"):
                 self.description = [("TABLE_TYPE",), ("ENGINE",)]
@@ -1478,6 +1516,94 @@ def _editable_preview_worker(*, table_type="BASE TABLE", primary_key=("id",), en
     worker._connection = connection
     worker._cell_edit_test_state = state
     return worker, state, connection
+
+
+
+def test_schema_table_preview_fetches_bounded_keyset_pages_and_spools_them(tmp_path):
+    worker, state, _connection = _editable_preview_worker(row_count=1203)
+    try:
+        first = worker._preview_table("analytics", "items")
+        assert first["ok"] is True
+        item = first["results"][0]
+        result_id = item["result_id"]
+        assert len(item["rows"]) == 1000
+        assert item["rows"][0][0] == 1
+        assert item["rows"][-1][0] == 1000
+        assert item["row_count"] == 1203
+        assert item["preview_truncated"] is True
+        assert item["table_preview_paging"] == {
+            "enabled": True,
+            "page_size": 1000,
+            "row_count": 1203,
+            "cached_rows": 1000,
+            "complete": False,
+            "reason": "",
+        }
+        cached = worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0]
+        assert cached == 1000
+
+        second = worker._fetch_result_page(result_id, 1000, 1000)
+        assert second["ok"] is True
+        assert second["table_preview_page"] is True
+        assert len(second["rows"]) == 203
+        assert second["rows"][0][0] == 1001
+        assert second["rows"][-1][0] == 1203
+        assert second["cached_rows"] == 1203
+        assert second["cache_complete"] is True
+        assert second["has_more"] is False
+        assert state["queries"].count(("SELECT COUNT(*) FROM `analytics`.`items`", ())) >= 1
+        cached = worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0]
+        assert cached == 1203
+        assert worker._incomplete_table_preview_error(result_id, "export") is None
+    finally:
+        worker._spool.close()
+
+
+def test_schema_table_preview_without_primary_key_stays_partial_and_blocks_whole_result_operations(tmp_path):
+    worker, _state, _connection = _editable_preview_worker(primary_key=(), row_count=1203)
+    try:
+        first = worker._preview_table("analytics", "items")
+        assert first["ok"] is True
+        item = first["results"][0]
+        result_id = item["result_id"]
+        assert len(item["rows"]) == 1000
+        assert item["row_count"] == 1203
+        assert item["table_preview_paging"]["enabled"] is False
+        assert item["table_preview_paging"]["complete"] is False
+        assert "no verified primary key" in item["table_preview_paging"]["reason"]
+
+        page = worker._fetch_result_page(result_id, 1000, 1000)
+        assert page["ok"] is False
+        assert "no active safe paging cursor" in page["error"]
+        assert "cached 1000 of 1203 row(s)" in worker._incomplete_table_preview_error(result_id, "export")
+        filtered = worker._dispatch("filter_result_spool", {
+            "result_id": result_id, "query": "row"
+        })
+        assert filtered["ok"] is False
+        assert "Load the remaining pages" in filtered["error"]
+    finally:
+        worker._spool.close()
+
+
+def test_schema_table_preview_keyset_page_rejects_changed_connection_session():
+    worker, _state, _connection = _editable_preview_worker(row_count=1203)
+    try:
+        first = worker._preview_table("analytics", "items")
+        result_id = first["results"][0]["result_id"]
+        worker._session_token = "a-different-session"
+        page = worker._fetch_result_page(result_id, 1000, 1000)
+        assert page["ok"] is False
+        assert "connection changed" in page["error"]
+        cached = worker._spool.execute(
+            "SELECT COUNT(*) FROM result_rows WHERE result_id=?", (result_id,)
+        ).fetchone()[0]
+        assert cached == 1000
+    finally:
+        worker._spool.close()
 
 
 def test_table_preview_enables_cell_edit_only_for_primary_key_base_tables():
