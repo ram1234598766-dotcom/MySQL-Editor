@@ -1960,11 +1960,16 @@ class MainWindow(QMainWindow):
         )
         if has_connected_preview:
             direction = "next" if offset >= loaded_count else "cached"
+            page_limit = (
+                RESULT_PAGE_ROWS
+                if direction == "next"
+                else min(RESULT_PAGE_ROWS, max(1, loaded_count - offset))
+            )
             action = "table_preview_page"
             payload = {
                 "result_id": result_id,
                 "offset": offset,
-                "limit": RESULT_PAGE_ROWS,
+                "limit": page_limit,
                 "direction": direction,
             }
             context = {
