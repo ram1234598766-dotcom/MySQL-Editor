@@ -53,7 +53,7 @@ MySQL Editor is a local-first desktop application for connecting to a MySQL serv
 - Switch between results returned by different statements in a script.
 - Sortable result grid, numeric-aware sorting, NULL display, and clipboard actions for selected cells/rows, headers, and the full untruncated cell value.
 - Case-insensitive quick filter for visible rows. It changes the grid view only; it does not exclude rows from CSV export.
-- Each query initially loads up to 2,000 rows into the grid. Use **Fetch +1,000** to append the next page from the local SQLite result spool without rerunning or modifying SQL. All fetched rows remain available for CSV export.
+- Each query initially loads up to 2,000 rows into the grid. Scrolling to the end requests the next page from the local SQLite result spool asynchronously; **Fetch +1,000** remains a manual fallback. Paging never reruns or modifies SQL. All fetched rows remain available for CSV export. Loaded grid rows accumulate as pages are viewed; a bounded row-cache eviction policy is not implemented yet.
 - Atomic CSV export to help preserve an existing destination when a write fails, with persistent non-modal status feedback that keeps the saved path or redacted error visible without interrupting SQL work.
 - Windows application-folder build, portable EXE, Inno Setup installer, generated icons/setup branding, and desktop shortcut support.
 - Release gating includes lint, compilation and unit/UI tests across Python 3.12–3.14, disposable MySQL integration, dependency audits, Windows UI/launch checks, silent install/uninstall verification, a per-artifact provenance manifest, SBOM/license records, and SHA-256 checksums.
@@ -182,7 +182,7 @@ A multi-statement script can create several result entries. Use the result picke
 - **Copy selected cells** copies a tab-separated rectangular selection; tabs and newlines inside values are quoted so copied data stays parseable.
 - **Copy selected rows** copies every column from each selected visible row; **Copy column headers** copies only selected columns' headers, or all headers when nothing is selected.
 - **Cell details** opens a read-only view for long values, showing the column, row, and whether the value is SQL NULL, empty text, or non-empty text.
-- **Fetch +1,000** appends up to 1,000 additional rows from the local result spool; it does not rerun the query or change the submitted SQL. Sorting and quick filtering continue to apply to the loaded preview, including newly appended rows.
+- **Result paging** loads up to 1,000 more rows from the local result spool when the grid reaches its end, or when **Fetch +1,000** is activated. It does not rerun the query or change submitted SQL. Sorting and quick filtering continue to apply to the loaded preview, including newly appended rows.
 - **CSV export** uses every row fetched into the current session result spool, not only the rows currently loaded in the grid or matched by the filter. It preserves original server-fetch order even after sorting, filtering, or paging.
 - **NULL vs empty text:** the grid displays SQL NULL as **(NULL)**; clipboard copy uses the marker **NULL** while empty text remains blank. CSV writes SQL NULL as the unquoted token `\N` and leaves empty text as an empty field. Text values beginning with a backslash are escaped by adding one leading backslash, so a literal text value `\N` exports as `\\N`. Consumers importing these files should decode this documented convention to restore SQL NULL and the original backslash-leading text.
 
@@ -377,7 +377,7 @@ If **Verify server identity** is selected, check the hostname, certificate valid
 Confirm that Remember this connection was selected and Windows Credential Manager is available for the current Windows user. If the credential is missing or rejected by MySQL, open the connection form and enter it again. The app intentionally has no plaintext fallback.
 
 ### Query results look incomplete
-The grid initially loads up to 2,000 rows per query result. Use **Fetch +1,000** to load additional pages from the local result cache; this does not rerun SQL. Table preview remains capped at 1,000 rows. CSV export includes every row fetched into the result spool and is not reduced by the loaded-page count or quick filter. Ensure the query completed and the correct result entry is selected.
+The grid initially loads up to 2,000 rows per query result. Scroll to the bottom to request additional pages from the local result cache; **Fetch +1,000** remains available as a manual fallback. Paging does not rerun SQL. Table preview remains capped at 1,000 rows. CSV export includes every row fetched into the result spool and is not reduced by the loaded-page count or quick filter. Ensure the query completed and the correct result entry is selected.
 
 ### Stored procedures and DELIMITER
 MySQL Editor recognizes standalone MySQL-client `DELIMITER` directives at statement boundaries, uses the active delimiter to keep compound routine bodies together, and removes the client-only directive lines before sending SQL to MySQL. You can switch delimiters (for example, to `//` or `$$`) and restore `;` later in the same script. Malformed delimiter commands fail before the script is queued, so earlier statements are not submitted accidentally. This is a statement-boundary parser, not a full MySQL grammar or semantic validator; the server remains authoritative for SQL validity and permissions.
@@ -391,7 +391,7 @@ The automated UI check uses Qt's offscreen platform and cannot prove that every 
 ## Known limitations
 
 - Script splitting supports standalone MySQL-client DELIMITER changes and compound stored-program boundaries, but it is not a full MySQL grammar or semantic validator. Malformed directives fail closed before submission.
-- Table preview is limited to 1,000 rows. Large query results initially load 2,000 rows; additional rows are loaded in pages from the session spool, while CSV export retains the complete fetched result.
+- Table preview is limited to 1,000 rows. Large query results initially load 2,000 rows and request additional spool pages as the grid scrolls; **Fetch +1,000** remains the fallback. CSV export retains the complete fetched result. Rows already loaded into the grid accumulate during a session; bounded cache eviction for a million-row grid is not implemented yet.
 - Query cancellation is best-effort and server-side completion cannot always be confirmed immediately.
 - Some MySQL DDL statements implicitly commit regardless of Commit/Rollback controls.
 - SQL risk classification uses SQLGlot's MySQL AST for parseable UPDATE/DELETE outer-WHERE checks and keeps a heuristic fallback for unsupported syntax and executable comments. It can still miss destructive or expensive queries and is not an authorization boundary.

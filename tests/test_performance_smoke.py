@@ -6,7 +6,7 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QModelIndex, QObject, Signal
 from PySide6.QtWidgets import QApplication, QTableView
 
 import mysql_editor.ui.main_window as main_window_module
@@ -227,3 +227,85 @@ def test_csv_export_of_twenty_five_thousand_rows_stays_within_budget(tmp_path):
         assert elapsed < 15.0, f"Exporting 25,000 CSV rows took {elapsed:.2f}s"
     finally:
         worker._cleanup_resources()
+
+
+def test_result_model_scroll_request_dispatches_a_spool_page(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_window_module, "QSettings", MemorySettings)
+    repository = LocalRepository(tmp_path / "paging.sqlite3")
+    worker = StartupWorker()
+    profile = {
+        "id": "paging-profile",
+        "name": "Paging test",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "username": "tester",
+    }
+    config = {
+        "host": "127.0.0.1",
+        "port": 3306,
+        "username": "tester",
+        "default_schema": "",
+        "tls_mode": "Automatic TLS",
+    }
+    window = None
+    try:
+        window = MainWindow(
+            worker,
+            repository,
+            object(),
+            profile,
+            config,
+            {"server_version": "MySQL test", "database": ""},
+        )
+        result_id = "large-result"
+        rows = [[index] for index in range(2000)]
+        window._query_results = [{
+            "result_id": result_id,
+            "kind": "rows",
+            "headers": ["id"],
+            "rows": rows,
+            "row_count": 2005,
+        }]
+        window._current_result_id = result_id
+        window.result_model.update(["id"], rows)
+        window.result_model.set_paging_state(total_rows=2005)
+        window.resize(1000, 700)
+        window.show()
+        _APP.processEvents()
+
+        scrollbar = window.result_grid.verticalScrollBar()
+        assert scrollbar.maximum() > 0
+        # Reaching the end of the visible grid asynchronously asks the worker for
+        # the next spool page. It does not rerun the MySQL query on the UI thread.
+        # Force an actual value transition to the bottom even if the offscreen
+        # platform initialized the scrollbar at its maximum during layout.
+        scrollbar.setValue(max(0, scrollbar.maximum() - 1))
+        _APP.processEvents()
+        scrollbar.setValue(scrollbar.maximum())
+        _APP.processEvents()
+
+        fetch_requests = [
+            (action, payload, task_id)
+            for action, payload, task_id in worker.submissions
+            if action == "fetch_result_page"
+        ]
+        assert len(fetch_requests) == 1
+        action, payload, task_id = fetch_requests[0]
+        assert payload == {
+            "result_id": result_id,
+            "offset": 2000,
+            "limit": main_window_module.RESULT_PAGE_ROWS,
+        }
+        assert window._result_page_load_pending == {
+            "job_id": task_id,
+            "result_id": result_id,
+            "offset": 2000,
+        }
+        assert window.result_model.canFetchMore(QModelIndex()) is False
+    finally:
+        if window is not None:
+            window.close()
+            window.deleteLater()
+        repository.close()
+        _APP.processEvents()
+
