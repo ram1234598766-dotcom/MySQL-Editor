@@ -2808,6 +2808,8 @@ class MainWindow(QMainWindow):
         expected_action, context = pending
         if expected_action != action:
             return
+        if action == "drop_result_filter":
+            return
         if result.get("connection_lost"):
             self._mark_connection_lost(str(result.get("error", "") or ""))
         preview_rollback_rows = result.get("preview_rollback_rows") or []
@@ -2853,6 +2855,9 @@ class MainWindow(QMainWindow):
                     ),
                 )
         outcome = None
+        if action == "filter_result_spool":
+            self._handle_spool_filter_completed(job_id, result, context)
+            return
         if action == "query":
             if "transaction_open" in result:
                 self._transaction_open = bool(result["transaction_open"])
