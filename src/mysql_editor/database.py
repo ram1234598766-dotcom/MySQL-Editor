@@ -11,16 +11,24 @@ import tempfile
 import threading
 import time
 import uuid
+import math
 from datetime import date, datetime, time as dtime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
+import xlsxwriter
 from mysql_editor.core import ScriptParseError, safe_identifier, sanitize_error_message, split_sql_statements
 
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
 RESULT_PAGE_ROWS = 1000
+
+EXCEL_MAX_ROWS = 1_048_576
+EXCEL_MAX_COLUMNS = 16_384
+EXCEL_MAX_SHEETS = 255
+EXCEL_MAX_CELL_UTF16_UNITS = 32_767
+EXCEL_MAX_DATA_ROWS_PER_SHEET = EXCEL_MAX_ROWS - 1  # Reserve the first row for headers.
 
 CSV_NULL_TOKEN = r"\N"  # noqa: S105 - CSV marker, not a credential.
 
@@ -643,6 +651,8 @@ class DatabaseWorker(QThread):
             return self._export_json(str(payload["result_id"]), str(payload["path"]))
         if action == "export_ndjson":
             return self._export_ndjson(str(payload["result_id"]), str(payload["path"]))
+        if action == "export_xlsx":
+            return self._export_xlsx(str(payload["result_id"]), str(payload["path"]))
         return {"ok": False, "error": f"Unknown worker action: {action}"}
 
     def _fetch_result_page(
