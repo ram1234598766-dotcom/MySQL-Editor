@@ -15,7 +15,9 @@ from PySide6.QtGui import QFont, QFontDatabase, QFontInfo, QIcon, QTextCursor
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from mysql_editor.storage import CredentialStore, LocalRepository, MasterPasswordStore
-from mysql_editor.ui.main_window import MainWindow
+from mysql_editor.ui.main_window import (
+    CSV_EXPORT_NULL_SEMANTICS, CSV_EXPORT_SEMANTICS, RESULT_EXPORT_SEMANTICS, MainWindow,
+)
 from mysql_editor.ui.theme import TYPOGRAPHY, stylesheet_for_theme
 from mysql_editor.ui.tutorial import ProductTourDialog
 from mysql_editor.ui.unlock_dialog import MasterUnlockDialog
@@ -268,15 +270,20 @@ def main():
         assert first.stop_button.accessibleName() == "Request query cancellation"
         assert first.commit_button.accessibleName() == "Commit active transaction"
         assert first.rollback_button.accessibleName() == "Roll back active transaction"
-        assert first.export_button.accessibleName() == "Export fetched result rows to CSV"
-        export_semantics = "preserves MySQL fetch order and includes every fetched row"
-        assert export_semantics in first.export_button.accessibleDescription()
-        assert "ignores grid sorting and the visible-row filter" in first.export_button.accessibleDescription()
-        assert export_semantics in first.result_filter.toolTip()
+        assert first.export_button.accessibleName() == "Export fetched result rows"
+        export_description = first.export_button.accessibleDescription()
+        assert "Choose CSV, JSON array, or newline-delimited JSON." in export_description
+        assert RESULT_EXPORT_SEMANTICS in export_description
+        assert first.result_filter.toolTip() == (
+            "Filters the visible preview only. " + RESULT_EXPORT_SEMANTICS
+        )
         assert "fetch order" in first.result_grid.accessibleDescription().lower()
-        assert ("SQL NULL is encoded as " + r"\N") in first.export_button.accessibleDescription()
-        assert "empty text stays blank" in first.export_button.accessibleDescription()
-        assert "escaped by adding one leading backslash" in first.export_button.accessibleDescription()
+        # CSV's NULL/empty-text convention remains format-specific, rather than
+        # misleadingly applying to the new JSON and NDJSON formats.
+        assert ("SQL NULL is encoded as " + r"\N") in CSV_EXPORT_NULL_SEMANTICS
+        assert "empty text stays blank" in CSV_EXPORT_NULL_SEMANTICS
+        assert "escaped by adding one leading backslash" in CSV_EXPORT_NULL_SEMANTICS
+        assert "includes every fetched row" in CSV_EXPORT_SEMANTICS
         assert first.font().pointSize() >= 0
         assert editor.font().pointSize() == 10
 
