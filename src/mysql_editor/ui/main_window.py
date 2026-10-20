@@ -12,7 +12,7 @@ from typing import Any
 from PySide6.QtCore import QAbstractTableModel, QItemSelectionModel, QModelIndex, QSettings, QSortFilterProxyModel, Signal, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QKeySequence, QIcon, QPixmap, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QComboBox, QDialog, QFileDialog, QFontDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTableView, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
