@@ -280,8 +280,13 @@ def test_result_model_scroll_request_dispatches_a_spool_page(tmp_path, monkeypat
         scrollbar.setValue(scrollbar.maximum())
         _APP.processEvents()
 
-        action, payload, task_id = worker.submissions[-1]
-        assert action == "fetch_result_page"
+        fetch_requests = [
+            (action, payload, task_id)
+            for action, payload, task_id in worker.submissions
+            if action == "fetch_result_page"
+        ]
+        assert len(fetch_requests) == 1
+        action, payload, task_id = fetch_requests[0]
         assert payload == {
             "result_id": result_id,
             "offset": 2000,
