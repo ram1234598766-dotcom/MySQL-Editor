@@ -4,9 +4,37 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 NULL_COPY_MARKER = "NULL"
+
+
+def result_export_target(path: str, selected_filter: str) -> tuple[str, str]:
+    """Resolve the chosen export filter and ensure the destination has its matching suffix."""
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        return "", ""
+
+    filters = {
+        "CSV files (*.csv)": ("csv", ".csv"),
+        "JSON array (*.json)": ("json", ".json"),
+        "NDJSON files (*.ndjson)": ("ndjson", ".ndjson"),
+    }
+    selected = filters.get(str(selected_filter or "").strip())
+    if selected is None:
+        suffix_to_format = {
+            ".csv": ("csv", ".csv"),
+            ".json": ("json", ".json"),
+            ".ndjson": ("ndjson", ".ndjson"),
+            ".jsonl": ("ndjson", ".ndjson"),
+        }
+        selected = suffix_to_format.get(Path(raw_path).suffix.casefold(), ("csv", ".csv"))
+    export_format, expected_suffix = selected
+    destination = Path(raw_path)
+    if destination.suffix.casefold() != expected_suffix:
+        destination = destination.with_suffix(expected_suffix)
+    return str(destination), export_format
 
 
 def _tsv_text(rows: Sequence[Sequence[Any]]) -> str:
