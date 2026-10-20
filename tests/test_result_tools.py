@@ -55,12 +55,12 @@ def test_result_filter_message_distinguishes_preview_rows_from_fetched_rows():
     from mysql_editor.ui.result_tools import result_filter_message
 
     assert result_filter_message("missing", 0, 2000, 4127) == (
-        "No rows in the visible preview match 'missing'. "
-        "2,000 preview row(s) checked; data export includes all 4,127 fetched row(s)."
+        "No rows in the current grid window match 'missing'. "
+        "2,000 window row(s) checked; data export includes all 4,127 result row(s)."
     )
     assert result_filter_message("alice", 3, 20, 20) == (
-        "Quick filter: 3 of 20 preview row(s) match. "
-        "Data export includes all 20 fetched row(s)."
+        "Quick filter: 3 of 20 current-window row(s) match. "
+        "Data export includes all 20 result row(s)."
     )
     assert result_filter_message("  ", 0, 20, 20) == ""
 
@@ -97,12 +97,37 @@ def test_filter_clear_restores_the_underlying_result_message():
 
     window = Window()
     MainWindow._filter_results(window, "missing")
-    assert "No rows in the visible preview match 'missing'." in window.result_message.value
-    assert "all 80 fetched row(s)" in window.result_message.value
+    assert "No rows in the current grid window match 'missing'." in window.result_message.value
+    assert "all 80 result row(s)" in window.result_message.value
 
     MainWindow._filter_results(window, "")
     assert window.result_message.value == window._result_base_message
 
+
+
+def test_result_window_message_discloses_bounded_memory_and_absolute_range():
+    from mysql_editor.ui.result_tools import result_window_message
+
+    message = result_window_message(
+        {"kind": "rows", "row_count": 100_000},
+        window_start=25_000,
+        window_rows=5_000,
+        total_rows=100_000,
+    )
+    assert message == (
+        "Rows result · showing rows 25,001–30,000 of 100,000. "
+        "The active grid window is capped at 5,000 row(s); while paging, one initial-page "
+        "recovery snapshot may also be retained. The local spool and data exports keep the full 100,000-row result. "
+        "Scroll to the top for earlier rows or to the bottom for later rows."
+    )
+
+    single_window = result_window_message(
+        {"kind": "rows"},
+        window_start=0,
+        window_rows=12,
+        total_rows=12,
+    )
+    assert "All rows fit in the current grid window." in single_window
 
 
 def test_result_summary_distinguishes_empty_rows_from_statements_without_rows():

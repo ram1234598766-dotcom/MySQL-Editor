@@ -4,10 +4,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QModelIndex
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QApplication
 
-from mysql_editor.ui.main_window import ResultsFilterProxyModel, ResultsModel
+from mysql_editor.database import RESULT_PAGE_ROWS as RESULT_PAGE_SIZE
+from mysql_editor.ui.main_window import MainWindow, ResultsFilterProxyModel, ResultsModel
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -93,3 +94,315 @@ def test_filter_proxy_forwards_fetch_more_to_source_model():
         proxy.deleteLater()
         model.deleteLater()
         _APP.processEvents()
+
+def test_result_model_evicts_oldest_rows_and_preserves_absolute_row_numbers():
+    retained = ResultsModel.MAX_RETAINED_ROWS
+    model = ResultsModel(headers=["id"], rows=[[index] for index in range(retained)])
+    model.set_paging_state(total_rows=100_000)
+    removed_ranges = []
+    model.rowsRemoved.connect(lambda _parent, first, last: removed_ranges.append((first, last)))
+
+    try:
+        evicted = model.append_rows(
+            [[index] for index in range(retained, retained + RESULT_PAGE_SIZE)]
+        )
+
+        assert evicted == RESULT_PAGE_SIZE
+        assert model.rowCount() == retained
+        assert len(model.rows) == retained
+        assert model.base_offset == RESULT_PAGE_SIZE
+        assert model.rows[0] == [RESULT_PAGE_SIZE]
+        assert model.rows[-1] == [retained + RESULT_PAGE_SIZE - 1]
+        assert model.headerData(0, Qt.Orientation.Vertical) == str(RESULT_PAGE_SIZE + 1)
+        assert model.headerData(retained - 1, Qt.Orientation.Vertical) == str(retained + RESULT_PAGE_SIZE)
+        assert model.canFetchPrevious() is True
+        assert model.canFetchMore() is True
+        assert removed_ranges == [(0, RESULT_PAGE_SIZE - 1)]
+    finally:
+        model.deleteLater()
+        _APP.processEvents()
+
+
+def test_result_model_prepends_previous_page_and_evicts_newest_rows():
+    retained = ResultsModel.MAX_RETAINED_ROWS
+    start = 4_000
+    model = ResultsModel(
+        headers=["id"],
+        rows=[[index] for index in range(start, start + retained)],
+    )
+    model.update(
+        ["id"],
+        [[index] for index in range(start, start + retained)],
+        base_offset=start,
+    )
+    model.set_paging_state(total_rows=100_000)
+
+    try:
+        evicted = model.prepend_rows(
+            [[index] for index in range(start - RESULT_PAGE_SIZE, start)],
+            start_offset=start - RESULT_PAGE_SIZE,
+        )
+
+        assert evicted == RESULT_PAGE_SIZE
+        assert model.rowCount() == retained
+        assert model.base_offset == start - RESULT_PAGE_SIZE
+        assert model.rows[0] == [start - RESULT_PAGE_SIZE]
+        assert model.rows[-1] == [start + retained - RESULT_PAGE_SIZE - 1]
+        assert model.headerData(0, Qt.Orientation.Vertical) == str(start - RESULT_PAGE_SIZE + 1)
+        assert model.headerData(retained - 1, Qt.Orientation.Vertical) == str(start + retained - RESULT_PAGE_SIZE)
+        assert model.canFetchPrevious() is True
+        assert model.canFetchMore() is True
+    finally:
+        model.deleteLater()
+        _APP.processEvents()
+
+
+def test_result_model_previous_page_signal_is_single_flight_and_offset_aware():
+    model = ResultsModel(headers=["id"], rows=[[index] for index in range(100, 200)])
+    model.update(["id"], [[index] for index in range(100, 200)], base_offset=100)
+    model.set_paging_state(total_rows=10_000)
+    requests = []
+    model.previous_rows_requested.connect(lambda: requests.append(model.base_offset))
+
+    try:
+        assert model.canFetchPrevious() is True
+        model.fetchPrevious()
+        assert requests == [100]
+        assert model.canFetchPrevious() is False
+        model.fetchPrevious()
+        assert requests == [100]
+
+        model.set_paging_state(pending=False)
+        model.update(["id"], [[index] for index in range(20)])
+        assert model.canFetchPrevious() is False
+    finally:
+        model.deleteLater()
+        _APP.processEvents()
+
+def test_proxy_vertical_headers_keep_absolute_row_numbers_after_sorting():
+    model = ResultsModel(headers=["id"], rows=[[9], [1], [5]])
+    model.update(["id"], [[9], [1], [5]], base_offset=500)
+    model.set_paging_state(total_rows=2_000)
+    proxy = ResultsFilterProxyModel()
+    proxy.setSourceModel(model)
+
+    try:
+        proxy.sort(0, Qt.SortOrder.AscendingOrder)
+        assert [proxy.index(row, 0).data() for row in range(proxy.rowCount())] == ["1", "5", "9"]
+        assert [proxy.headerData(row, Qt.Orientation.Vertical) for row in range(proxy.rowCount())] == [
+            "502", "503", "501",
+        ]
+        # A partial source window must not be sorted in place, because page
+        # offsets must continue to address the original fetch order in SQLite.
+        assert [row[0] for row in model.rows] == [9, 1, 5]
+        assert model.base_offset == 500
+    finally:
+        proxy.setSourceModel(None)
+        proxy.deleteLater()
+        model.deleteLater()
+        _APP.processEvents()
+
+def test_manual_page_action_can_load_earlier_rows_when_filter_hides_scrollbar():
+    class Scrollbar:
+        def __init__(self, maximum):
+            self.maximum_value = maximum
+
+        def maximum(self):
+            return self.maximum_value
+
+    class Grid:
+        def __init__(self, maximum):
+            self.scrollbar = Scrollbar(maximum)
+
+        def verticalScrollBar(self):
+            return self.scrollbar
+
+    class Window:
+        _current_result_id = "result"
+
+        def __init__(self, *, start, end, total, scrollbar_maximum):
+            self.item = {"result_id": "result", "row_count": total, "kind": "rows"}
+            self.bounds = (start, end, total)
+            self.result_grid = Grid(scrollbar_maximum)
+            self.previous_requests = 0
+            self.next_requests = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result" else None
+
+        def _result_window_bounds(self, _item):
+            return self.bounds
+
+        def fetch_previous_result_rows(self):
+            self.previous_requests += 1
+
+        def fetch_more_result_rows(self):
+            self.next_requests += 1
+
+    filtered = Window(start=5_000, end=10_000, total=50_000, scrollbar_maximum=0)
+    MainWindow.fetch_result_page_manually(filtered)
+    assert filtered.previous_requests == 1
+    assert filtered.next_requests == 0
+
+    ordinary = Window(start=5_000, end=10_000, total=50_000, scrollbar_maximum=300)
+    MainWindow.fetch_result_page_manually(ordinary)
+    assert ordinary.previous_requests == 0
+    assert ordinary.next_requests == 1
+
+    final_window = Window(start=45_000, end=50_000, total=50_000, scrollbar_maximum=0)
+    MainWindow.fetch_result_page_manually(final_window)
+    assert final_window.previous_requests == 1
+    assert final_window.next_requests == 0
+
+def test_repeated_page_appends_keep_the_row_window_bounded_to_five_thousand():
+    total = 100_000
+    retained = ResultsModel.MAX_RETAINED_ROWS
+    model = ResultsModel(headers=["id"], rows=[[index] for index in range(retained)])
+    model.set_paging_state(total_rows=total)
+
+    try:
+        for offset in range(retained, total, RESULT_PAGE_SIZE):
+            page = [[index] for index in range(offset, min(total, offset + RESULT_PAGE_SIZE))]
+            model.append_rows(page)
+
+            assert model.rowCount() <= retained
+            assert len(model.rows) <= retained
+            assert len(model._row_offsets) == len(model.rows)
+            assert model.base_offset + len(model.rows) <= total
+
+        assert model.rowCount() == retained
+        assert model.base_offset == total - retained
+        assert model.headerData(0, Qt.Orientation.Vertical) == str(total - retained + 1)
+        assert model.data(model.index(0, 0), Qt.ItemDataRole.UserRole) == total - retained
+        assert model.headerData(retained - 1, Qt.Orientation.Vertical) == str(total)
+        assert model.data(model.index(retained - 1, 0), Qt.ItemDataRole.UserRole) == total - 1
+        assert model.canFetchMore() is False
+        assert model.canFetchPrevious() is True
+    finally:
+        model.deleteLater()
+        _APP.processEvents()
+
+def test_previous_window_page_dispatches_bounded_local_spool_request():
+    class Model:
+        def __init__(self):
+            self.paging = []
+
+        def canFetchPrevious(self):
+            return True
+
+        def set_paging_state(self, **kwargs):
+            self.paging.append(kwargs)
+
+    class Window:
+        _query_running = False
+        _result_page_load_pending = None
+        _current_result_id = "result-id"
+
+        def __init__(self):
+            self.item = {
+                "result_id": "result-id",
+                "kind": "rows",
+                "window_start_offset": 2_500,
+                "row_count": 20_000,
+                "rows": [[row] for row in range(2_500, 7_500)],
+            }
+            self.result_model = Model()
+            self.dispatched = []
+            self.controls_updated = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result-id" else None
+
+        def _result_window_bounds(self, item):
+            start = item["window_start_offset"]
+            end = start + len(item["rows"])
+            return start, end, item["row_count"]
+
+        def _dispatch(self, action, payload, context):
+            self.dispatched.append((action, payload, context))
+            return "previous-job"
+
+        def _set_result_controls(self):
+            self.controls_updated += 1
+
+    window = Window()
+    MainWindow.fetch_previous_result_rows(window)
+
+    assert window.dispatched == [(
+        "fetch_result_page",
+        {"result_id": "result-id", "offset": 1_500, "limit": 1_000},
+        {
+            "result_id": "result-id",
+            "offset": 1_500,
+            "direction": "previous",
+            "expected_end": 2_500,
+        },
+    )]
+    assert window._result_page_load_pending == {
+        "job_id": "previous-job",
+        "result_id": "result-id",
+        "offset": 1_500,
+        "direction": "previous",
+        "expected_end": 2_500,
+    }
+    assert window.result_model.paging == [{"pending": True}]
+    assert window.controls_updated == 1
+
+
+def test_next_window_page_dispatch_starts_at_absolute_window_end():
+    class Model:
+        def __init__(self):
+            self.paging = []
+
+        def set_paging_state(self, **kwargs):
+            self.paging.append(kwargs)
+
+    class Window:
+        _query_running = False
+        _result_page_load_pending = None
+        _current_result_id = "result-id"
+
+        def __init__(self):
+            self.item = {
+                "result_id": "result-id",
+                "kind": "rows",
+                "window_start_offset": 2_500,
+                "row_count": 20_000,
+                "rows": [[row] for row in range(2_500, 7_500)],
+            }
+            self.result_model = Model()
+            self.dispatched = []
+            self.controls_updated = 0
+
+        def _result_item_by_id(self, result_id):
+            return self.item if result_id == "result-id" else None
+
+        def _result_window_bounds(self, item):
+            start = item["window_start_offset"]
+            end = start + len(item["rows"])
+            return start, end, item["row_count"]
+
+        def _dispatch(self, action, payload, context):
+            self.dispatched.append((action, payload, context))
+            return "next-job"
+
+        def _set_result_controls(self):
+            self.controls_updated += 1
+
+    window = Window()
+    MainWindow.fetch_more_result_rows(window)
+
+    assert window.dispatched == [(
+        "fetch_result_page",
+        {"result_id": "result-id", "offset": 7_500, "limit": 1_000},
+        {"result_id": "result-id", "offset": 7_500, "direction": "next"},
+    )]
+    assert window.item["initial_rows"] == window.item["rows"]
+    assert window._result_page_load_pending == {
+        "job_id": "next-job",
+        "result_id": "result-id",
+        "offset": 7_500,
+    }
+    assert window.result_model.paging == [{"pending": True}]
+    assert window.controls_updated == 1
+

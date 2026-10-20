@@ -132,7 +132,8 @@ def test_fetch_more_rows_uses_local_cache_and_preserves_active_filter(tmp_path):
         assert window.fetch_more_button.text() == "All Rows Loaded"
         assert not window.fetch_more_button.isEnabled()
         assert "SQL was not rerun" in window.status.text()
-        assert "all 4 fetched row(s)" in window.result_message.text()
+        assert "Quick filter: 2 of 4 current-window row(s) match." in window.result_message.text()
+        assert "Data export includes all 4 result row(s)." in window.result_message.text()
     finally:
         window._query_running = False
         window.close()
