@@ -70,12 +70,18 @@ EXPORT_FORMAT_LABELS = {"csv": "CSV", "json": "JSON", "ndjson": "NDJSON"}
 
 
 class ResultsModel(QAbstractTableModel):
+    """Bounded, contiguous row window over the on-disk result spool."""
+
     more_rows_requested = Signal()
+    previous_rows_requested = Signal()
+    MAX_RETAINED_ROWS = RESULT_PAGE_ROWS * 5
 
     def __init__(self, headers=None, rows=None, parent=None, theme: object = "dark"):
         super().__init__(parent)
         self.headers = list(headers or [])
-        self.rows = list(rows or [])
+        self.rows = [list(row) for row in (rows or [])]
+        self.base_offset = 0
+        self._row_offsets = list(range(len(self.rows)))
         self.total_rows = len(self.rows)
         self._page_load_pending = False
         self._page_load_available = True
@@ -94,11 +100,21 @@ class ResultsModel(QAbstractTableModel):
                 [Qt.ItemDataRole.ForegroundRole],
             )
 
-    def update(self, headers, rows):
+    def update(self, headers, rows, *, base_offset: int = 0):
+        """Replace the current row window and its absolute source-row mapping."""
+        try:
+            parsed_offset = max(0, int(base_offset))
+        except (TypeError, ValueError, OverflowError):
+            parsed_offset = 0
+        new_rows = [list(row) for row in (rows or [])]
+        if len(new_rows) > self.MAX_RETAINED_ROWS:
+            new_rows = new_rows[: self.MAX_RETAINED_ROWS]
         self.beginResetModel()
-        self.headers = list(headers)
-        self.rows = [list(row) for row in rows]
-        self.total_rows = len(self.rows)
+        self.headers = list(headers or [])
+        self.rows = new_rows
+        self.base_offset = parsed_offset
+        self._row_offsets = list(range(parsed_offset, parsed_offset + len(new_rows)))
+        self.total_rows = parsed_offset + len(new_rows)
         self._page_load_pending = False
         self._page_load_available = True
         self.endResetModel()
@@ -115,12 +131,18 @@ class ResultsModel(QAbstractTableModel):
             try:
                 parsed_total = max(0, int(total_rows))
             except (TypeError, ValueError, OverflowError):
-                parsed_total = len(self.rows)
-            self.total_rows = max(len(self.rows), parsed_total)
+                parsed_total = self.base_offset + len(self.rows)
+            self.total_rows = max(self.base_offset + len(self.rows), parsed_total)
         if pending is not None:
             self._page_load_pending = bool(pending)
         if available is not None:
             self._page_load_available = bool(available)
+
+    def absolute_row_index(self, local_row: int) -> int | None:
+        """Return the zero-based source-spool row index for a visible model row."""
+        if not 0 <= local_row < len(self._row_offsets):
+            return None
+        return self._row_offsets[local_row]
 
     def canFetchMore(self, parent=QModelIndex()) -> bool:
         if parent.isValid():
@@ -128,15 +150,30 @@ class ResultsModel(QAbstractTableModel):
         return (
             self._page_load_available
             and not self._page_load_pending
-            and len(self.rows) < self.total_rows
+            and self.base_offset + len(self.rows) < self.total_rows
         )
 
     def fetchMore(self, parent=QModelIndex()) -> None:
-        """Request another spool page; the worker result arrives asynchronously."""
+        """Request the next spool page; the worker result arrives asynchronously."""
         if not self.canFetchMore(parent):
             return
         self._page_load_pending = True
         self.more_rows_requested.emit()
+
+    def canFetchPrevious(self) -> bool:
+        """Whether an earlier window can be loaded from the same local result spool."""
+        return (
+            self._page_load_available
+            and not self._page_load_pending
+            and self.base_offset > 0
+        )
+
+    def fetchPrevious(self) -> None:
+        """Request the previous spool page without a synchronous database call."""
+        if not self.canFetchPrevious():
+            return
+        self._page_load_pending = True
+        self.previous_rows_requested.emit()
 
     def update_cell_row(self, row_index: int, values) -> bool:
         """Replace a single preview row after MySQL confirms a cell update."""
@@ -156,17 +193,57 @@ class ResultsModel(QAbstractTableModel):
             )
         return True
 
-    def append_rows(self, rows) -> None:
-        """Append a result page without resetting existing rows or selection state."""
+    def append_rows(self, rows) -> int:
+        """Append rows and evict the oldest window prefix once the cache bound is reached."""
         additions = [list(row) for row in rows]
         if not additions:
-            return
+            return 0
+        next_offset = self.base_offset + len(self.rows)
         first = len(self.rows)
         last = first + len(additions) - 1
         self.beginInsertRows(QModelIndex(), first, last)
         self.rows.extend(additions)
-        self.total_rows = max(self.total_rows, len(self.rows))
+        self._row_offsets.extend(range(next_offset, next_offset + len(additions)))
+        self.total_rows = max(self.total_rows, self.base_offset + len(self.rows))
         self.endInsertRows()
+
+        evicted = max(0, len(self.rows) - self.MAX_RETAINED_ROWS)
+        if evicted:
+            self.beginRemoveRows(QModelIndex(), 0, evicted - 1)
+            del self.rows[:evicted]
+            del self._row_offsets[:evicted]
+            self.base_offset += evicted
+            self.endRemoveRows()
+        return evicted
+
+    def prepend_rows(self, rows, *, start_offset: int) -> int:
+        """Prepend a contiguous earlier page and evict the newest tail if necessary."""
+        additions = [list(row) for row in rows]
+        if not additions:
+            return 0
+        try:
+            offset = max(0, int(start_offset))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        if offset + len(additions) != self.base_offset:
+            return 0
+        last = len(additions) - 1
+        self.beginInsertRows(QModelIndex(), 0, last)
+        self.rows[0:0] = additions
+        self._row_offsets[0:0] = list(range(offset, offset + len(additions)))
+        self.base_offset = offset
+        self.total_rows = max(self.total_rows, self.base_offset + len(self.rows))
+        self.endInsertRows()
+
+        evicted = max(0, len(self.rows) - self.MAX_RETAINED_ROWS)
+        if evicted:
+            first_removed = len(self.rows) - evicted
+            last_removed = len(self.rows) - 1
+            self.beginRemoveRows(QModelIndex(), first_removed, last_removed)
+            del self.rows[first_removed:]
+            del self._row_offsets[first_removed:]
+            self.endRemoveRows()
+        return evicted
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.rows)
@@ -175,7 +252,9 @@ class ResultsModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.headers)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
+        if not index.isValid() or not (0 <= index.row() < len(self.rows)):
+            return None
+        if not 0 <= index.column() < len(self.headers):
             return None
         value = self.rows[index.row()][index.column()]
         if role == Qt.ItemDataRole.UserRole:
@@ -193,8 +272,8 @@ class ResultsModel(QAbstractTableModel):
             return None
         if orientation == Qt.Orientation.Horizontal and section < len(self.headers):
             return self.headers[section]
-        if orientation == Qt.Orientation.Vertical:
-            return str(section + 1)
+        if orientation == Qt.Orientation.Vertical and 0 <= section < len(self._row_offsets):
+            return str(self._row_offsets[section] + 1)
         return None
 
     def sort(self, column, order=Qt.SortOrder.AscendingOrder):
@@ -209,14 +288,17 @@ class ResultsModel(QAbstractTableModel):
             except (InvalidOperation, ValueError):
                 return (0, 1, str(value).casefold())
 
-        # NULL is always appended after non-NULL values, regardless of direction.
-        non_null_rows = [row for row in self.rows if row[column] is not None]
-        null_rows = [row for row in self.rows if row[column] is None]
-        non_null_rows.sort(
-            key=sort_key,
+        indexed_rows = list(zip(self.rows, self._row_offsets))
+        non_null = [entry for entry in indexed_rows if entry[0][column] is not None]
+        null_rows = [entry for entry in indexed_rows if entry[0][column] is None]
+        non_null.sort(
+            key=lambda entry: sort_key(entry[0]),
             reverse=order == Qt.SortOrder.DescendingOrder,
         )
-        self.rows[:] = non_null_rows + null_rows
+        ordered = non_null + null_rows
+        self.rows[:] = [row for row, _offset in ordered]
+        self._row_offsets[:] = [offset for _row, offset in ordered]
+        self.base_offset = min(self._row_offsets, default=self.base_offset)
         self.layoutChanged.emit()
 
 
