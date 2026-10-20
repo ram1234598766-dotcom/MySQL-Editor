@@ -384,9 +384,9 @@ class SqlEditor(QPlainTextEdit):
         self.setObjectName("sqlEditor")
         self.setAccessibleName("SQL query editor")
         self.setAccessibleDescription(
-            "Write MySQL queries here. Press Ctrl+Space to open completion, Ctrl+/ to toggle "
-            "MySQL line comments on the current line or selected lines, Enter to preserve "
-            "indentation, and use matching-bracket feedback."
+            "Write MySQL queries here. Press Ctrl+Space to open completion and Ctrl+/ to toggle "
+            "MySQL line comments on the current line or selected lines. Enter preserves "
+            "indentation; matching brackets are highlighted."
         )
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         font = QFont("Cascadia Code")
