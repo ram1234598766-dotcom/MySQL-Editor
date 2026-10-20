@@ -753,6 +753,9 @@ class MainWindow(QMainWindow):
             self._maybe_fetch_result_page_on_scroll
         )
         self.result_grid.setSortingEnabled(True)
+        self.result_grid.horizontalHeader().sortIndicatorChanged.connect(
+            self._on_result_sort_indicator_changed
+        )
         self.result_grid.setAlternatingRowColors(True)
         self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
         self.result_grid.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
@@ -1710,6 +1713,8 @@ class MainWindow(QMainWindow):
         item.pop("view_query", None)
         item.pop("view_row_count", None)
         item.pop("source_offsets", None)
+        item.pop("sort_column", None)
+        item.pop("sort_descending", None)
         if view_id:
             self._dispatch(
                 "drop_result_filter",
@@ -1744,23 +1749,30 @@ class MainWindow(QMainWindow):
             and start > 0
             and not item.get("page_load_unavailable")
         )
-        current_filter_pending = (
+        current_view_pending = (
             self._pending_spool_filter is not None
             and self._pending_spool_filter.get("result_id") == self._current_result_id
             and self._pending_spool_filter.get("generation") == self._filter_generation
         )
-        current_filter_running = (
+        current_view_running = (
             self._spool_filter_request is not None
             and self._spool_filter_request.get("result_id") == self._current_result_id
             and self._spool_filter_request.get("generation") == self._filter_generation
         )
-        filter_pending = current_filter_pending or current_filter_running
-        pending = self._result_page_load_pending is not None or filter_pending
-        if filter_pending:
-            self.fetch_more_button.setText("Filtering…")
-            self.fetch_more_button.setToolTip(
-                "Searching the full result in the local SQLite cache. The active grid remains bounded."
-            )
+        view_pending = current_view_pending or current_view_running
+        pending = self._result_page_load_pending is not None or view_pending
+        if view_pending:
+            request = self._pending_spool_filter or self._spool_filter_request or {}
+            if request.get("operation") == "sort" or request.get("action") == "sort_result_spool":
+                self.fetch_more_button.setText("Sorting…")
+                self.fetch_more_button.setToolTip(
+                    "Sorting every row in the local SQLite result view. The active grid remains bounded."
+                )
+            else:
+                self.fetch_more_button.setText("Filtering…")
+                self.fetch_more_button.setToolTip(
+                    "Searching the full result in the local SQLite cache. The active grid remains bounded."
+                )
             self.fetch_more_button.setEnabled(False)
         elif pending:
             self.fetch_more_button.setText("Loading…")
