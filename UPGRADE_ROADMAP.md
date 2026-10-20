@@ -843,6 +843,8 @@ The exact merge commit `3db5d9f66e1f2edf30c3bf4db42a6cdf700f25d0` passed all pos
 
 **Scope:** Use SQLGlot's MySQL AST as the first path for parseable UPDATE and DELETE risk advisories. The advisory checks only the mutation node's own top-level WHERE; a predicate inside a CTE, join condition, or nested subquery cannot make an unbounded outer mutation look bounded. Unsupported syntax and SQLGlot parse errors retain the existing scanner fallback. MySQL/MariaDB executable-comment bodies continue to be inspected separately.
 
-**Regression coverage:** MySQL joined UPDATE, an outer CTE containing an unbounded UPDATE, a CTE-wrapped DELETE with a real outer predicate, a predicate containing a nested subquery, and fallback behavior when SQLGlot is unavailable. The result remains advisory; server-side MySQL privileges remain the actual authorization boundary.
+**Related parser integration fix:** the previously used `sqlglot.format` import is not exported by the supported SQLGlot API. That ImportError had disabled the existing optional-import block, leaving the formatter unavailable and preventing AST access. Parser imports are now isolated to supported public APIs; formatting parses and renders each MySQL statement, keeps later statements, and preserves a final semicolon when present.
+
+**Regression coverage:** MySQL joined UPDATE, an outer CTE containing an unbounded UPDATE, a CTE-wrapped DELETE with a real outer predicate, a predicate containing a nested subquery, fallback behavior when SQLGlot is unavailable, and multi-statement formatting. The result remains advisory; server-side MySQL privileges remain the actual authorization boundary.
 
 **Not completed by this increment:** full AST-based statement splitting, schema-aware completion, inline diagnostics, a full MySQL grammar, semantic validation, and physical-Windows acceptance. Merge only after the exact PR head passes the full CI and Windows packaging workflow.
