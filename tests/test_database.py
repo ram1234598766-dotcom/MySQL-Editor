@@ -2108,4 +2108,3 @@ def test_prepare_result_filter_streams_large_spool_and_reports_progress():
         assert any("scanned 10,000" in message for message in worker.activities)
     finally:
         spool.close()
-\n
