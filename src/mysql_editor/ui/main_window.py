@@ -588,6 +588,9 @@ class MainWindow(QMainWindow):
         self.result_proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.result_proxy.setFilterKeyColumn(-1)
         self.result_grid.setModel(self.result_proxy)
+        self.result_grid.verticalScrollBar().valueChanged.connect(
+            self._maybe_fetch_result_page_on_scroll
+        )
         self.result_grid.setSortingEnabled(True)
         self.result_grid.setAlternatingRowColors(True)
         self.result_grid.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
@@ -1611,6 +1614,17 @@ class MainWindow(QMainWindow):
             item["page_load_unavailable"] = True
             self.result_model.set_paging_state(pending=False, available=False)
             self._set_result_controls()
+
+    def _maybe_fetch_result_page_on_scroll(self, value: int) -> None:
+        """Request the next cached page only when the user reaches the grid's end."""
+        if self._query_running or self._result_page_load_pending is not None:
+            return
+        scrollbar = self.result_grid.verticalScrollBar()
+        maximum = scrollbar.maximum()
+        if maximum <= 0 or value < maximum:
+            return
+        if self.result_proxy.canFetchMore(QModelIndex()):
+            self.result_proxy.fetchMore(QModelIndex())
 
     def _query_for_run(self, selection_only=False, whole_script=False):
         editor = self._current_editor()
