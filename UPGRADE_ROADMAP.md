@@ -59,7 +59,7 @@ The associated pull request is [PR #7](https://github.com/ram1234598766-dotcom/M
 
 ### Current product limitations that should inform the plan
 
-- SQL completion is an editing aid, not a full semantic engine. It does not yet reliably resolve every table alias, join scope, column type, or nested query context.
+- SQL completion remains an editing aid, not a full semantic engine. It now resolves nested aliases and correlated outer scopes using a conservative lexical scope finder, but it does not fully resolve every join scope, column type, or MySQL semantic context.
 - The SQL script splitter supports standalone MySQL-client DELIMITER changes and compound stored-program statement boundaries; it is not a full MySQL grammar or semantic validator.
 - Query results initially load up to 2,000 rows; additional pages are read from the local result spool on demand. Table preview remains capped at 1,000 rows. CSV, JSON, and NDJSON export read the full fetched result spool in server-fetch order; the visible grid sort/filter does not reduce exported rows.
 - Query cancellation is best-effort and depends on server permissions/state.
@@ -892,10 +892,22 @@ Regression tests cover current-line comment/uncomment, selected multi-line block
 
 ### Phase 3 follow-up — nested SQL completion scopes — 20 October 2026
 
-**Status: implementation in branch `feat/scoped-sql-completion`; CI validation pending.**
+**Status: merged to `main` in [commit `470649c`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/470649cb8a0c3fc48ca28e3b9a787d2824a0b7a7); required CI passed.** [Desktop CI #516](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432952017), [dependency security #585](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432952353), and [Windows packages #397](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39432951953) completed successfully.
 
 - Qualified alias completion now scans the innermost balanced `SELECT`/`WITH`/`VALUES` query scope first. A local alias shadows an identically named alias in an outer query.
 - If no local alias matches, qualified-column completion checks enclosing query scopes so correlated outer aliases remain available.
 - Unqualified column suggestions aggregate metadata from the active scope and visible enclosing scopes, but hide nested query bodies while scanning a parent. Columns from sibling subqueries therefore cannot leak into the current suggestion list.
 - The change uses a conservative lexical scope finder on top of existing comment/string masking; it does not claim full MySQL grammar coverage or type-level semantic analysis.
-- Added regressions for nested alias shadowing, correlated outer alias resolution, and exclusion of sibling-subquery columns. Validation of these tests and all packaging gates is pending the focused PR.
+- Regression coverage for nested alias shadowing, correlated outer-alias resolution, and exclusion of sibling-subquery columns passed in the merged implementation's Python test matrix and full Windows package workflow.
+
+### Runtime theme repaint reliability follow-up — 20 October 2026
+
+**Status: merged and verified.** PR #89 is merged as [commit `883d6f3`](https://github.com/ram1234598766-dotcom/MySQL-Editor/commit/883d6f301a8ad308cd2bea165ba9e5ad5727d021). It addresses a reproducible Linux/Python 3.12 Qt segmentation fault that occurred when changing the theme through the application-wide `QApplication.setStyleSheet()` path. Runtime theme changes now apply to the main window/subtree instead of repolishing all top-level application widgets. The regression test verifies the global application stylesheet stays unchanged and still checks editor contents/selection, tabs, result rows/filter, splitter state, connection labels, and explicit font preferences.
+
+The exact post-merge main workflows passed:
+- [Desktop CI #523](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446511147) — PASS; Python 3.12/3.13/3.14 matrices, Qt UI smoke, and MySQL 8.4 integration passed, including the previously crashing Python 3.12 Linux unit suite.
+- [Dependency security #592](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446508587) — PASS.
+- [Windows packages #404](https://github.com/ram1234598766-dotcom/MySQL-Editor/actions/runs/39446507664) — PASS, all 28 build steps. It built the application-folder EXE and portable EXE, passed the signing smoke test, built and exercised the installer, validated package startup and expected files, generated the SBOM/provenance/checksums, and uploaded `MySQLEditor-Windows` and `MySQLEditor-UI-Visual-QA` artifacts. The publication job was skipped as expected; this did not publish a new release or sign preview binaries.
+
+These hosted checks do not close Phase 8 manual acceptance: target-machine DPI/rendering, keyboard-only interaction, screen-reader behavior, real Credential Manager state, external MySQL/TLS environment, and measured one-million-row responsiveness still require physical Windows validation.
+
