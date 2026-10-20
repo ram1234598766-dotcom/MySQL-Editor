@@ -16,7 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from PySide6.QtCore import QThread, Signal
-from mysql_editor.core import ScriptParseError, redact_sql_secrets, safe_identifier, split_sql_statements
+from mysql_editor.core import ScriptParseError, redact_sql_secrets, safe_identifier, sanitize_error_message, split_sql_statements
 
 MAX_PREVIEW_ROWS = 2000
 FETCH_BATCH = 500
@@ -45,12 +45,11 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 def safe_db_error(error: BaseException) -> str:
-    # Server/driver errors can echo fragments of submitted SQL. Redact common MySQL
-    # account/password syntax as well as conventional key=value secret assignments.
-    message = redact_sql_secrets(str(error)).strip().replace("\x00", "")
-    if len(message) > 1600:
-        message = message[:1600] + "…"
-    return message or "The database operation failed. Check the connection and server logs."
+    """Preserve useful database context while sanitizing and bounding driver errors."""
+    return sanitize_error_message(
+        error,
+        fallback="The database operation failed. Check the connection and server logs.",
+    )
 
 def is_connection_lost(error: BaseException) -> bool:
     """Recognize errors that mean the active MySQL session can no longer be used."""
