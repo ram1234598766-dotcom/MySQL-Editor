@@ -540,3 +540,81 @@ def test_large_result_filter_scans_spool_pages_matches_and_preserves_export_tota
         repository.close()
         _APP.processEvents()
 
+def test_replacing_query_results_releases_the_previous_disk_filter_view(tmp_path):
+    window, repository, worker = _make_window(tmp_path)
+    old_item = {
+        "result_id": "old-filtered-result",
+        "kind": "rows",
+        "headers": ["name"],
+        "rows": [["Alpha match"]],
+        "initial_rows": [["Alpha"], ["Bravo"]],
+        "row_count": 10,
+        "window_start_offset": 0,
+        "view_id": "old-filter-view",
+        "view_query": "alpha",
+        "view_row_count": 1,
+        "source_offsets": [4],
+    }
+    window._query_results = [old_item]
+    window._current_result_id = old_item["result_id"]
+    try:
+        job_id = window._dispatch("query", {"sql": "SELECT id FROM next_result;"})
+        window._on_worker_completed(
+            job_id,
+            "query",
+            {
+                "ok": True,
+                "results": [{
+                    "result_id": "new-result",
+                    "kind": "rows",
+                    "headers": ["id"],
+                    "rows": [[7]],
+                    "row_count": 1,
+                    "duration_ms": 2,
+                }],
+                "duration_ms": 2,
+            },
+        )
+
+        assert window._current_result_id == "new-result"
+        assert "view_id" not in old_item
+        assert old_item["rows"] == [["Alpha"], ["Bravo"]]
+        cleanup_requests = [
+            payload
+            for action, payload, _task_id in worker.submissions
+            if action == "drop_result_filter"
+        ]
+        assert cleanup_requests == [{"view_id": "old-filter-view"}]
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
+
+def test_programmatic_long_filter_is_clamped_to_the_visible_256_character_limit(tmp_path):
+    window, repository, _worker = _make_window(tmp_path)
+    item = {
+        "result_id": "long-filter-result",
+        "kind": "rows",
+        "headers": ["name"],
+        "rows": [["sample"]],
+        "row_count": 10,
+        "preview_truncated": True,
+    }
+    window._query_results = [item]
+    window._current_result_id = item["result_id"]
+    window.result_model.update(item["headers"], item["rows"], total_rows=10)
+    try:
+        window._filter_results("x" * 300)
+
+        assert len(window.result_filter.text()) == 256
+        assert window._pending_spool_filter is not None
+        assert window._pending_spool_filter["query"] == window.result_filter.text()
+        assert len(window._pending_spool_filter["query"]) == 256
+    finally:
+        window._filter_debounce_timer.stop()
+        window.close()
+        repository.close()
+        _APP.processEvents()
+
